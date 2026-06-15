@@ -7,6 +7,7 @@ const TenantErrorView = () => import('@/views/TenantErrorView.vue');
 const SuperAdminShell = () => import('@/views/super/SuperAdminShell.vue');
 const SuperTenantsView = () => import('@/views/super/SuperTenantsView.vue');
 const SuperCreateTenantView = () => import('@/views/super/SuperCreateTenantView.vue');
+const SuperTenantDetailView = () => import('@/views/super/SuperTenantDetailView.vue');
 
 const router = createRouter({
   history: createWebHistory(),
@@ -43,6 +44,11 @@ const router = createRouter({
           path: 'tenants/new',
           name: 'super-tenant-new',
           component: SuperCreateTenantView,
+        },
+        {
+          path: 'tenants/:slug',
+          name: 'super-tenant-detail',
+          component: SuperTenantDetailView,
         },
       ],
     },

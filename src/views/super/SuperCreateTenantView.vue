@@ -56,24 +56,15 @@
         </button>
       </div>
     </form>
-
-    <div v-if="created" class="success">
-      <h3>✅ 已建立</h3>
-      <ul>
-        <li>點名頁：<a :href="created.checkInUrl" target="_blank">{{ created.checkInUrl }}</a></li>
-        <li>後台：<a :href="created.adminUrl" target="_blank">{{ created.adminUrl }}</a></li>
-      </ul>
-      <p v-if="!form.ownerUid.trim()" class="warn">
-        記得喺 Firebase Authentication 開客戶帳號，再手動加 <code>members</code> 或重新編輯。
-      </p>
-      <RouterLink to="/super/tenants" class="link">返回列表 →</RouterLink>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { createTenant, normalizeSlug } from '@/composables/useSuperTenants';
+
+const router = useRouter();
 
 const form = reactive({
   slug: '',
@@ -87,16 +78,14 @@ const form = reactive({
 
 const saving = ref(false);
 const error = ref('');
-const created = ref(null);
 
 const slugPreview = computed(() => normalizeSlug(form.slug));
 
 async function submit() {
   error.value = '';
-  created.value = null;
   saving.value = true;
   try {
-    created.value = await createTenant({
+    const result = await createTenant({
       slug: form.slug,
       coupleNames: form.coupleNames,
       venueName: form.venueName,
@@ -105,6 +94,7 @@ async function submit() {
       themeColor: form.themeColor,
       ownerUid: form.ownerUid,
     });
+    router.push(`/super/tenants/${result.slug}`);
   } catch (e) {
     error.value = e?.message || '建立失敗';
   } finally {
