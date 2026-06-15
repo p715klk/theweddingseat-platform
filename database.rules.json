@@ -8,37 +8,53 @@
       "$tenantId": {
         "meta": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "wedding_guests": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "unassigned_guests": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "table_settings": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "floor_layout": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "meta_label_columns": {
           ".read": true,
-          ".write": "auth != null"
+          ".write": "auth != null && (!root.child('tenants').child($tenantId).child('members').exists() || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true)"
         },
         "guest_status": {
           ".read": true,
-          ".write": true
+          "$statusKey": {
+            "arrived": {
+              ".write": "root.child('tenants').child($tenantId).child('meta').child('status').val() != 'expired'",
+              ".validate": "newData.isString() && (newData.val() == '未到' || newData.val() == '已到' || newData.val() == '取消')"
+            },
+            "gift": {
+              ".write": "root.child('tenants').child($tenantId).child('meta').child('status').val() != 'expired'",
+              ".validate": "newData.isString() && (newData.val() == '未交' || newData.val() == '人情' || newData.val() == '送金器' || newData.val() == '電子人情')"
+            },
+            "$other": {
+              ".write": false
+            }
+          }
         },
         "members": {
-          ".read": "auth != null",
-          ".write": "auth != null"
+          ".read": "auth != null && root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true",
+          "$uid": {
+            ".write": false
+          }
         }
       }
-    }
+    },
+    ".read": false,
+    ".write": false
   }
 }
