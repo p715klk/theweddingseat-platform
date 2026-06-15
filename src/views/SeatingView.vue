@@ -10,36 +10,45 @@
       v-else-if="!user"
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center p-4"
     >
-      <AdminLoginForm />
+      <AdminLoginForm @success="goToSeatingCanvas" />
     </div>
-    <iframe
-      v-else-if="iframeSrc"
-      :key="iframeSrc"
-      :src="iframeSrc"
-      class="seating-frame"
-      title="畫布排位"
-    />
+    <div
+      v-else
+      class="fixed inset-0 bg-slate-100 z-[10000] flex flex-col items-center justify-center text-gray-600 font-bold gap-2"
+    >
+      <p>⏳ 前往畫布排位...</p>
+      <p v-if="slug" class="text-xs text-gray-400 font-normal">{{ slug }}</p>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
+import { watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
-import { appPath } from '@/lib/appBase';
+import { appUrl } from '@/lib/appBase';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 
 const route = useRoute();
 const { slug, initTenant } = useTenant();
 const { user, authReady } = useAuth();
 
-onMounted(() => initTenant(route, { allowExpired: true }));
+initTenant(route, { allowExpired: true });
 
-const iframeSrc = computed(() => {
-  if (!slug.value || !user.value) return '';
-  return `${appPath(`legacy/admin/seating.html`)}?slug=${encodeURIComponent(slug.value)}`;
-});
+function goToSeatingCanvas() {
+  if (!slug.value) return;
+  const target = appUrl(`legacy/admin/seating.html?slug=${encodeURIComponent(slug.value)}`);
+  window.location.replace(target);
+}
+
+watch(
+  [authReady, user, slug],
+  ([ready, u, s]) => {
+    if (ready && u && s) goToSeatingCanvas();
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>
@@ -48,11 +57,5 @@ const iframeSrc = computed(() => {
   width: 100%;
   overflow: hidden;
   background: #0f172a;
-}
-.seating-frame {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
 }
 </style>

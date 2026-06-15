@@ -34,6 +34,15 @@ function showTenantError(message) {
         </div>`;
 }
 
+function resolveAppBasePrefix() {
+    const parts = location.pathname.split('/').filter(Boolean);
+    const legacyIdx = parts.indexOf('legacy');
+    if (legacyIdx > 0) {
+        return `/${parts.slice(0, legacyIdx).join('/')}/`;
+    }
+    return '/';
+}
+
 function applyTenantBranding() {
     if (!tenantMeta) return;
 
@@ -65,6 +74,16 @@ function applyTenantBranding() {
 
     document.documentElement.style.setProperty('--tenant-theme', theme);
     appendSlugToInternalLinks();
+
+    const backAdmin = document.getElementById('link-back-admin');
+    if (backAdmin && tenantSlug) {
+        backAdmin.href = `${resolveAppBasePrefix()}p/${encodeURIComponent(tenantSlug)}/admin`;
+    }
+
+    const checkIn = document.getElementById('link-check-in');
+    if (checkIn && tenantSlug) {
+        checkIn.href = `${resolveAppBasePrefix()}p/${encodeURIComponent(tenantSlug)}`;
+    }
 }
 
 function appendSlugToInternalLinks() {

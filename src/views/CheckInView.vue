@@ -112,6 +112,12 @@
           </div>
         </main>
       </div>
+      <p
+        v-if="floorLayout.items.length && showFloorScrollHint"
+        class="text-center text-xs text-gray-400 mt-2"
+      >
+        ↔↕ 枱位較多，可左右／上下滑動查看
+      </p>
     </div>
 
     <div
@@ -189,7 +195,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted, watch } from 'vue';
+import { ref, computed, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useCheckIn } from '@/composables/useCheckIn';
@@ -221,7 +227,26 @@ const {
   parseArrivedStatus,
   guestStatusKey,
   normalizeTags,
+  guestMatchesKeyword,
 } = useCheckIn();
+
+const showFloorScrollHint = ref(false);
+
+watch(
+  () => floorLayout.value.items.length,
+  async () => {
+    await nextTick();
+    const plan = document.getElementById('floor-plan');
+    const wrap = plan?.parentElement;
+    if (!plan || !wrap) {
+      showFloorScrollHint.value = false;
+      return;
+    }
+    showFloorScrollHint.value =
+      plan.offsetWidth > wrap.clientWidth || plan.offsetHeight > wrap.clientHeight;
+  },
+  { immediate: true },
+);
 
 const checkInLocked = computed(() => isExpired.value);
 

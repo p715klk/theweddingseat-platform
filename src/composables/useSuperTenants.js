@@ -189,6 +189,8 @@ export async function createTenant({
 
   if (ownerUid?.trim()) {
     updates[`${tenantBase}/members/${ownerUid.trim()}`] = true;
+  } else if (editor?.uid) {
+    updates[`${tenantBase}/members/${editor.uid}`] = true;
   }
 
   await update(dbRef(database), updates);

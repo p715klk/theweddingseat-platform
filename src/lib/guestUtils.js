@@ -125,7 +125,36 @@ function layoutItemsBounds(items) {
   };
 }
 
-/** 點名頁：優先用 table_settings 座標；否則按 wedding_guests 枱號自動排版 */
+/** 從畫布同步嘅 floor_layout 建立平面圖（與 legacy seating.js 一致） */
+export function buildFloorPlanFromFloorLayout(layout) {
+  if (!layout || layout.mode !== 'coords' || !Array.isArray(layout.items) || !layout.items.length) {
+    return null;
+  }
+  const items = layout.items
+    .map((item) => ({
+      num: String(item.num),
+      x: Number(item.x),
+      y: Number(item.y),
+    }))
+    .filter((item) => item.num && Number.isFinite(item.x) && Number.isFinite(item.y));
+  if (!items.length) return null;
+  if (layout.bounds?.width && layout.bounds?.height) {
+    return {
+      mode: 'coords',
+      tableSize: Number(layout.tableSize) || TABLE_DIM,
+      items,
+      bounds: {
+        minX: Number(layout.bounds.minX),
+        minY: Number(layout.bounds.minY),
+        width: Number(layout.bounds.width),
+        height: Number(layout.bounds.height),
+      },
+    };
+  }
+  return layoutItemsBounds(items);
+}
+
+/** 點名頁：同 legacy index_script.js — 直接用 table_settings x/y；無則按賓客枱號排版 */
 export function buildCheckInFloorPlan(weddingGuests, tableSettings) {
   const fromSettings = buildFloorPlanFromTableSettings(tableSettings);
   if (fromSettings.items.length) return fromSettings;

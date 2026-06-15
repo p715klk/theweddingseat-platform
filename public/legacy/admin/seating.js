@@ -1225,8 +1225,18 @@ function toggleSidebar() {
     }
 }
 
-const TABLE_LOCK_KEY = 'seating_tables_locked';
-let isTablePositionLocked = localStorage.getItem(TABLE_LOCK_KEY) === '1';
+let isTablePositionLocked = false;
+
+function getTableLockStorageKey() {
+    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
+        ? tenantSlug
+        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
+    return `seating_tables_locked_${slug}`;
+}
+
+function loadTablePositionLockState() {
+    isTablePositionLocked = localStorage.getItem(getTableLockStorageKey()) === '1';
+}
 
 function updateTableLockUI() {
     const btn = document.getElementById('btn-lock-tables');
@@ -1246,7 +1256,7 @@ function updateTableLockUI() {
 
 function toggleTablePositionLock() {
     isTablePositionLocked = !isTablePositionLocked;
-    localStorage.setItem(TABLE_LOCK_KEY, isTablePositionLocked ? '1' : '0');
+    localStorage.setItem(getTableLockStorageKey(), isTablePositionLocked ? '1' : '0');
     if (isTablePositionLocked) cancelTableDrag();
     updateTableLockUI();
 }
@@ -1640,6 +1650,14 @@ function sortGuestArraysBySeat() {
 }
 
 let suppressGuestRemoteRenderCount = 0;
+let suppressTableSettingsRemoteRenderCount = 0;
+
+function getGridSnapStorageKey() {
+    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
+        ? tenantSlug
+        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
+    return `seating_grid_snap_v1_${slug}`;
+}
 const guestPersistPendingTables = new Set();
 let guestPersistPoolDirty = false;
 let localGuestRevision = 0;
@@ -2143,6 +2161,7 @@ function runRender() {
 function bootstrapSeatingView() {
     runRender();
     initMobileExperience();
+    loadTablePositionLockState();
     updateTableLockUI();
     if (seatingViewBootstrapped) return;
     seatingViewBootstrapped = true;
@@ -2172,11 +2191,11 @@ function handleSeatingDataRoot(root) {
         return;
     }
 
-    if (!localStorage.getItem('seating_grid_snap_v1')) {
+    if (!localStorage.getItem(getGridSnapStorageKey())) {
         snapAllTablesToGrid()
             .catch(err => console.warn('枱位對齊格線失敗:', err))
             .finally(() => {
-                localStorage.setItem('seating_grid_snap_v1', '1');
+                localStorage.setItem(getGridSnapStorageKey(), '1');
                 bootstrapSeatingView();
                 scheduleFloorLayoutSync();
             });
@@ -2238,6 +2257,11 @@ function startSeatingRealtimeSync() {
     }, err => console.error('meta_label_columns 讀取失敗:', err));
 
     tenantRef('table_settings').on('value', (snapshot) => {
+        if (isDraggingTable) return;
+        if (suppressTableSettingsRemoteRenderCount > 0) {
+            suppressTableSettingsRemoteRenderCount--;
+            return;
+        }
         const root = {
             wedding_guests: allGuests,
             unassigned_guests: unassignedPool,
@@ -2253,7 +2277,7 @@ function startSeatingRealtimeSync() {
     });
 }
 
-whenTenantReady.then(startSeatingRealtimeSync).catch(() => {});
+whenAdminSessionReady().then(startSeatingRealtimeSync).catch(() => {});
 
 window.addEventListener('resize', () => {
     if (!isMobileViewport()) return;
@@ -2379,7 +2403,14 @@ function renderCanvasTables() {
         tableWrapper.setAttribute('data-table', tableNum);
 
         const startTableDrag = (e) => {
-            if (isTablePositionLocked) return;
+            if (isTablePositionLocked) {
+                const btn = document.getElementById('btn-lock-tables');
+                if (btn) {
+                    btn.classList.add('ring-2', 'ring-amber-400');
+                    setTimeout(() => btn.classList.remove('ring-2', 'ring-amber-400'), 800);
+                }
+                return;
+            }
             if ((e.pointerType === 'mouse' && e.button !== 0) || isGuestDragging) return;
             if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
             e.stopPropagation();
@@ -2430,9 +2461,15 @@ function finishTableDrag() {
             const tableNum = draggedTableElement.getAttribute('data-table');
             tableSettings[tableNum].x = bx;
             tableSettings[tableNum].y = by;
+            suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
                 .then(() => forceFloorLayoutSync())
-                .catch(err => console.warn('枱位同步失敗:', err));
+                .catch(err => {
+                    suppressTableSettingsRemoteRenderCount = 0;
+                    console.error('枱位同步失敗:', err);
+                    alert('❌ 枱位儲存失敗，請確認已登入並有寫入權限（members）。');
+                    cancelTableDrag();
+                });
         } else {
             cancelTableDrag();
             return;
@@ -2589,7 +2626,10 @@ function createNewTableAction() {
         max_seats: cleanMax,
         x: snapToGrid(center.x - PLATE_SIZE / 2),
         y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
-    }).then(() => forceFloorLayoutSync());
+    }).then(() => forceFloorLayoutSync()).catch((err) => {
+        console.error('新增圓枱失敗:', err);
+        alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+    });
 }
 
 function fillTableSettingsForm(tableNum, currentMax) {

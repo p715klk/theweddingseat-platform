@@ -6,6 +6,7 @@ import {
   parseArrivedStatus,
   guestStatusKey,
   normalizeTags,
+  guestMatchesKeyword,
   FLOOR_CANVAS_SCALE,
   FLOOR_TABLE_PX,
 } from '@/lib/guestUtils';
@@ -123,28 +124,20 @@ export function useCheckIn() {
   }
 
   function searchResults() {
-    const kw = searchKeyword.value.trim().toLowerCase();
+    const kw = searchKeyword.value.trim();
     if (!kw) return [];
     const results = [];
     Object.keys(weddingGuests.value).forEach((tableNum) => {
       (weddingGuests.value[tableNum] || []).forEach((guest) => {
-        const fields = [
-          guest.name,
-          guest.side,
-          ...normalizeTags(guest.group),
-        ]
-          .join(' ')
-          .toLowerCase();
-        if (fields.includes(kw) || kw.split(/\s+/).every((t) => fields.includes(t))) {
-          const key = guestStatusKey(tableNum, guest.name);
-          const st = parseArrivedStatus(guestStatus.value[key]?.arrived);
-          results.push({
-            tableNum,
-            guest,
-            arrived: st,
-            gift: guestStatus.value[key]?.gift || '未交',
-          });
-        }
+        if (!guestMatchesKeyword(guest, kw, guestStatus.value)) return;
+        const key = guestStatusKey(tableNum, guest.name);
+        const st = parseArrivedStatus(guestStatus.value[key]?.arrived);
+        results.push({
+          tableNum,
+          guest,
+          arrived: st,
+          gift: guestStatus.value[key]?.gift || '未交',
+        });
       });
     });
     return results;
@@ -170,5 +163,6 @@ export function useCheckIn() {
     parseArrivedStatus,
     guestStatusKey,
     normalizeTags,
+    guestMatchesKeyword,
   };
 }
