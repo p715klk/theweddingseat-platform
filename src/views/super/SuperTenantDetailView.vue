@@ -24,7 +24,7 @@
         </p>
         <form class="slug-form" @submit.prevent="saveSlug">
           <div class="slug-row">
-            <span class="slug-prefix">{{ origin }}/p/</span>
+            <span class="slug-prefix">{{ appUrl('p/') }}</span>
             <input v-model="editForm.slug" type="text" required placeholder="chen-wong-20260915" />
           </div>
           <p class="field-hint">預覽：<code>{{ slugPreview || '…' }}</code></p>
@@ -157,6 +157,7 @@ import {
   normalizeSlug,
   formatAuditTime,
 } from '@/composables/useSuperTenants';
+import { appUrl } from '@/lib/appBase';
 
 const route = useRoute();
 const router = useRouter();
@@ -175,8 +176,6 @@ const saveMetaOk = ref(false);
 const savingSlug = ref(false);
 const slugMsg = ref('');
 const slugMsgOk = ref(false);
-
-const origin = window.location.origin;
 
 const editForm = reactive({
   slug: '',
@@ -206,8 +205,8 @@ function syncEditForm() {
   editForm.plan = m.plan || 'standard';
 }
 
-const checkInUrl = computed(() => `${origin}/p/${slug.value}`);
-const adminUrl = computed(() => `${origin}/p/${slug.value}/admin`);
+const checkInUrl = computed(() => appUrl(`p/${slug.value}`));
+const adminUrl = computed(() => appUrl(`p/${slug.value}/admin`));
 
 const memberUids = computed(() => Object.keys(tenant.value?.members || {}));
 

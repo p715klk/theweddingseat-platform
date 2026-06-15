@@ -197,12 +197,12 @@ createTenant()
 
 #### Phase 1 Super Admin 實作清單
 
-- [ ] RTDB 加 `platform_admins/{你的UID}: true`（Console 手動 bootstrap 一次）
+- [x] RTDB 加 `platform_admins/{你的UID}: true`（Console bootstrap）
 - [x] 更新 `database.rules.json` 支援 `platform_admins`
-- [x] Vue 路由 `/super`、`/super/tenants`、`/super/tenants/new`
-- [x] 租戶列表 + 新增 tenant 表單（寫入 RTDB）
-- [x] 表單可填客戶 Auth UID → 自動寫 `members`（Auth 帳號暫時 Console 開）
-- [ ] Cloud Functions `createTenant`（有付費客戶後）
+- [x] Vue 路由 `/super`、列表、新增、詳情（改 slug / audit）
+- [x] expired：平台 admin 可預覽點名頁；user backend 仍可入
+- [x] GitHub Pages Actions deploy（見 README）
+- [ ] Cloud Functions `createTenant`（自動開 Auth + members）
 
 ---
 
@@ -548,16 +548,17 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 - [x] 改晒 tenant path（Vue composables + legacy bootstrap）
 - [x] `meta` 動態 branding
 - [x] Security Rules 基本版（guest_status 驗證 + members）
-- [ ] GitHub Pages deploy + `404.html` fallback
-- [ ] `.gitignore` firebase_config + commit 安全修復
+- [x] GitHub Actions deploy + `404.html` SPA fallback
+- [x] `.gitignore` firebase_config + env 範例
 
 ### Phase 1 — 可賣第一個客戶（進行中）
 
-- [x] **Super Admin** `/super`：列表 + 新增 Project（見 §0.5）
-- [x] `platform_admins` + Rules 更新（需 Publish + bootstrap UID）
-- [ ] 買域名 `theweddingseat.com` + 接 GitHub Pages
-- [ ] 開第二個真實 slug 測試隔離
-- [ ] Cloud Functions `createTenant`（自動開 Auth + members）
+- [x] **Super Admin** `/super`（列表、新增、詳情、改 slug、audit）
+- [x] `platform_admins` + Rules
+- [x] GitHub Pages deploy workflow
+- [ ] Push main + 設定 GitHub Secrets + Firebase Authorized domains
+- [ ] 買域名 `theweddingseat.com`（可選；到時 `BASE_PATH=/`）
+- [ ] Cloud Functions `createTenant`
 
 ### Phase 2 — 可以規模化（6–10 週）
 

@@ -45,8 +45,8 @@
             <span class="badge" :class="t.meta.status || 'active'">{{ t.meta.status || 'active' }}</span>
           </td>
           <td class="links" @click.stop>
-            <a :href="`/p/${t.slug}`" target="_blank" rel="noopener">點名</a>
-            <a :href="`/p/${t.slug}/admin`" target="_blank" rel="noopener">後台</a>
+            <a :href="appUrl(`p/${t.slug}`)" target="_blank" rel="noopener">點名</a>
+            <a :href="appUrl(`p/${t.slug}/admin`)" target="_blank" rel="noopener">後台</a>
             <RouterLink :to="`/super/tenants/${t.slug}`" class="detail-link">詳情</RouterLink>
           </td>
         </tr>
@@ -59,6 +59,7 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { listTenants, formatAuditTime } from '@/composables/useSuperTenants';
+import { appUrl } from '@/lib/appBase';
 
 const router = useRouter();
 const tenants = ref([]);

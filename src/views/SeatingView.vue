@@ -27,6 +27,7 @@ import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
+import { appPath } from '@/lib/appBase';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 
 const route = useRoute();
@@ -37,7 +38,7 @@ onMounted(() => initTenant(route, { allowExpired: true }));
 
 const iframeSrc = computed(() => {
   if (!slug.value || !user.value) return '';
-  return `/legacy/admin/seating.html?slug=${encodeURIComponent(slug.value)}`;
+  return `${appPath(`legacy/admin/seating.html`)}?slug=${encodeURIComponent(slug.value)}`;
 });
 </script>
 

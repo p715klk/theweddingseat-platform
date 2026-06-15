@@ -29,7 +29,34 @@ npm run dev
 npm run build
 ```
 
-輸出喺 `dist/`。GitHub Pages：Settings → Pages → 部署 `dist` 資料夾（可用 GitHub Actions）。
+輸出喺 `dist/`。`npm run build` 會自動複製 `404.html` 做 SPA fallback。
+
+### GitHub Pages（建議）
+
+1. Repo → **Settings** → **Pages** → **Build and deployment** → Source 揀 **GitHub Actions**
+2. Repo → **Settings** → **Secrets and variables** → **Actions**，加入：
+
+| Secret | 說明 |
+|--------|------|
+| `VITE_FIREBASE_API_KEY` | Firebase Web apiKey |
+| `VITE_FIREBASE_AUTH_DOMAIN` | 例如 `theweddingseat-prod.firebaseapp.com` |
+| `VITE_FIREBASE_DATABASE_URL` | RTDB URL |
+| `VITE_FIREBASE_PROJECT_ID` | 例如 `theweddingseat-prod` |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Storage bucket |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Messaging sender ID |
+| `VITE_FIREBASE_APP_ID` | Web app ID |
+| `VITE_FIREBASE_MEASUREMENT_ID` | （選填）Analytics |
+
+3. Push 去 `main` → Actions workflow `Deploy GitHub Pages` 會自動 build + deploy
+4. 網址：`https://<username>.github.io/<repo-name>/p/demo`
+5. Firebase Console → Authentication → **Authorized domains** 加 `*.github.io`
+
+本地模擬 GitHub Pages 路徑：
+
+```bash
+# PowerShell
+$env:BASE_PATH="/theweddingseat-platform/"; npm run build; npm run preview
+```
 
 `database.rules.json` 貼去 Firebase Console → Rules → Publish。
 
