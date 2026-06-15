@@ -6,6 +6,9 @@ import {
   signOut,
   setPersistence,
   browserLocalPersistence,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword,
 } from 'firebase/auth';
 import { firebaseApp, firebaseConfig } from '@/firebase';
 
@@ -69,7 +72,20 @@ async function logout() {
   await signOut(auth);
 }
 
+async function changePassword(currentPassword, newPassword) {
+  const auth = getAuthInstance();
+  if (!auth?.currentUser) throw new Error('未登入');
+  if (!auth.currentUser.email) throw new Error('此帳號無 email，無法驗證舊密碼');
+  authError.value = null;
+  const credential = EmailAuthProvider.credential(
+    auth.currentUser.email,
+    currentPassword,
+  );
+  await reauthenticateWithCredential(auth.currentUser, credential);
+  await updatePassword(auth.currentUser, newPassword);
+}
+
 export function useAuth() {
   initAuth();
-  return { user, authReady, authError, login, logout };
+  return { user, authReady, authError, login, logout, changePassword };
 }

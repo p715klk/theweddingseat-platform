@@ -5,7 +5,14 @@
     <label>Email</label>
     <input v-model="email" type="email" required autocomplete="username" />
     <label>密碼</label>
-    <input v-model="password" type="password" required autocomplete="current-password" />
+    <input
+      v-model="password"
+      type="password"
+      required
+      autocomplete="current-password"
+      v-on="passwordInputHandlers"
+    />
+    <p v-if="showCapsLockHint" class="caps-lock-hint">Caps Lock 已開啟</p>
     <p v-if="configError" class="error">{{ configError }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <button type="submit" :disabled="loading || !!configError">{{ loading ? '登入中…' : '登入' }}</button>
@@ -15,9 +22,11 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
+import { useCapsLockHint } from '@/composables/useCapsLockHint';
 
 const emit = defineEmits(['success']);
 const { login, authError } = useAuth();
+const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
 const email = ref('');
 const password = ref('');
@@ -88,6 +97,12 @@ input {
   color: #dc2626;
   font-size: 0.75rem;
   margin-bottom: 0.5rem;
+}
+.caps-lock-hint {
+  margin: -0.35rem 0 0.75rem;
+  font-size: 0.75rem;
+  color: #d97706;
+  font-weight: 600;
 }
 button {
   width: 100%;
