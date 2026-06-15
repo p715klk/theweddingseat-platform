@@ -1,0 +1,112 @@
+import { ref as dbRef, get, set, update } from 'firebase/database';
+import { database } from '@/firebase';
+
+const DEFAULT_LABEL_COLUMNS = {
+  keys: ['group'],
+  names: ['標籤 (可多選)'],
+  categories: {
+    group: ['家人', '男方親戚', '女方親戚', '中學同學'],
+  },
+};
+
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function normalizeSlug(input) {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+export function isValidSlug(slug) {
+  return slug.length >= 2 && slug.length <= 48 && SLUG_PATTERN.test(slug);
+}
+
+export async function listTenants() {
+  const snap = await get(dbRef(database, 'tenants'));
+  const raw = snap.val() || {};
+  return Object.entries(raw)
+    .map(([tenantId, data]) => ({
+      tenantId,
+      meta: data?.meta || {},
+      slug: data?.meta?.slug || tenantId,
+    }))
+    .sort((a, b) => {
+      const da = a.meta.wedding_date || '';
+      const db = b.meta.wedding_date || '';
+      return db.localeCompare(da);
+    });
+}
+
+export async function isSlugTaken(slug) {
+  const snap = await get(dbRef(database, `slugs/${slug}`));
+  return snap.exists();
+}
+
+/**
+ * 建立新 tenant（Super Admin 用；Auth 帳號仍要 Console 或 Cloud Function 開）
+ */
+export async function createTenant({
+  slug,
+  coupleNames,
+  venueName,
+  venueHall,
+  weddingDate,
+  themeColor = '#b91c1c',
+  plan = 'standard',
+  ownerUid = '',
+}) {
+  const normalized = normalizeSlug(slug);
+  if (!isValidSlug(normalized)) {
+    throw new Error('Slug 格式無效（用小寫英文、數字、連字號，例如 chen-wong-20260915）');
+  }
+  if (await isSlugTaken(normalized)) {
+    throw new Error(`Slug「${normalized}」已被使用`);
+  }
+
+  const tenantId = normalized;
+  const now = Date.now();
+  const meta = {
+    couple_names: coupleNames.trim(),
+    venue_name: venueName.trim(),
+    venue_hall: venueHall.trim(),
+    wedding_date: weddingDate,
+    theme_color: themeColor,
+    status: 'active',
+    slug: normalized,
+    plan,
+    created_at: now,
+  };
+
+  const tenantBase = `tenants/${tenantId}`;
+  const updates = {
+    [`slugs/${normalized}`]: tenantId,
+    [`${tenantBase}/meta`]: meta,
+    [`${tenantBase}/wedding_guests`]: {},
+    [`${tenantBase}/unassigned_guests`]: [],
+    [`${tenantBase}/guest_status`]: {},
+    [`${tenantBase}/table_settings`]: [null],
+    [`${tenantBase}/floor_layout`]: { items: [], bounds: null, mode: 'coords' },
+    [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
+  };
+
+  if (ownerUid?.trim()) {
+    updates[`${tenantBase}/members/${ownerUid.trim()}`] = true;
+  }
+
+  await update(dbRef(database), updates);
+
+  return {
+    tenantId,
+    slug: normalized,
+    checkInUrl: `/p/${normalized}`,
+    adminUrl: `/p/${normalized}/admin`,
+  };
+}
+
+export async function setTenantStatus(tenantId, status) {
+  await set(dbRef(database, `tenants/${tenantId}/meta/status`), status);
+}

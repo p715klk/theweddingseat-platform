@@ -21,6 +21,7 @@ npm run dev
 | `/p/:slug` | 點名頁（公開） |
 | `/p/:slug/admin` | 賓客後台（要登入） |
 | `/p/:slug/seating` | 畫布排位（要登入，暫用 legacy iframe） |
+| `/super` | 平台 Super Admin（開客戶 project） |
 
 ## 建置與部署
 

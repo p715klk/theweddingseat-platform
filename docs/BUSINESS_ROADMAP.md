@@ -86,9 +86,9 @@
 
 #### Step 7 — Firebase Security Rules（基本版）
 
-- [ ] RTDB Rules：未 login 只可以讀 `tenants/{slug}/meta` + 寫 `guest_status`（點名）
-- [ ] 寫 `wedding_guests` / `table_settings` 要 Auth
-- [ ] **測試**：用兩個 slug 確認 A 睇唔到 B 資料
+- [x] RTDB Rules：未 login 可讀 `meta` / `wedding_guests` 等（點名頁需要）+ 寫 `guest_status`（點名）
+- [x] 寫 `wedding_guests` / `table_settings` 要 Auth + `members` 白名單（見 §0.5）
+- [ ] **測試**：用兩個 slug 確認隔離（讀取靠 slug URL，後台寫入靠 members）
 
 #### Step 8 — Deploy 靜態站（無 server）
 
@@ -123,6 +123,86 @@ Phase 0d（1 天）    Security Rules 基本版
 Phase 0e（1 天）    GitHub Pages deploy + 404 fallback
 Phase 0f（之後）    正式 /p/{slug} URL + 買 domain + Super Admin 頁
 ```
+
+### 0.5 兩層後台：User Backend vs Super Admin（2026-06-15 釐清）
+
+> **重要：** `/p/{slug}/admin` 係 **客戶用嘅 User Backend**，唔係你賣 service 用嘅平台後台。
+
+#### 三個入口
+
+| 層級 | 邊個用 | URL | 做咩 |
+|------|--------|-----|------|
+| **Super Admin** | 你（平台營運者） | `/super` | 開 tenant、派帳號、收費、支援 |
+| **User Backend** | 買咗服務嘅新人／統籌 | `/p/{slug}/admin` | 管賓客、排位、標籤 |
+| **點名頁** | 帶位同事 | `/p/{slug}` | 只點名，唔使登入 |
+
+```
+你（平台）
+├── Super Admin          /super/tenants          ← Phase 1 要建
+│     └── createTenant() Cloud Function          ← Phase 1–2
+│
+└── 客戶 A、B、C…
+      ├── 點名頁         /p/chen-wong_20260915
+      ├── User Backend   /p/chen-wong_20260915/admin
+      └── 畫布排位       /p/chen-wong_20260915/seating
+```
+
+#### `members` 係過渡，唔係最終方案
+
+| 階段 | 開 tenant / 派權限 |
+|------|-------------------|
+| **而家（Super Admin 未做好）** | Firebase Console 手動加 `tenants/{id}` + Authentication 加 user + 手動加 `members/{uid}` |
+| **Phase 1 Super Admin** | 你喺 `/super` 撳掣寫入 RTDB；Auth 帳號可暫時手動開，再填 UID 入 members |
+| **Phase 2 自動化** | `createTenant` Cloud Function 自動：建 slug、meta、Auth 用戶、`members`、發 email |
+
+#### 權限兩層（RBAC）
+
+| 節點 / 角色 | 路徑 | 權限 |
+|-------------|------|------|
+| `platform_admins/{uid}` | RTDB 根 | 開/停 tenant、寫 `slugs`、管理所有 `tenants/*` |
+| `tenants/{id}/members/{uid}` | 每個 tenant 下 | 只改**該場**婚宴嘅賓客、排位、meta |
+
+最終 Security Rules 邏輯：
+
+- `platform_admin` → 可寫 `slugs`、可建/改 `tenants/{id}/*`
+- `tenant_owner`（在 members 內）→ 只可寫自己 tenant
+- 未登入 → 可讀點名所需資料 + 只寫 `guest_status` 指定欄位
+
+#### 賣 service 最終 flow
+
+```
+客戶付款（WhatsApp / Stripe）
+        │
+        ▼
+Super Admin「新增 Project」（或 Stripe webhook）
+        │
+        ▼
+createTenant()
+  1. 生成 slug + tenantId
+  2. 寫 tenants/{id}/meta、slugs/{slug}
+  3. 複製預設枱位模板
+  4. Admin SDK 建立 Auth 帳號
+  5. 寫 tenants/{id}/members/{uid}: true
+  6. 發 email（點名 link + 後台 login）
+        │
+        ▼
+客戶自己登入 /p/xxx/admin，你唔使再入 Firebase Console
+```
+
+#### API Key 同 Security（補充）
+
+- Firebase Web `apiKey`（`AIzaSy...`）係**公開識別碼**，唔係萬能密碼；真正保護靠 **Rules + Auth + API Key HTTP referrer 限制**
+- **唔好 commit** `public/legacy/js/firebase_config.js`；用 `.env.local` + `npm run sync:legacy-config` 生成
+- **service account JSON** 絕對唔好放 frontend；`createTenant` 只用喺 Cloud Functions
+
+#### Phase 1 Super Admin 實作清單
+
+- [ ] RTDB 加 `platform_admins/{你的UID}: true`（Console 手動 bootstrap 一次）
+- [x] 更新 `database.rules.json` 支援 `platform_admins`
+- [x] Vue 路由 `/super`、`/super/tenants`、`/super/tenants/new`
+- [x] 租戶列表 + 新增 tenant 表單（寫入 RTDB）
+- [x] 表單可填客戶 Auth UID → 自動寫 `members`（Auth 帳號暫時 Console 開）
+- [ ] Cloud Functions `createTenant`（有付費客戶後）
 
 ---
 
@@ -459,24 +539,25 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 ## 4. 建議實施階段
 
-### Phase 0 — 新 Repo + 新 Firebase（1–2 週）← **你而家喺呢度**
+### Phase 0 — 新 Repo + 新 Firebase（1–2 週）← **大部分完成**
 
-- [ ] Copy project 去新 repo（同舊婚禮 repo 分開）
-- [ ] 開新 Firebase project（asia-southeast1）
-- [ ] 集中 `firebase_config.js`；換晒舊 `databaseURL`
-- [ ] 加 `tenant_bootstrap.js` + `tenants/demo` 測試資料
-- [ ] 改晒所有 `database.ref` 用 tenant path
-- [ ] `meta` 動態 branding；移除公開 admin link
-- [ ] 基本 Security Rules
+- [x] Copy project 去新 repo（同舊婚禮 repo 分開）
+- [x] 開新 Firebase project（asia-southeast1）
+- [x] 集中 Firebase config；`.env.local` + sync script
+- [x] Vue 3 + `useTenant` + `tenants/demo` 測試資料
+- [x] 改晒 tenant path（Vue composables + legacy bootstrap）
+- [x] `meta` 動態 branding
+- [x] Security Rules 基本版（guest_status 驗證 + members）
 - [ ] GitHub Pages deploy + `404.html` fallback
+- [ ] `.gitignore` firebase_config + commit 安全修復
 
-### Phase 1 — 可賣第一個客戶（4–6 週）
+### Phase 1 — 可賣第一個客戶（進行中）
 
+- [x] **Super Admin** `/super`：列表 + 新增 Project（見 §0.5）
+- [x] `platform_admins` + Rules 更新（需 Publish + bootstrap UID）
 - [ ] 買域名 `theweddingseat.com` + 接 GitHub Pages
-- [ ] 正式 `/p/{slug}` URL（唔再只靠 `?slug=demo`）
-- [ ] Super Admin 最小頁：列表 + 手動「新增 Project」
-- [ ] Firebase Auth + 後台 login
 - [ ] 開第二個真實 slug 測試隔離
+- [ ] Cloud Functions `createTenant`（自動開 Auth + members）
 
 ### Phase 2 — 可以規模化（6–10 週）
 
@@ -569,4 +650,4 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 ---
 
-*最後更新：2026-06-15（加 §0 第一步清單、§3.11 Hosting/GitHub、零 server 架構）*
+*最後更新：2026-06-15（§0.5 兩層後台、members 過渡說明、Phase 0/1 進度、API Key 補充）*

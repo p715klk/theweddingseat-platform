@@ -4,6 +4,9 @@ const CheckInView = () => import('@/views/CheckInView.vue');
 const AdminView = () => import('@/views/AdminView.vue');
 const SeatingView = () => import('@/views/SeatingView.vue');
 const TenantErrorView = () => import('@/views/TenantErrorView.vue');
+const SuperAdminShell = () => import('@/views/super/SuperAdminShell.vue');
+const SuperTenantsView = () => import('@/views/super/SuperTenantsView.vue');
+const SuperCreateTenantView = () => import('@/views/super/SuperCreateTenantView.vue');
 
 const router = createRouter({
   history: createWebHistory(),
@@ -25,6 +28,23 @@ const router = createRouter({
       name: 'seating',
       component: SeatingView,
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/super',
+      component: SuperAdminShell,
+      children: [
+        { path: '', redirect: '/super/tenants' },
+        {
+          path: 'tenants',
+          name: 'super-tenants',
+          component: SuperTenantsView,
+        },
+        {
+          path: 'tenants/new',
+          name: 'super-tenant-new',
+          component: SuperCreateTenantView,
+        },
+      ],
     },
     {
       path: '/error',
