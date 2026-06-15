@@ -33,7 +33,7 @@ const route = useRoute();
 const { slug, initTenant } = useTenant();
 const { user, authReady } = useAuth();
 
-onMounted(() => initTenant(route));
+onMounted(() => initTenant(route, { allowExpired: true }));
 
 const iframeSrc = computed(() => {
   if (!slug.value || !user.value) return '';

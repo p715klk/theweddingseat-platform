@@ -5,6 +5,13 @@
       ⏳ 載入中...
     </div>
     <div v-else class="bg-gray-100 text-gray-800 font-sans pb-12 select-none min-h-screen">
+    <div
+      v-if="isExpired"
+      class="sticky top-0 z-[60] bg-amber-100 border-b border-amber-300 text-amber-950 text-center text-xs font-bold py-2 px-3"
+    >
+      ⚠️ 此專案已 expired — 公開點名已停用
+      <span v-if="isPlatformAdmin">（平台預覽模式，你仍可睇到頁面）</span>
+    </div>
     <header
       class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-center items-center"
       :style="{ backgroundColor: themeColor }"
@@ -52,7 +59,8 @@
               type="button"
               class="px-2 py-1 text-xs font-black rounded border"
               :class="arrivedBtnClass(row.arrived)"
-              @click="cycleArrived(row.tableNum, row.guest.name, row.arrived)"
+              :disabled="checkInLocked"
+              @click="onCycleArrived(row.tableNum, row.guest.name, row.arrived)"
             >
               {{ arrivedLabel(row.arrived) }}
             </button>
@@ -60,7 +68,8 @@
               type="button"
               class="px-2 py-1 text-xs font-black rounded border"
               :class="giftBtnClass(row.gift)"
-              @click="cycleGift(row.tableNum, row.guest.name, row.gift)"
+              :disabled="checkInLocked"
+              @click="onCycleGift(row.tableNum, row.guest.name, row.gift)"
             >
               {{ giftLabel(row.gift) }}
             </button>
@@ -141,7 +150,8 @@
                 type="button"
                 class="px-2.5 py-2 text-xs font-black rounded border shadow-sm"
                 :class="arrivedBtnClass(guestArrived(selectedTable, guest))"
-                @click="cycleArrived(selectedTable, guest.name, guestArrived(selectedTable, guest))"
+                :disabled="checkInLocked"
+                @click="onCycleArrived(selectedTable, guest.name, guestArrived(selectedTable, guest))"
               >
                 {{ arrivedLabel(guestArrived(selectedTable, guest)) }}
               </button>
@@ -149,7 +159,8 @@
                 type="button"
                 class="px-2.5 py-2 text-xs font-black rounded border shadow-sm"
                 :class="giftBtnClass(guestGift(selectedTable, guest))"
-                @click="cycleGift(selectedTable, guest.name, guestGift(selectedTable, guest))"
+                :disabled="checkInLocked"
+                @click="onCycleGift(selectedTable, guest.name, guestGift(selectedTable, guest))"
               >
                 {{ giftLabel(guestGift(selectedTable, guest)) }}
               </button>
@@ -172,15 +183,19 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useCheckIn } from '@/composables/useCheckIn';
+import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
+import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 
 const route = useRoute();
 const loading = ref(true);
-const { error, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
+const { authReady } = useAuth();
+const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
+const { error, isExpired, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
 const {
   floorLayout,
   selectedTable,
@@ -202,14 +217,47 @@ const {
   normalizeTags,
 } = useCheckIn();
 
-onMounted(async () => {
+const checkInLocked = computed(() => isExpired.value);
+
+function onCycleArrived(table, name, current) {
+  if (checkInLocked.value) return;
+  cycleArrived(table, name, current);
+}
+
+function onCycleGift(table, name, current) {
+  if (checkInLocked.value) return;
+  cycleGift(table, name, current);
+}
+
+async function bootCheckIn() {
+  loading.value = true;
   try {
-    await initTenant(route);
+    await initTenant(route, { allowExpired: isPlatformAdmin.value });
     if (!error.value) startSync();
   } finally {
     loading.value = false;
   }
-});
+}
+
+let authGatePassed = false;
+
+watch(
+  [authReady, platformAdminReady],
+  ([authOk, platformOk]) => {
+    if (!authOk || !platformOk || authGatePassed) return;
+    authGatePassed = true;
+    bootCheckIn();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => route.params.slug,
+  () => {
+    if (authGatePassed) bootCheckIn();
+  },
+);
+
 onUnmounted(stopSync);
 
 function openTable(num) {

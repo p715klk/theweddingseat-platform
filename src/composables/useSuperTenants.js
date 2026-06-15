@@ -11,6 +11,27 @@ const DEFAULT_LABEL_COLUMNS = {
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+function auditFields(editor, { isCreate = false } = {}) {
+  if (!editor?.uid) return {};
+  const now = Date.now();
+  const fields = {
+    updated_at: now,
+    updated_by_uid: editor.uid,
+    updated_by_email: editor.email || '',
+  };
+  if (isCreate) {
+    fields.created_at = now;
+    fields.created_by_uid = editor.uid;
+    fields.created_by_email = editor.email || '';
+  }
+  return fields;
+}
+
+export function formatAuditTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString('zh-HK');
+}
+
 export function normalizeSlug(input) {
   return String(input || '')
     .trim()
@@ -65,16 +86,50 @@ export async function getTenantBySlug(slug) {
   };
 }
 
-export async function updateTenantMeta(tenantId, patch) {
+export async function updateTenantMeta(tenantId, patch, editor = null) {
   const ref = dbRef(database, `tenants/${tenantId}/meta`);
   const current = (await get(ref)).val() || {};
-  await set(ref, { ...current, ...patch, slug: current.slug || tenantId });
+  await set(ref, {
+    ...current,
+    ...patch,
+    slug: patch.slug ?? current.slug ?? tenantId,
+    ...auditFields(editor),
+  });
 }
 
-export async function addTenantMember(tenantId, uid) {
+export async function renameTenantSlug(tenantId, oldSlug, newSlugInput, editor = null) {
+  const newSlug = normalizeSlug(newSlugInput);
+  if (!isValidSlug(newSlug)) {
+    throw new Error('Slug 格式無效（用小寫英文、數字、連字號）');
+  }
+  if (newSlug === oldSlug) return newSlug;
+  if (await isSlugTaken(newSlug)) {
+    throw new Error(`Slug「${newSlug}」已被使用`);
+  }
+
+  const metaRef = dbRef(database, `tenants/${tenantId}/meta`);
+  const current = (await get(metaRef)).val() || {};
+
+  await update(dbRef(database), {
+    [`slugs/${newSlug}`]: tenantId,
+    [`slugs/${oldSlug}`]: null,
+  });
+  await set(metaRef, {
+    ...current,
+    slug: newSlug,
+    ...auditFields(editor),
+  });
+
+  return newSlug;
+}
+
+export async function addTenantMember(tenantId, uid, editor = null) {
   const trimmed = uid?.trim();
   if (!trimmed) throw new Error('請輸入 UID');
   await set(dbRef(database, `tenants/${tenantId}/members/${trimmed}`), true);
+  if (editor) {
+    await updateTenantMeta(tenantId, {}, editor);
+  }
 }
 
 export async function isSlugTaken(slug) {
@@ -94,6 +149,7 @@ export async function createTenant({
   themeColor = '#b91c1c',
   plan = 'standard',
   ownerUid = '',
+  editor = null,
 }) {
   const normalized = normalizeSlug(slug);
   if (!isValidSlug(normalized)) {
@@ -104,7 +160,6 @@ export async function createTenant({
   }
 
   const tenantId = normalized;
-  const now = Date.now();
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -114,7 +169,7 @@ export async function createTenant({
     status: 'active',
     slug: normalized,
     plan,
-    created_at: now,
+    ...auditFields(editor, { isCreate: true }),
   };
 
   const tenantBase = `tenants/${tenantId}`;
@@ -143,6 +198,6 @@ export async function createTenant({
   };
 }
 
-export async function setTenantStatus(tenantId, status) {
-  await set(dbRef(database, `tenants/${tenantId}/meta/status`), status);
+export async function setTenantStatus(tenantId, status, editor = null) {
+  await updateTenantMeta(tenantId, { status }, editor);
 }

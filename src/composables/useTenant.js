@@ -7,6 +7,7 @@ const tenantId = ref('');
 const meta = ref(null);
 const ready = ref(false);
 const error = ref(null);
+const isExpired = ref(false);
 
 function resolveSlugFromRoute(route) {
   if (route.params.slug) return String(route.params.slug);
@@ -24,9 +25,11 @@ function tenantRef(subPath = '') {
   return dbRef(database, tenantPath(subPath));
 }
 
-async function initTenant(route) {
+async function initTenant(route, options = {}) {
+  const { allowExpired = false } = options;
   ready.value = false;
   error.value = null;
+  isExpired.value = false;
   slug.value = resolveSlugFromRoute(route);
 
   try {
@@ -40,8 +43,11 @@ async function initTenant(route) {
       return;
     }
     if (metaVal.status === 'expired') {
-      error.value = '此婚宴專案已結束';
-      return;
+      isExpired.value = true;
+      if (!allowExpired) {
+        error.value = '此婚宴專案已結束';
+        return;
+      }
     }
     meta.value = metaVal;
     ready.value = true;
@@ -64,6 +70,7 @@ export function useTenant() {
     meta,
     ready,
     error,
+    isExpired,
     themeColor,
     coupleNames,
     venueLabel,

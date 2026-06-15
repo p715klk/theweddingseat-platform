@@ -22,6 +22,7 @@
           <th>新人</th>
           <th>場地</th>
           <th>婚期</th>
+          <th>最後修改</th>
           <th>狀態</th>
           <th>連結</th>
         </tr>
@@ -37,6 +38,9 @@
           <td>{{ t.meta.couple_names || '—' }}</td>
           <td>{{ venueLabel(t.meta) }}</td>
           <td>{{ t.meta.wedding_date || '—' }}</td>
+          <td class="audit-cell">
+            <span>{{ formatUpdated(t.meta) }}</span>
+          </td>
           <td>
             <span class="badge" :class="t.meta.status || 'active'">{{ t.meta.status || 'active' }}</span>
           </td>
@@ -54,7 +58,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { listTenants } from '@/composables/useSuperTenants';
+import { listTenants, formatAuditTime } from '@/composables/useSuperTenants';
 
 const router = useRouter();
 const tenants = ref([]);
@@ -64,6 +68,12 @@ const error = ref('');
 function venueLabel(meta) {
   const parts = [meta.venue_name, meta.venue_hall].filter(Boolean);
   return parts.length ? parts.join(' · ') : '—';
+}
+
+function formatUpdated(meta) {
+  const who = meta.updated_by_email || meta.created_by_email || '';
+  const when = formatAuditTime(meta.updated_at || meta.created_at);
+  return who ? `${when} · ${who}` : when;
 }
 
 function goDetail(slug) {
@@ -148,6 +158,11 @@ defineExpose({ load });
 .table th {
   font-size: 0.75rem;
   color: #64748b;
+}
+.audit-cell {
+  font-size: 0.75rem;
+  color: #64748b;
+  max-width: 11rem;
 }
 .row-click {
   cursor: pointer;

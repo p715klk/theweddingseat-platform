@@ -62,9 +62,11 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useAuth } from '@/composables/useAuth';
 import { createTenant, normalizeSlug } from '@/composables/useSuperTenants';
 
 const router = useRouter();
+const { user } = useAuth();
 
 const form = reactive({
   slug: '',
@@ -93,6 +95,9 @@ async function submit() {
       weddingDate: form.weddingDate,
       themeColor: form.themeColor,
       ownerUid: form.ownerUid,
+      editor: user.value
+        ? { uid: user.value.uid, email: user.value.email || '' }
+        : null,
     });
     router.push(`/super/tenants/${result.slug}`);
   } catch (e) {

@@ -79,6 +79,11 @@ function appendSlugToInternalLinks() {
     });
 }
 
+function isAdminContext() {
+    if (location.pathname.includes('/admin/')) return true;
+    return new URLSearchParams(location.search).get('admin') === '1';
+}
+
 function initTenant() {
     tenantSlug = resolveTenantSlug();
 
@@ -93,7 +98,7 @@ function initTenant() {
                 showTenantError(`找不到專案「${tenantSlug}」。請確認 URL 或 Firebase 內 tenants/${tenantSlug}/meta 已建立。`);
                 throw new Error(`Tenant not found: ${tenantSlug}`);
             }
-            if (tenantMeta.status === 'expired') {
+            if (tenantMeta.status === 'expired' && !isAdminContext()) {
                 showTenantError('此婚宴專案已結束，如有疑問請聯絡婚禮統籌。');
                 throw new Error(`Tenant expired: ${tenantSlug}`);
             }
