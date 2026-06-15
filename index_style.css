@@ -1,0 +1,89 @@
+/* 自訂全域樣式 */
+body {
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+/* 允許平面圖區域內 scroll + tap（body 用 manipulation 會令嵌套 scroll 點擊失效） */
+html, body {
+    touch-action: pan-x pan-y;
+}
+
+/* 簽到頁平面圖 — 固定尺寸正方形枱，超出就 scroll */
+.floor-plan-section {
+    width: 100%;
+    max-width: 100%;
+}
+
+.floor-plan-wrap {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-x pan-y;
+    width: 100%;
+    max-height: min(75vh, 640px);
+    border-radius: 0.75rem;
+    background: rgba(255, 255, 255, 0.45);
+    position: relative;
+    isolation: isolate;
+}
+
+#floor-plan {
+    --floor-table-px: 80px;
+    position: relative;
+    margin: 0 auto;
+    flex-shrink: 0;
+    box-sizing: content-box;
+}
+
+#floor-plan .floor-cell-table {
+    position: absolute;
+    width: var(--floor-table-px);
+    height: var(--floor-table-px);
+    box-sizing: border-box;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(239, 68, 68, 0.15);
+    z-index: 1;
+    transform: translateZ(0);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.125rem;
+    padding: 0.25rem;
+}
+
+#floor-plan .floor-table-label {
+    font-size: 10.4px;
+    line-height: 1.15;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+#floor-plan .floor-table-ring {
+    width: 2.85rem;
+    height: 2.85rem;
+    flex-shrink: 0;
+    font-size: 11px;
+    line-height: 1;
+    pointer-events: none;
+}
+
+@media screen and (min-width: 769px) {
+    #floor-plan .floor-table-ring {
+        font-size: 13px;
+    }
+}
+
+@media screen and (max-width: 768px) {
+    input, select, textarea, .excel-input, .table-select {
+        font-size: 16px !important;
+        touch-action: manipulation;
+    }
+
+    .floor-plan-wrap {
+        max-height: min(70vh, 560px);
+    }
+}
