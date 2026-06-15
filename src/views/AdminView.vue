@@ -1,7 +1,14 @@
 <template>
   <div class="admin-host">
+    <TenantErrorView v-if="tenantError" :message="tenantError" />
     <div
-      v-if="!authReady"
+      v-else-if="!tenantReady"
+      class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center text-gray-400 font-bold"
+    >
+      ⏳ 載入專案...
+    </div>
+    <div
+      v-else-if="!authReady"
       class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center text-gray-400 font-bold"
     >
       ⏳ 驗證登入狀態...
@@ -10,44 +17,46 @@
       v-else-if="!user"
       class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center p-4"
     >
-      <AdminLoginForm @success="goToLegacyAdmin" />
+      <AdminLoginForm @success="onLoggedIn" />
     </div>
-    <div
+    <AdminPanel
       v-else
-      class="fixed inset-0 bg-gray-100 z-[10000] flex flex-col items-center justify-center text-gray-600 font-bold gap-2"
-    >
-      <p>⏳ 前往賓客名單後台...</p>
-      <p v-if="slug" class="text-xs text-gray-400 font-normal">{{ slug }}</p>
-    </div>
+      :slug="slug"
+      :couple-names="coupleNames"
+      @logout="handleLogout"
+    />
   </div>
 </template>
 
 <script setup>
-import { watch } from 'vue';
+import { computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
-import { appUrl } from '@/lib/appBase';
+import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
+import AdminPanel from '@/components/admin/AdminPanel.vue';
 
 const route = useRoute();
-const { slug, initTenant } = useTenant();
-const { user, authReady } = useAuth();
+const { slug, ready, error, coupleNames, initTenant } = useTenant();
+const { user, authReady, logout } = useAuth();
 
 initTenant(route, { allowExpired: true });
 
-function goToLegacyAdmin() {
-  if (!slug.value) return;
-  const target = appUrl(`legacy/admin/admin.html?slug=${encodeURIComponent(slug.value)}`);
-  window.location.replace(target);
+const tenantReady = computed(() => ready.value);
+const tenantError = computed(() => error.value);
+
+function onLoggedIn() {
+  /* auth state updates automatically */
+}
+
+async function handleLogout() {
+  await logout();
 }
 
 watch(
-  [authReady, user, slug],
-  ([ready, u, s]) => {
-    if (ready && u && s) goToLegacyAdmin();
-  },
-  { immediate: true },
+  () => route.params.slug,
+  () => initTenant(route, { allowExpired: true }),
 );
 </script>
 

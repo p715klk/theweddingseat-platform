@@ -383,3 +383,11 @@ html, body {
 .settings-dropdown-menu button.danger:hover {
     background: #fee2e2;
 }
+
+/* Vue admin：輸入區可選文字 */
+.admin-page input,
+.admin-page select,
+.admin-page textarea {
+    -webkit-user-select: text;
+    user-select: text;
+}

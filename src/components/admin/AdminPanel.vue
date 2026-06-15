@@ -1,0 +1,355 @@
+<template>
+  <div class="admin-page bg-gray-100 text-gray-800 font-sans h-screen flex flex-col p-4 overflow-hidden">
+    <div class="w-full max-w-[98%] mx-auto flex flex-col h-full space-y-3">
+      <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-300 pb-3 flex-shrink-0 gap-3">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0 flex-1 lg:flex-initial">
+          <h1 class="text-xl font-bold text-red-700 shrink-0">📋 賓客名單管理後台</h1>
+          <span v-if="coupleNames" class="text-sm font-bold text-gray-600 shrink-0">{{ coupleNames }}</span>
+          <span class="header-hint text-[11px] text-gray-500 font-normal leading-snug">
+            按住 ☰ 拖拉排序；標籤欄支援多選(用＋加入標籤)；表頭欄位分界線可拖拉調整欄寬。修改後需儲存變更。
+            <span v-if="dirty" class="text-amber-600 font-bold">（有未儲存改動）</span>
+          </span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          <button
+            type="button"
+            class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition"
+            @click="handleAddGuest"
+          >
+            ➕ 新增賓客
+          </button>
+          <button
+            type="button"
+            class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow transition disabled:opacity-60"
+            :disabled="saving || !dirty"
+            @click="handleSave"
+          >
+            {{ saving ? '儲存中…' : '💾 儲存變更' }}
+          </button>
+
+          <div class="relative" id="settings-dropdown" ref="settingsRef">
+            <input ref="csvInputRef" id="csv-file-input" type="file" accept=".csv" class="hidden" @change="onCsvSelected" />
+            <button
+              type="button"
+              id="btn-settings"
+              class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition"
+              @click="toggleSettingsMenu"
+            >
+              ⚙ 設定
+            </button>
+            <div v-if="settingsOpen" id="settings-menu" class="settings-dropdown-menu">
+              <button type="button" @click="openCsvPicker">📥 匯入 CSV</button>
+              <button type="button" @click="exportCSV(); settingsOpen = false">📤 匯出 CSV</button>
+              <button type="button" class="danger" @click="confirmEmpty">🗑 清空所有賓客</button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center"
+            @click="requestLeave(seatingRoute)"
+          >
+            🦢 前往畫布排位
+          </button>
+          <button
+            type="button"
+            class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center"
+            @click="requestLeave(checkInRoute)"
+          >
+            🏠 前往點名首頁
+          </button>
+          <button
+            type="button"
+            class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-gray-300 transition"
+            @click="emit('logout')"
+          >
+            登出
+          </button>
+        </div>
+      </header>
+
+      <div class="bg-white rounded-xl shadow border border-gray-200 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <AdminGuestTable
+          ref="guestTableRef"
+          :guests="guests"
+          :categories="categories"
+          :loading="loading"
+          :load-error="loadError"
+          :get-max-seats="getMaxSeats"
+          @dirty="markDirty()"
+          @reorder="(from, to) => reorderGuests(from, to)"
+          @table-change="(g) => updateGuestTable(g)"
+          @seat-change="(g, seat) => updateGuestSeat(g, seat)"
+          @remove="(i) => removeGuest(i)"
+          @add-category="(name) => addCategory(name)"
+          @request-delete-category="deleteTagOpen = true"
+          @retry="load(true)"
+        />
+      </div>
+
+      <div class="text-right text-[10px] text-gray-400 font-mono flex-shrink-0 px-1">
+        Wedding Manager Panel v5.0 (多選標籤)
+      </div>
+    </div>
+
+    <div
+      id="admin-toast"
+      class="admin-toast"
+      :class="{ 'is-visible': !!toast, hidden: !toast }"
+      role="status"
+      aria-live="polite"
+    >
+      {{ toast }}
+    </div>
+
+    <div
+      v-if="leaveDialog"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 mb-2">⚠️ 有未儲存的改動</h3>
+        <p class="text-xs text-gray-500 mb-4 leading-relaxed">你尚未按「儲存變更」。若現在離開，修改將不會同步到畫布同點名頁。</p>
+        <div class="flex flex-col gap-2">
+          <button type="button" class="w-full px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow" @click="leaveSaveAndGo">💾 儲存並離開</button>
+          <button type="button" class="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold" @click="leaveDiscard">不儲存，離開</button>
+          <button type="button" class="w-full px-3 py-2 bg-white hover:bg-gray-50 text-gray-500 rounded-lg text-xs font-bold border border-gray-200" @click="leaveDialog = false">留在此頁</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="deleteTagOpen"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+      @click.self="deleteTagOpen = false"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 mb-2">🗑️ 刪除標籤</h3>
+        <p class="text-xs text-gray-500 mb-3">從標籤清單移除；若有賓客仍使用該標籤，將無法刪除。</p>
+        <select v-model="deleteTagSelected" class="w-full border border-gray-300 rounded-lg p-2 text-sm mb-3">
+          <option value="">— 選擇 —</option>
+          <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
+        </select>
+        <p v-if="deleteTagSelected" class="text-xs mb-4 text-gray-600">{{ deleteTagHint }}</p>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold" @click="deleteTagOpen = false">取消</button>
+          <button
+            type="button"
+            class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow disabled:opacity-40"
+            :disabled="!canDeleteTag"
+            @click="confirmDeleteTag"
+          >
+            確認刪除
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <AdminCsvImportDialog
+      :open="csvDialogOpen"
+      :file-name="csvFileName"
+      :imported-guests="csvImportedGuests"
+      :preview-fn="previewCSVImport"
+      :applying="saving"
+      @cancel="csvDialogOpen = false"
+      @confirm="onCsvConfirm"
+    />
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { onBeforeRouteLeave, useRouter } from 'vue-router';
+import { useAdminGuests } from '@/composables/useAdminGuests';
+import { findGuestsUsingTag } from '@/lib/adminGuestModel';
+import AdminGuestTable from '@/components/admin/AdminGuestTable.vue';
+import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
+
+const props = defineProps({
+  slug: { type: String, required: true },
+  coupleNames: { type: String, default: '' },
+});
+
+const emit = defineEmits(['logout']);
+
+const router = useRouter();
+const {
+  guests,
+  categories,
+  dirty,
+  loading,
+  saving,
+  loadError,
+  toast,
+  load,
+  save,
+  addGuest,
+  removeGuest,
+  reorderGuests,
+  updateGuestTable,
+  updateGuestSeat,
+  addCategory,
+  removeCategory,
+  emptyAllGuests,
+  exportCSV,
+  parseCSVFile,
+  previewCSVImport,
+  applyCSVImport,
+  markDirty,
+  startSync,
+  stopSync,
+  getMaxSeats,
+  showToast,
+} = useAdminGuests();
+
+const settingsOpen = ref(false);
+const settingsRef = ref(null);
+const csvInputRef = ref(null);
+const guestTableRef = ref(null);
+const csvDialogOpen = ref(false);
+const csvFileName = ref('');
+const csvImportedGuests = ref([]);
+const leaveDialog = ref(false);
+const pendingLeave = ref(null);
+const deleteTagOpen = ref(false);
+const deleteTagSelected = ref('');
+
+const checkInRoute = computed(() => `/p/${props.slug}`);
+const seatingRoute = computed(() => `/p/${props.slug}/seating`);
+
+const deleteTagHint = computed(() => {
+  if (!deleteTagSelected.value) return '';
+  const used = findGuestsUsingTag(guests.value, deleteTagSelected.value);
+  if (used.length) return `⚠️ 有 ${used.length} 位賓客使用此標籤，無法刪除。`;
+  return '可以刪除此標籤。';
+});
+
+const canDeleteTag = computed(() =>
+  deleteTagSelected.value && findGuestsUsingTag(guests.value, deleteTagSelected.value).length === 0,
+);
+
+function toggleSettingsMenu(e) {
+  e.stopPropagation();
+  settingsOpen.value = !settingsOpen.value;
+}
+
+function onDocClick(e) {
+  if (settingsOpen.value && settingsRef.value && !settingsRef.value.contains(e.target)) {
+    settingsOpen.value = false;
+  }
+}
+
+onMounted(async () => {
+  document.addEventListener('click', onDocClick);
+  startSync();
+  try {
+    await load(true);
+  } catch {
+    /* loadError shown in table */
+  }
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick);
+  stopSync();
+});
+
+async function handleSave() {
+  try {
+    await save();
+  } catch (e) {
+    window.alert(`❌ 儲存失敗: ${e.message}`);
+  }
+}
+
+function handleAddGuest() {
+  guestTableRef.value?.tearDownSortable();
+  addGuest();
+  nextTick(() => {
+    guestTableRef.value?.setupSortable({ scrollToBottom: true });
+  });
+}
+
+function confirmEmpty() {
+  settingsOpen.value = false;
+  if (!guests.value.length) {
+    showToast('目前沒有賓客可清空');
+    return;
+  }
+  const ok = window.confirm(`確定要清空所有賓客嗎？\n\n將移除 ${guests.value.length} 位賓客，需按「儲存變更」才會同步到 Firebase。`);
+  if (ok) emptyAllGuests();
+}
+
+function openCsvPicker() {
+  settingsOpen.value = false;
+  if (csvInputRef.value) {
+    csvInputRef.value.value = '';
+    csvInputRef.value.click();
+  }
+}
+
+async function onCsvSelected(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const parsed = await parseCSVFile(file);
+    if (parsed.error) {
+      window.alert(parsed.error);
+      return;
+    }
+    csvFileName.value = file.name;
+    csvImportedGuests.value = parsed.importedGuests;
+    csvDialogOpen.value = true;
+  } catch {
+    window.alert('❌ 讀取 CSV 檔案失敗，請重試。');
+  }
+}
+
+async function onCsvConfirm(plan) {
+  try {
+    await applyCSVImport(plan);
+    csvDialogOpen.value = false;
+  } catch (e) {
+    window.alert(`❌ 匯入失敗: ${e.message}`);
+  }
+}
+
+function confirmDeleteTag() {
+  if (!canDeleteTag.value) return;
+  removeCategory(deleteTagSelected.value);
+  deleteTagOpen.value = false;
+  deleteTagSelected.value = '';
+}
+
+function requestLeave(path) {
+  if (!dirty.value) {
+    router.push(path);
+    return;
+  }
+  pendingLeave.value = path;
+  leaveDialog.value = true;
+}
+
+async function leaveSaveAndGo() {
+  try {
+    await save();
+    leaveDialog.value = false;
+    if (pendingLeave.value) router.push(pendingLeave.value);
+  } catch (e) {
+    window.alert(`❌ 儲存失敗: ${e.message}`);
+  }
+}
+
+function leaveDiscard() {
+  dirty.value = false;
+  leaveDialog.value = false;
+  if (pendingLeave.value) router.push(pendingLeave.value);
+}
+
+onBeforeRouteLeave((to) => {
+  if (!dirty.value) return true;
+  pendingLeave.value = to.fullPath;
+  leaveDialog.value = true;
+  return false;
+});
+</script>

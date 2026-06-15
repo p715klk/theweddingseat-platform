@@ -1,160 +1,270 @@
 import { ref } from 'vue';
-import { onValue, set, get } from 'firebase/database';
+import { get, set, onValue } from 'firebase/database';
 import { useTenant } from '@/composables/useTenant';
-import { normalizeTags, PRIMARY_TAG_KEY } from '@/lib/guestUtils';
+import { normalizeTags } from '@/lib/guestUtils';
+import {
+  processFirebaseGuests,
+  serializeGuestsForSave,
+  normalizeGuestForList,
+  reassignSeatsForTables,
+  onGuestTableChange,
+  exportGuestsToCSV,
+  downloadCsv,
+  mergeCategoriesFromGuests,
+  findGuestsUsingTag,
+} from '@/lib/adminGuestModel';
+import {
+  parseCSVFileContent,
+  buildCSVImportPlan,
+  buildCSVImportSuccessMessage,
+} from '@/lib/adminCsv';
 
 const DEFAULT_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
 
 export function useAdminGuests() {
   const { tenantRef } = useTenant();
+
   const guests = ref([]);
   const categories = ref([...DEFAULT_CATEGORIES]);
+  const tableSettings = ref({});
   const dirty = ref(false);
   const loading = ref(false);
-  const guestStatus = ref({});
-  let unsub = null;
+  const saving = ref(false);
+  const loadError = ref('');
+  const toast = ref('');
+  let toastTimer = null;
+  let unsubscribers = [];
+  let syncTimer = null;
+  let csvImportInProgress = false;
 
-  function processRaw(weddingGuests, unassignedGuests) {
-    const list = [];
-    Object.keys(weddingGuests || {})
-      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-      .forEach((tableNum) => {
-        const tableGuests = weddingGuests[tableNum];
-        if (!Array.isArray(tableGuests)) return;
-        tableGuests.forEach((g) => {
-          if (!g?.name) return;
-          const key = `${tableNum}_${g.name}`;
-          const canceled = guestStatus.value[key]?.arrived === '取消';
-          list.push({
-            name: g.name,
-            side: g.side || '男方',
-            table: parseInt(tableNum, 10),
-            sort: parseInt(g.sort, 10) || 1,
-            group: normalizeTags(g.group ?? g[PRIMARY_TAG_KEY]),
-            isCanceled: canceled,
-          });
-        });
-      });
-    (unassignedGuests || []).forEach((g) => {
-      if (!g?.name) return;
-      list.push({
-        name: g.name,
-        side: g.side || '男方',
-        table: '',
-        sort: 99,
-        group: normalizeTags(g.group ?? g[PRIMARY_TAG_KEY]),
-        isCanceled: false,
-      });
-    });
-    list.sort((a, b) => {
-      const ta = a.table === '' ? 9999 : a.table;
-      const tb = b.table === '' ? 9999 : b.table;
-      if (ta !== tb) return ta - tb;
-      return (a.sort || 99) - (b.sort || 99);
-    });
+  function showToast(message, ms = 2000) {
+    toast.value = message;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.value = '';
+    }, ms);
+  }
+
+  async function fetchBundle() {
+    const [metaSnap, guestsSnap, unassignedSnap, settingsSnap, statusSnap] = await Promise.all([
+      get(tenantRef('meta_label_columns')),
+      get(tenantRef('wedding_guests')),
+      get(tenantRef('unassigned_guests')),
+      get(tenantRef('table_settings')),
+      get(tenantRef('guest_status')),
+    ]);
+    return {
+      meta: metaSnap.val(),
+      weddingGuests: guestsSnap.val() || {},
+      unassignedGuests: unassignedSnap.val() || [],
+      tableSettings: settingsSnap.val() || {},
+      guestStatus: statusSnap.val() || {},
+    };
+  }
+
+  function applyBundle(bundle) {
+    tableSettings.value = bundle.tableSettings || {};
+    const meta = bundle.meta;
+    if (meta?.categories?.group) {
+      categories.value = [...meta.categories.group];
+    }
+    const list = processFirebaseGuests(
+      bundle.weddingGuests,
+      bundle.unassignedGuests,
+      bundle.guestStatus,
+      tableSettings.value,
+    );
+    categories.value = mergeCategoriesFromGuests(categories.value, list);
     guests.value = list;
     dirty.value = false;
   }
 
-  async function load() {
+  async function load(force = false) {
+    if (dirty.value && !force) return;
     loading.value = true;
+    loadError.value = '';
     try {
-      const [gSnap, uSnap, mSnap, sSnap] = await Promise.all([
-        get(tenantRef('wedding_guests')),
-        get(tenantRef('unassigned_guests')),
-        get(tenantRef('meta_label_columns')),
-        get(tenantRef('guest_status')),
-      ]);
-      guestStatus.value = sSnap.val() || {};
-      const meta = mSnap.val();
-      if (meta?.categories?.group) {
-        categories.value = [...meta.categories.group];
-      }
-      processRaw(gSnap.val() || {}, uSnap.val() || []);
+      applyBundle(await fetchBundle());
+    } catch (e) {
+      loadError.value = e?.message || '載入失敗';
+      throw e;
     } finally {
       loading.value = false;
     }
   }
 
+  function scheduleRealtimeRefresh() {
+    if (csvImportInProgress || dirty.value) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      load().catch((e) => console.error('Admin 即時同步失敗:', e));
+    }, 150);
+  }
+
   function startSync() {
     stopSync();
-    unsub = onValue(tenantRef('wedding_guests'), async () => {
-      if (dirty.value) return;
-      await load();
+    ['wedding_guests', 'unassigned_guests', 'guest_status', 'meta_label_columns', 'table_settings'].forEach((path) => {
+      const unsub = onValue(tenantRef(path), scheduleRealtimeRefresh);
+      unsubscribers.push(unsub);
     });
   }
 
   function stopSync() {
-    if (unsub) unsub();
-    unsub = null;
-  }
-
-  function addGuest() {
-    guests.value.push({
-      name: '',
-      side: '男方',
-      table: '',
-      sort: 99,
-      group: [],
-      isCanceled: false,
-    });
-    dirty.value = true;
-  }
-
-  function removeGuest(index) {
-    guests.value.splice(index, 1);
-    dirty.value = true;
+    unsubscribers.forEach((u) => u());
+    unsubscribers = [];
+    clearTimeout(syncTimer);
   }
 
   function markDirty() {
     dirty.value = true;
   }
 
-  async function save() {
-    const wedding = {};
-    const unassigned = [];
-    guests.value.forEach((g) => {
-      if (!g.name?.trim()) return;
-      const row = {
-        name: g.name.trim(),
-        side: g.side,
-        group: normalizeTags(g.group),
-      };
-      if (g.table === '' || g.table == null || isNaN(g.table)) {
-        row.sort = 99;
-        unassigned.push(row);
-      } else {
-        const t = parseInt(g.table, 10);
-        if (!wedding[t]) wedding[t] = [];
-        row.sort = parseInt(g.sort, 10) || 1;
-        wedding[t].push(row);
-      }
-    });
+  function addGuest() {
+    guests.value.push(normalizeGuestForList({
+      name: '',
+      side: '男方',
+      table: '',
+      sort: 99,
+      group: [],
+    }));
+    markDirty();
+  }
 
-    await Promise.all([
-      set(tenantRef('wedding_guests'), wedding),
-      set(tenantRef('unassigned_guests'), unassigned),
-      set(tenantRef('meta_label_columns'), {
-        keys: ['group'],
-        names: ['標籤 (可多選)'],
-        categories: { group: categories.value },
-      }),
-    ]);
-    dirty.value = false;
-    await load();
+  function removeGuest(index) {
+    guests.value.splice(index, 1);
+    markDirty();
+  }
+
+  function reorderGuests(fromIndex, toIndex) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    const list = [...guests.value];
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+    guests.value = list;
+
+    const affected = [];
+    if (moved.table !== '' && moved.table != null) affected.push(moved.table);
+    reassignSeatsForTables(guests.value, affected, tableSettings.value);
+    markDirty();
+  }
+
+  function updateGuestTable(guest) {
+    onGuestTableChange(guest, guests.value, tableSettings.value);
+    markDirty();
+  }
+
+  function updateGuestSeat(guest, seat) {
+    const n = parseInt(seat, 10);
+    if (!Number.isNaN(n) && n >= 1) guest.sort = n;
+    markDirty();
+  }
+
+  function addCategory(name) {
+    const trimmed = name?.trim();
+    if (!trimmed || categories.value.includes(trimmed)) return false;
+    categories.value.push(trimmed);
+    markDirty();
+    return true;
+  }
+
+  function removeCategory(tag) {
+    if (findGuestsUsingTag(guests.value, tag).length > 0) return false;
+    categories.value = categories.value.filter((c) => c !== tag);
+    markDirty();
+    return true;
+  }
+
+  function emptyAllGuests() {
+    guests.value = [];
+    markDirty();
+  }
+
+  function exportCSV() {
+    if (!guests.value.length) return;
+    downloadCsv(exportGuestsToCSV(guests.value));
+  }
+
+  async function parseCSVFile(file) {
+    const text = await file.text();
+    return parseCSVFileContent(text);
+  }
+
+  function previewCSVImport(importedGuests, mode) {
+    return buildCSVImportPlan(importedGuests, guests.value, mode);
+  }
+
+  async function applyCSVImport(plan) {
+    csvImportInProgress = true;
+    try {
+      guests.value = plan.resultGuests.map((g) => normalizeGuestForList(g));
+      categories.value = mergeCategoriesFromGuests(categories.value, guests.value);
+      markDirty();
+      await save({ toastMessage: buildCSVImportSuccessMessage(plan) });
+    } finally {
+      csvImportInProgress = false;
+    }
+  }
+
+  async function save(options = {}) {
+    const { toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。' } = options;
+    saving.value = true;
+    try {
+      const { wedding, unassigned } = serializeGuestsForSave(guests.value);
+      await Promise.all([
+        set(tenantRef('wedding_guests'), wedding),
+        set(tenantRef('unassigned_guests'), unassigned),
+        set(tenantRef('meta_label_columns'), {
+          keys: ['group'],
+          names: ['標籤 (可多選)'],
+          categories: { group: categories.value },
+        }),
+      ]);
+      dirty.value = false;
+      showToast(toastMessage, 2500);
+      await load(true);
+    } catch (e) {
+      throw new Error(e?.message || '儲存失敗');
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  function getMaxSeats(tableNum) {
+    const settings = tableSettings.value;
+    const n = parseInt(tableNum, 10);
+    if (Number.isNaN(n)) return 12;
+    const s = settings[n] || settings[String(n)];
+    const configured = parseInt(s?.max_seats, 10);
+    return !Number.isNaN(configured) && configured >= 1 ? Math.min(configured, 99) : 12;
   }
 
   return {
     guests,
     categories,
+    tableSettings,
     dirty,
     loading,
+    saving,
+    loadError,
+    toast,
     load,
     save,
     addGuest,
     removeGuest,
+    reorderGuests,
+    updateGuestTable,
+    updateGuestSeat,
+    addCategory,
+    removeCategory,
+    emptyAllGuests,
+    exportCSV,
+    parseCSVFile,
+    previewCSVImport,
+    applyCSVImport,
     markDirty,
     startSync,
     stopSync,
+    getMaxSeats,
+    showToast,
   };
 }
