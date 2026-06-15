@@ -1,8 +1,4 @@
-const firebaseConfig = {
-    databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
-};
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
+// Firebase 見 ../js/firebase_config.js
 
 let allGuests = [];
 let unassignedPool = [];
@@ -42,7 +38,7 @@ function loadTableSettings(raw) {
     const normalized = normalizeTableSettings(raw);
     if (Array.isArray(raw) && Object.keys(normalized).length && !tableSettingsMigrated) {
         tableSettingsMigrated = true;
-        database.ref('table_settings').set(normalized).catch(err => {
+        tenantRef('table_settings').set(normalized).catch(err => {
             console.warn('table_settings 轉換 object 失敗:', err);
             tableSettingsMigrated = false;
         });
@@ -51,7 +47,7 @@ function loadTableSettings(raw) {
 }
 
 function persistTableSettings() {
-    return database.ref('table_settings').set(tableSettings);
+    return tenantRef('table_settings').set(tableSettings);
 }
 
 function ensureDefaultTablesIfEmpty() {
@@ -325,7 +321,7 @@ function closeCustomCategoryDialog(isConfirm) {
 }
 
 function persistMetaLabelColumns() {
-    return database.ref('meta_label_columns').update({
+    return tenantRef('meta_label_columns').update({
         keys: [PRIMARY_TAG_KEY],
         names: ['標籤 (可多選)'],
         categories: categoriesByColumn
@@ -721,7 +717,7 @@ function syncFloorLayoutIfNeeded(existingLayout) {
     }
     if (computedJson === lastPersistedFloorLayoutJson) return Promise.resolve();
 
-    return database.ref('floor_layout').set(computed).then(() => {
+    return tenantRef('floor_layout').set(computed).then(() => {
         lastPersistedFloorLayoutJson = computedJson;
     }).catch(err => {
         console.warn('floor_layout 同步失敗（簽到頁排位可能未更新）:', err);
@@ -735,7 +731,7 @@ function scheduleFloorLayoutSync(existingLayout = null) {
 function forceFloorLayoutSync() {
     const layout = buildSignInFloorLayout(tableSettings);
     lastPersistedFloorLayoutJson = JSON.stringify(layout);
-    return database.ref('floor_layout').set(layout);
+    return tenantRef('floor_layout').set(layout);
 }
 
 function getTableVisualBleed(maxSeats) {
@@ -869,7 +865,7 @@ function snapAllTablesToGrid() {
         }
     });
     if (!changed) return Promise.resolve(false);
-    return database.ref().update(updates).then(() => true);
+    return tenantRef().update(updates).then(() => true);
 }
 
 function centerAllTablesOnCanvas() {
@@ -887,7 +883,7 @@ function centerAllTablesOnCanvas() {
         updates[`table_settings/${num}/x`] = tableSettings[num].x;
         updates[`table_settings/${num}/y`] = tableSettings[num].y;
     });
-    return database.ref().update(updates).then(() => true);
+    return tenantRef().update(updates).then(() => true);
 }
 
 function fitViewToTables() {
@@ -1722,7 +1718,7 @@ function persistGuestState(affectedTableNums, poolDirty = false) {
     });
 
     suppressGuestRemoteRenderCount = poolDirty ? 2 : 1;
-    return database.ref().update(updates).then(() => {
+    return tenantRef().update(updates).then(() => {
         lastPersistedGuestRevision = localGuestRevision;
     }).catch(err => {
         suppressGuestRemoteRenderCount = 0;
@@ -2204,56 +2200,60 @@ function markSeatingPartialReady(key) {
     maybeBootstrapFromPartialSync();
 }
 
-setGlobalStatsMessage('連線中...');
+function startSeatingRealtimeSync() {
+    setGlobalStatsMessage('連線中...');
 
-database.ref('wedding_guests').on('value', (snapshot) => {
-    if (shouldApplyRemoteGuestState()) {
-        allGuests = snapshot.val() || [];
-    }
-    markSeatingPartialReady('guests');
-    if (suppressGuestRemoteRenderCount > 0) {
-        suppressGuestRemoteRenderCount--;
-        return;
-    }
-    if (!shouldApplyRemoteGuestState()) return;
-    runRender();
-}, err => {
-    console.error('wedding_guests 讀取失敗:', err);
-    setGlobalStatsMessage('賓客資料讀取失敗');
-});
+    tenantRef('wedding_guests').on('value', (snapshot) => {
+        if (shouldApplyRemoteGuestState()) {
+            allGuests = snapshot.val() || [];
+        }
+        markSeatingPartialReady('guests');
+        if (suppressGuestRemoteRenderCount > 0) {
+            suppressGuestRemoteRenderCount--;
+            return;
+        }
+        if (!shouldApplyRemoteGuestState()) return;
+        runRender();
+    }, err => {
+        console.error('wedding_guests 讀取失敗:', err);
+        setGlobalStatsMessage('賓客資料讀取失敗');
+    });
 
-database.ref('unassigned_guests').on('value', (snapshot) => {
-    if (shouldApplyRemoteGuestState()) {
-        unassignedPool = normalizeUnassignedPool(snapshot.val());
-    }
-    markSeatingPartialReady('pool');
-    if (suppressGuestRemoteRenderCount > 0) {
-        suppressGuestRemoteRenderCount--;
-        return;
-    }
-    if (!shouldApplyRemoteGuestState()) return;
-    runRender();
-}, err => console.error('unassigned_guests 讀取失敗:', err));
+    tenantRef('unassigned_guests').on('value', (snapshot) => {
+        if (shouldApplyRemoteGuestState()) {
+            unassignedPool = normalizeUnassignedPool(snapshot.val());
+        }
+        markSeatingPartialReady('pool');
+        if (suppressGuestRemoteRenderCount > 0) {
+            suppressGuestRemoteRenderCount--;
+            return;
+        }
+        if (!shouldApplyRemoteGuestState()) return;
+        runRender();
+    }, err => console.error('unassigned_guests 讀取失敗:', err));
 
-database.ref('meta_label_columns').on('value', (snapshot) => {
-    applyMetaLabelColumns(snapshot.val());
-    markSeatingPartialReady('meta');
-}, err => console.error('meta_label_columns 讀取失敗:', err));
+    tenantRef('meta_label_columns').on('value', (snapshot) => {
+        applyMetaLabelColumns(snapshot.val());
+        markSeatingPartialReady('meta');
+    }, err => console.error('meta_label_columns 讀取失敗:', err));
 
-database.ref('table_settings').on('value', (snapshot) => {
-    const root = {
-        wedding_guests: allGuests,
-        unassigned_guests: unassignedPool,
-        table_settings: snapshot.val(),
-        meta_label_columns: null,
-        floor_layout: null
-    };
-    handleSeatingDataRoot(root);
-    markSeatingPartialReady('tables');
-}, err => {
-    console.error('table_settings 讀取失敗:', err);
-    setGlobalStatsMessage('枱位資料讀取失敗');
-});
+    tenantRef('table_settings').on('value', (snapshot) => {
+        const root = {
+            wedding_guests: allGuests,
+            unassigned_guests: unassignedPool,
+            table_settings: snapshot.val(),
+            meta_label_columns: null,
+            floor_layout: null
+        };
+        handleSeatingDataRoot(root);
+        markSeatingPartialReady('tables');
+    }, err => {
+        console.error('table_settings 讀取失敗:', err);
+        setGlobalStatsMessage('枱位資料讀取失敗');
+    });
+}
+
+whenTenantReady.then(startSeatingRealtimeSync).catch(() => {});
 
 window.addEventListener('resize', () => {
     if (!isMobileViewport()) return;
@@ -2430,7 +2430,7 @@ function finishTableDrag() {
             const tableNum = draggedTableElement.getAttribute('data-table');
             tableSettings[tableNum].x = bx;
             tableSettings[tableNum].y = by;
-            database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by })
+            tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
                 .then(() => forceFloorLayoutSync())
                 .catch(err => console.warn('枱位同步失敗:', err));
         } else {
@@ -2497,7 +2497,7 @@ function saveGuestChangesAction() {
             unassignedPool[poolIndex].group = newGroup;
             unassignedPool[poolIndex].side = newSide;
             Promise.all([
-                database.ref('unassigned_guests').set(unassignedPool),
+                tenantRef('unassigned_guests').set(unassignedPool),
                 persistMetaLabelColumns()
             ]).then(() => closeGuestModal());
         }
@@ -2512,7 +2512,7 @@ function saveGuestChangesAction() {
         allGuests[tableIdx][foundIdx].side = newSide;
 
         Promise.all([
-            database.ref(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]),
+            tenantRef(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]),
             persistMetaLabelColumns()
         ]).then(() => closeGuestModal());
     }
@@ -2585,7 +2585,7 @@ function createNewTableAction() {
         viewport.getBoundingClientRect().left + viewport.getBoundingClientRect().width / 2,
         viewport.getBoundingClientRect().top + viewport.getBoundingClientRect().height / 2
     );
-    database.ref(`table_settings/${cleanNum}`).set({
+    tenantRef(`table_settings/${cleanNum}`).set({
         max_seats: cleanMax,
         x: snapToGrid(center.x - PLATE_SIZE / 2),
         y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
@@ -2651,7 +2651,7 @@ function saveTableSettingsAction() {
 
     if (newNum === oldNum) {
         tableSettings[oldNum] = { ...tableSettings[oldNum], max_seats: newMax, label: newLabel };
-        database.ref(`table_settings/${oldNum}`).update({
+        tenantRef(`table_settings/${oldNum}`).update({
             max_seats: newMax,
             label: newLabel
         }).then(() => {
@@ -2681,7 +2681,7 @@ function saveTableSettingsAction() {
     updates[`wedding_guests/${newIdx}`] = guests;
     updates[`wedding_guests/${oldIdx}`] = null;
 
-    database.ref().update(updates).then(() => persistTableSettings())
+    tenantRef().update(updates).then(() => persistTableSettings())
         .then(() => forceFloorLayoutSync())
         .then(() => {
             runRender();
@@ -2711,8 +2711,8 @@ function deleteTableAction() {
 
     Promise.all([
         persistTableSettings(),
-        database.ref(`wedding_guests/${idx}`).set(null),
-        database.ref('unassigned_guests').set(unassignedPool)
+        tenantRef(`wedding_guests/${idx}`).set(null),
+        tenantRef('unassigned_guests').set(unassignedPool)
     ]).then(() => forceFloorLayoutSync())
         .then(() => {
             runRender();

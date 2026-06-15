@@ -55,11 +55,11 @@ function applyMetaLabelColumns(meta) {
 /** 只讀 admin 需要嘅節點（唔讀成個 root），初次載入會快過下載全部 guest_status 等資料 */
 function fetchAdminFirebaseBundle() {
     return Promise.all([
-        database.ref('meta_label_columns').once('value'),
-        database.ref('wedding_guests').once('value'),
-        database.ref('unassigned_guests').once('value'),
-        database.ref('table_settings').once('value'),
-        database.ref('guest_status').once('value')
+        tenantRef('meta_label_columns').once('value'),
+        tenantRef('wedding_guests').once('value'),
+        tenantRef('unassigned_guests').once('value'),
+        tenantRef('table_settings').once('value'),
+        tenantRef('guest_status').once('value')
     ]).then(([metaSnap, guestsSnap, unassignedSnap, settingsSnap, statusSnap]) => ({
         meta_label_columns: metaSnap.val(),
         wedding_guests: guestsSnap.val() || {},
@@ -181,7 +181,7 @@ function saveAllToFirebase(options = {}) {
     let newWeddingGuests = {};
     let newUnassignedGuests = [];
 
-    database.ref('meta_label_columns').set({
+    tenantRef('meta_label_columns').set({
         keys: labelColumnsKeys,
         names: labelColumnsNames,
         categories: categoriesByColumn
@@ -226,8 +226,8 @@ function saveAllToFirebase(options = {}) {
     });
 
     return Promise.all([
-        database.ref('wedding_guests').set(newWeddingGuests),
-        database.ref('unassigned_guests').set(newUnassignedGuests)
+        tenantRef('wedding_guests').set(newWeddingGuests),
+        tenantRef('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
         markAdminClean();
         const useToast = successMessage && successAutoDismissMs && typeof showAdminToast === 'function';
@@ -613,7 +613,7 @@ function scheduleAdminRealtimeRefresh() {
 
 function startAdminRealtimeSync() {
     ['wedding_guests', 'unassigned_guests', 'guest_status', 'meta_label_columns'].forEach((path) => {
-        database.ref(path).on('value', scheduleAdminRealtimeRefresh);
+        tenantRef(path).on('value', scheduleAdminRealtimeRefresh);
     });
 }
 

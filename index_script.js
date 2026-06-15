@@ -1,10 +1,3 @@
-// Firebase 設定
-const firebaseConfig = {
-    databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
-};
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
-
 // 同 seating 畫布一致 — 直接用 table_settings 嘅 x/y
 const TABLE_DIM = 420;
 const FLOOR_PLAN_PADDING = 20;
@@ -257,9 +250,8 @@ function renderFloorPlan(layout) {
 
 renderFloorPlan({ items: [], bounds: null });
 
-// Firebase 即時監聽 — 排位跟 table_settings x/y 動態更新
-database.ref().on('value', (snapshot) => {
-    const root = snapshot.val() || {};
+// Firebase 即時監聽 — 只聽當前 tenant 節點
+function applyTenantCheckinData(root) {
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
@@ -271,13 +263,28 @@ database.ref().on('value', (snapshot) => {
     }
 
     updateFloorPlanSummary();
-    
-    const currentTable = document.getElementById('guest-modal').getAttribute('data-current-table');
+
+    const modal = document.getElementById('guest-modal');
+    const currentTable = modal ? modal.getAttribute('data-current-table') : '';
     if (currentTable) renderModalContent(currentTable);
 
-    const keyword = document.getElementById('search-input').value;
-    if (keyword.trim() !== '') handleSearch();
-});
+    const searchInput = document.getElementById('search-input');
+    if (searchInput && searchInput.value.trim() !== '') handleSearch();
+}
+
+function startCheckinRealtimeSync() {
+    const paths = ['wedding_guests', 'guest_status', 'table_settings'];
+    let cache = { wedding_guests: {}, guest_status: {}, table_settings: {} };
+
+    paths.forEach((path) => {
+        tenantRef(path).on('value', (snapshot) => {
+            cache[path] = snapshot.val() || (path === 'guest_status' || path === 'table_settings' ? {} : {});
+            applyTenantCheckinData(cache);
+        }, (err) => console.error(`checkin ${path} 讀取失敗:`, err));
+    });
+}
+
+whenTenantReady.then(startCheckinRealtimeSync).catch(() => {});
 
 function updateFloorPlanSummary() {
     Object.keys(dbData).forEach(table => {
@@ -438,7 +445,7 @@ function addNewGuestInline(tableNum) {
     const group = prompt("屬於邊個分類？多個請用 | 分隔 (例如: 家人|LK)", "現場加座");
     const nextSeat = getNextSeatForInlineGuest(tableNum);
 
-    database.ref(`wedding_guests/${tableNum}/${nextIndex}`).set({
+    tenantRef(`wedding_guests/${tableNum}/${nextIndex}`).set({
         name: newName.trim(),
         side: side ? side.trim() : "男方",
         group: normalizeGuestTags(group ? group.trim() : "現場加座"),
@@ -453,7 +460,7 @@ function cycleArrivedStatus(table, name, currentStatus) {
 
     const statusFlow = { '未到': '已到', '已到': '取消', '取消': '未到' };
     const nextStatus = statusFlow[sanitizedStatus] || '未到';
-    database.ref(`guest_status/${table}_${name}/arrived`).set(nextStatus);
+    tenantRef(`guest_status/${table}_${name}/arrived`).set(nextStatus);
 }
 
 function getArrivedLabel(status) {
@@ -536,7 +543,7 @@ function handleSearch() {
 function cycleGift(table, name, currentStatus) {
     const stages = ['未交', '人情', '送金器', '電子人情'];
     let nextIndex = (stages.indexOf(currentStatus) + 1) % stages.length;
-    database.ref(`guest_status/${table}_${name}/gift`).set(stages[nextIndex]);
+    tenantRef(`guest_status/${table}_${name}/gift`).set(stages[nextIndex]);
 }
 
 function getGiftLabel(status) {

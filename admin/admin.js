@@ -1,9 +1,4 @@
-// Firebase 設定
-const firebaseConfig = {
-    databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
-};
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
+// Firebase 見 ../js/firebase_config.js
 
 let tbody = null;
 let scrollContainer = null;
@@ -32,8 +27,8 @@ function loadFirebaseData() {
     tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
     
     Promise.all([
-        database.ref('wedding_guests').once('value'),
-        database.ref('unassigned_guests').once('value')
+        tenantRef('wedding_guests').once('value'),
+        tenantRef('unassigned_guests').once('value')
     ]).then(([snapshot1, snapshot2]) => {
         const weddingGuests = snapshot1.val() || {};
         const unassignedGuests = snapshot2.val() || [];
@@ -288,8 +283,8 @@ function saveAllToFirebase() {
     });
 
     Promise.all([
-        database.ref('wedding_guests').set(newWeddingGuests),
-        database.ref('unassigned_guests').set(newUnassignedGuests)
+        tenantRef('wedding_guests').set(newWeddingGuests),
+        tenantRef('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
         alert("✨ 【數據同步成功】！\n數據已完美同步至排位畫布。");
         loadFirebaseData();

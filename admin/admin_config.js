@@ -1,11 +1,6 @@
 // ==========================================
-// 📌 1. Firebase 初始化與全局狀態維護
+// 📌 1. 全局狀態維護（Firebase 見 ../js/firebase_config.js）
 // ==========================================
-const firebaseConfig = {
-    databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
-};
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
 
 // 全局核心數據狀態
 let localGuestsList = [];

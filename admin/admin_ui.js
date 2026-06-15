@@ -1015,8 +1015,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     reinitTableSortable();
     setupAdminLeaveGuard();
-    startAdminRealtimeSync();
-    loadFirebaseData(true).finally(() => enableAdminRealtimeSync());
+
+    whenTenantReady.then(() => {
+        startAdminRealtimeSync();
+        return loadFirebaseData(true);
+    }).finally(() => {
+        enableAdminRealtimeSync();
+    }).catch(() => {});
 });
 
 window.addEventListener('pageshow', (event) => {
