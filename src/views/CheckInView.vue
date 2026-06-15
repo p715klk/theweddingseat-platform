@@ -85,7 +85,13 @@
     </div>
 
     <div class="floor-plan-section mx-auto px-2 sm:px-4 pb-4">
-      <div class="floor-plan-wrap">
+      <p
+        v-if="!floorLayout.items.length"
+        class="text-center text-sm text-gray-500 py-8 px-4"
+      >
+        尚未有枱位顯示。請到後台為賓客設定枱號，或使用畫布排位儲存平面圖。
+      </p>
+      <div v-else class="floor-plan-wrap">
         <main
           id="floor-plan"
           aria-label="婚宴枱位平面圖"

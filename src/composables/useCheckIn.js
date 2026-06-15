@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { onValue, set } from 'firebase/database';
 import { useTenant } from '@/composables/useTenant';
 import {
-  buildFloorPlanFromTableSettings,
+  buildCheckInFloorPlan,
   parseArrivedStatus,
   guestStatusKey,
   normalizeTags,
@@ -21,6 +21,11 @@ export function useCheckIn() {
   const selectedTable = ref(null);
   const searchKeyword = ref('');
   const unsubscribers = [];
+  let tableSettingsCache = {};
+
+  function refreshFloorLayout() {
+    floorLayout.value = buildCheckInFloorPlan(weddingGuests.value, tableSettingsCache);
+  }
 
   function startSync() {
     stopSync();
@@ -28,10 +33,14 @@ export function useCheckIn() {
       const off = onValue(tenantRef(path), (snap) => {
         const emptyObj = path !== 'wedding_guests';
         const val = snap.val() ?? (emptyObj ? {} : {});
-        if (path === 'wedding_guests') weddingGuests.value = val || {};
+        if (path === 'wedding_guests') {
+          weddingGuests.value = val || {};
+          refreshFloorLayout();
+        }
         if (path === 'guest_status') guestStatus.value = val || {};
         if (path === 'table_settings') {
-          floorLayout.value = buildFloorPlanFromTableSettings(val || {});
+          tableSettingsCache = val || {};
+          refreshFloorLayout();
         }
       });
       unsubscribers.push(off);

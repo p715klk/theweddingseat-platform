@@ -1,5 +1,6 @@
 import { ref as dbRef, get, set, update } from 'firebase/database';
 import { database } from '@/firebase';
+import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -173,14 +174,16 @@ export async function createTenant({
   };
 
   const tenantBase = `tenants/${tenantId}`;
+  const defaultTableSettings = buildDefaultTableSettings(10);
+  const defaultFloorLayout = buildFloorPlanFromTableSettings(defaultTableSettings);
   const updates = {
     [`slugs/${normalized}`]: tenantId,
     [`${tenantBase}/meta`]: meta,
     [`${tenantBase}/wedding_guests`]: {},
     [`${tenantBase}/unassigned_guests`]: [],
     [`${tenantBase}/guest_status`]: {},
-    [`${tenantBase}/table_settings`]: [null],
-    [`${tenantBase}/floor_layout`]: { items: [], bounds: null, mode: 'coords' },
+    [`${tenantBase}/table_settings`]: defaultTableSettings,
+    [`${tenantBase}/floor_layout`]: defaultFloorLayout,
     [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
   };
 
