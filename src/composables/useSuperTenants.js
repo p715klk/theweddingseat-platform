@@ -26,19 +26,55 @@ export function isValidSlug(slug) {
 }
 
 export async function listTenants() {
-  const snap = await get(dbRef(database, 'tenants'));
-  const raw = snap.val() || {};
-  return Object.entries(raw)
-    .map(([tenantId, data]) => ({
-      tenantId,
-      meta: data?.meta || {},
-      slug: data?.meta?.slug || tenantId,
-    }))
-    .sort((a, b) => {
-      const da = a.meta.wedding_date || '';
-      const db = b.meta.wedding_date || '';
-      return db.localeCompare(da);
-    });
+  const slugsSnap = await get(dbRef(database, 'slugs'));
+  const slugs = slugsSnap.val() || {};
+  const entries = await Promise.all(
+    Object.entries(slugs).map(async ([slug, tenantId]) => {
+      const id = String(tenantId);
+      const metaSnap = await get(dbRef(database, `tenants/${id}/meta`));
+      const membersSnap = await get(dbRef(database, `tenants/${id}/members`));
+      return {
+        tenantId: id,
+        slug,
+        meta: metaSnap.val() || {},
+        members: membersSnap.val() || {},
+      };
+    }),
+  );
+  return entries.sort((a, b) => {
+    const da = a.meta.wedding_date || '';
+    const db = b.meta.wedding_date || '';
+    return db.localeCompare(da);
+  });
+}
+
+export async function getTenantBySlug(slug) {
+  const slugSnap = await get(dbRef(database, `slugs/${slug}`));
+  if (!slugSnap.exists()) return null;
+  const tenantId = String(slugSnap.val());
+  const [metaSnap, membersSnap] = await Promise.all([
+    get(dbRef(database, `tenants/${tenantId}/meta`)),
+    get(dbRef(database, `tenants/${tenantId}/members`)),
+  ]);
+  if (!metaSnap.exists()) return null;
+  return {
+    tenantId,
+    slug,
+    meta: metaSnap.val() || {},
+    members: membersSnap.val() || {},
+  };
+}
+
+export async function updateTenantMeta(tenantId, patch) {
+  const ref = dbRef(database, `tenants/${tenantId}/meta`);
+  const current = (await get(ref)).val() || {};
+  await set(ref, { ...current, ...patch, slug: current.slug || tenantId });
+}
+
+export async function addTenantMember(tenantId, uid) {
+  const trimmed = uid?.trim();
+  if (!trimmed) throw new Error('請輸入 UID');
+  await set(dbRef(database, `tenants/${tenantId}/members/${trimmed}`), true);
 }
 
 export async function isSlugTaken(slug) {
