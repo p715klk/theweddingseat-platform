@@ -1,0 +1,165 @@
+import { ref } from 'vue';
+import { onValue, set } from 'firebase/database';
+import { useTenant } from '@/composables/useTenant';
+import {
+  buildFloorPlanFromTableSettings,
+  parseArrivedStatus,
+  guestStatusKey,
+  normalizeTags,
+  FLOOR_CANVAS_SCALE,
+  FLOOR_TABLE_PX,
+} from '@/lib/guestUtils';
+
+export const TABLE_RING_BASE =
+  'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
+
+export function useCheckIn() {
+  const { tenantRef } = useTenant();
+  const weddingGuests = ref({});
+  const guestStatus = ref({});
+  const floorLayout = ref({ items: [], bounds: null });
+  const selectedTable = ref(null);
+  const searchKeyword = ref('');
+  const unsubscribers = [];
+
+  function startSync() {
+    stopSync();
+    ['wedding_guests', 'guest_status', 'table_settings'].forEach((path) => {
+      const off = onValue(tenantRef(path), (snap) => {
+        const emptyObj = path !== 'wedding_guests';
+        const val = snap.val() ?? (emptyObj ? {} : {});
+        if (path === 'wedding_guests') weddingGuests.value = val || {};
+        if (path === 'guest_status') guestStatus.value = val || {};
+        if (path === 'table_settings') {
+          floorLayout.value = buildFloorPlanFromTableSettings(val || {});
+        }
+      });
+      unsubscribers.push(off);
+    });
+  }
+
+  function stopSync() {
+    unsubscribers.forEach((off) => off());
+    unsubscribers.length = 0;
+  }
+
+  function tablePercent(tableNum) {
+    const guests = weddingGuests.value[tableNum] || [];
+    let arrived = 0;
+    let active = 0;
+    guests.forEach((g) => {
+      const st = parseArrivedStatus(guestStatus.value[guestStatusKey(tableNum, g.name)]?.arrived);
+      if (st !== '取消') {
+        active += 1;
+        if (st === '已到') arrived += 1;
+      }
+    });
+    return { percent: active ? Math.round((arrived / active) * 100) : 0, active };
+  }
+
+  function circleClass(percent, active) {
+    if (percent === 100 && active > 0) {
+      return `${TABLE_RING_BASE} border-green-500 bg-green-50 text-green-600`;
+    }
+    if (percent > 0) {
+      return `${TABLE_RING_BASE} border-orange-400 bg-orange-50 text-orange-500`;
+    }
+    return `${TABLE_RING_BASE} border-gray-300 bg-white text-gray-400`;
+  }
+
+  function cardBorderClass(percent, active) {
+    if (percent === 100 && active > 0) return 'border-green-500';
+    if (percent > 0) return 'border-orange-300';
+    return 'border-gray-200';
+  }
+
+  async function cycleArrived(table, name, current) {
+    const flow = { 未到: '已到', 已到: '取消', 取消: '未到' };
+    const next = flow[current] || '未到';
+    await set(tenantRef(`guest_status/${table}_${name}/arrived`), next);
+  }
+
+  async function cycleGift(table, name, current) {
+    const stages = ['未交', '人情', '送金器', '電子人情'];
+    const next = stages[(stages.indexOf(current) + 1) % stages.length];
+    await set(tenantRef(`guest_status/${table}_${name}/gift`), next);
+  }
+
+  function floorStyle(bounds) {
+    if (!bounds) return {};
+    const scale = FLOOR_CANVAS_SCALE;
+    return {
+      width: `${Math.ceil(bounds.width * scale)}px`,
+      height: `${Math.ceil(bounds.height * scale + FLOOR_TABLE_PX)}px`,
+      '--floor-table-px': `${FLOOR_TABLE_PX}px`,
+    };
+  }
+
+  function tableStyle(item, bounds) {
+    if (!bounds) return {};
+    const scale = FLOOR_CANVAS_SCALE;
+    return {
+      left: `${(item.x - bounds.minX) * scale}px`,
+      top: `${(item.y - bounds.minY) * scale}px`,
+    };
+  }
+
+  function sortedGuests(tableNum) {
+    const guests = [...(weddingGuests.value[tableNum] || [])];
+    return guests.sort((a, b) => {
+      const sa = a.sort !== undefined ? parseInt(a.sort, 10) : 999;
+      const sb = b.sort !== undefined ? parseInt(b.sort, 10) : 999;
+      return sa - sb;
+    });
+  }
+
+  function searchResults() {
+    const kw = searchKeyword.value.trim().toLowerCase();
+    if (!kw) return [];
+    const results = [];
+    Object.keys(weddingGuests.value).forEach((tableNum) => {
+      (weddingGuests.value[tableNum] || []).forEach((guest) => {
+        const fields = [
+          guest.name,
+          guest.side,
+          ...normalizeTags(guest.group),
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (fields.includes(kw) || kw.split(/\s+/).every((t) => fields.includes(t))) {
+          const key = guestStatusKey(tableNum, guest.name);
+          const st = parseArrivedStatus(guestStatus.value[key]?.arrived);
+          results.push({
+            tableNum,
+            guest,
+            arrived: st,
+            gift: guestStatus.value[key]?.gift || '未交',
+          });
+        }
+      });
+    });
+    return results;
+  }
+
+  return {
+    weddingGuests,
+    guestStatus,
+    floorLayout,
+    selectedTable,
+    searchKeyword,
+    startSync,
+    stopSync,
+    tablePercent,
+    circleClass,
+    cardBorderClass,
+    cycleArrived,
+    cycleGift,
+    floorStyle,
+    tableStyle,
+    sortedGuests,
+    searchResults,
+    parseArrivedStatus,
+    guestStatusKey,
+    normalizeTags,
+  };
+}

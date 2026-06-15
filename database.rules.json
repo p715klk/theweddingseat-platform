@@ -1,0 +1,44 @@
+{
+  "rules": {
+    "slugs": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "tenants": {
+      "$tenantId": {
+        "meta": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "wedding_guests": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "unassigned_guests": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "table_settings": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "floor_layout": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "meta_label_columns": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        "guest_status": {
+          ".read": true,
+          ".write": true
+        },
+        "members": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}

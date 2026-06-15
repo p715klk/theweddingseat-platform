@@ -1016,7 +1016,7 @@ document.addEventListener('DOMContentLoaded', () => {
     reinitTableSortable();
     setupAdminLeaveGuard();
 
-    whenTenantReady.then(() => {
+    whenAdminSessionReady().then(() => {
         startAdminRealtimeSync();
         return loadFirebaseData(true);
     }).finally(() => {
