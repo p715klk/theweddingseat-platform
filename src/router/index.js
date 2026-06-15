@@ -10,7 +10,7 @@ const SuperCreateTenantView = () => import('@/views/super/SuperCreateTenantView.
 const SuperTenantDetailView = () => import('@/views/super/SuperTenantDetailView.vue');
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/p/demo' },
     {
