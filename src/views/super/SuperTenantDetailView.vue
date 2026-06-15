@@ -18,7 +18,21 @@
       </header>
 
       <section class="section">
-        <h3>連結</h3>
+        <h3>連結（URL Slug）</h3>
+        <p class="hint-block">
+          改 slug 會改晒點名／後台網址。舊 link 會失效；資料仍保留喺 <code>tenants/{{ tenant.tenantId }}</code>。
+        </p>
+        <form class="slug-form" @submit.prevent="saveSlug">
+          <div class="slug-row">
+            <span class="slug-prefix">{{ origin }}/p/</span>
+            <input v-model="editForm.slug" type="text" required placeholder="chen-wong-20260915" />
+          </div>
+          <p class="field-hint">預覽：<code>{{ slugPreview || '…' }}</code></p>
+          <p v-if="slugMsg" :class="slugMsgOk ? 'ok' : 'error'">{{ slugMsg }}</p>
+          <button type="submit" class="btn-save" :disabled="savingSlug || slugPreview === slug">
+            {{ savingSlug ? '更新中…' : '🔗 更新連結' }}
+          </button>
+        </form>
         <ul class="links">
           <li>
             點名頁：
@@ -34,21 +48,54 @@
       </section>
 
       <section class="section">
-        <h3>Project 資料</h3>
-        <dl class="dl">
-          <dt>新人</dt>
-          <dd>{{ tenant.meta.couple_names || '—' }}</dd>
-          <dt>酒店</dt>
-          <dd>{{ tenant.meta.venue_name || '—' }}</dd>
-          <dt>宴會廳</dt>
-          <dd>{{ tenant.meta.venue_hall || '—' }}</dd>
-          <dt>婚期</dt>
-          <dd>{{ tenant.meta.wedding_date || '—' }}</dd>
-          <dt>Plan</dt>
-          <dd>{{ tenant.meta.plan || 'standard' }}</dd>
-          <dt>建立時間</dt>
-          <dd>{{ createdLabel }}</dd>
-        </dl>
+        <h3>編輯 Project 資料</h3>
+        <p class="hint-block">你係 platform admin，可以改晒以下資料（包括 expired 狀態嘅 project）。</p>
+        <form class="edit-form" @submit.prevent="saveMeta">
+          <div class="field">
+            <label>新人姓名</label>
+            <input v-model="editForm.coupleNames" type="text" required />
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label>酒店</label>
+              <input v-model="editForm.venueName" type="text" required />
+            </div>
+            <div class="field">
+              <label>宴會廳</label>
+              <input v-model="editForm.venueHall" type="text" />
+            </div>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label>婚期</label>
+              <input v-model="editForm.weddingDate" type="date" required />
+            </div>
+            <div class="field">
+              <label>主題色</label>
+              <input v-model="editForm.themeColor" type="color" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Plan</label>
+            <select v-model="editForm.plan">
+              <option value="standard">standard</option>
+              <option value="pro">pro</option>
+              <option value="concierge">concierge</option>
+            </select>
+          </div>
+          <p v-if="saveMetaMsg" :class="saveMetaOk ? 'ok' : 'error'">{{ saveMetaMsg }}</p>
+          <button type="submit" class="btn-save" :disabled="savingMeta">
+            {{ savingMeta ? '儲存中…' : '💾 儲存資料' }}
+          </button>
+        </form>
+        <p class="meta-readonly">
+          建立：{{ formatAuditTime(tenant.meta.created_at) }}
+          <span v-if="tenant.meta.created_by_email"> · {{ tenant.meta.created_by_email }}</span>
+        </p>
+        <p class="meta-readonly">
+          最後修改：{{ formatAuditTime(tenant.meta.updated_at) }}
+          <span v-if="tenant.meta.updated_by_email"> · {{ tenant.meta.updated_by_email }}</span>
+        </p>
       </section>
 
       <section class="section">
@@ -70,6 +117,10 @@
 
       <section class="section">
         <h3>狀態</h3>
+        <p class="hint-block">
+          <strong>expired</strong> 只會停用<strong>公開點名</strong>（改唔到「已到／未到」）。
+          你同客戶後台仍然可以改賓客名單。
+        </p>
         <div class="status-row">
           <button
             type="button"
@@ -94,15 +145,22 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useAuth } from '@/composables/useAuth';
 import {
   getTenantBySlug,
   addTenantMember,
   setTenantStatus,
+  updateTenantMeta,
+  renameTenantSlug,
+  normalizeSlug,
+  formatAuditTime,
 } from '@/composables/useSuperTenants';
 
 const route = useRoute();
+const router = useRouter();
+const { user } = useAuth();
 const slug = computed(() => String(route.params.slug || ''));
 const tenant = ref(null);
 const loading = ref(true);
@@ -111,17 +169,47 @@ const newMemberUid = ref('');
 const savingMember = ref(false);
 const memberMsg = ref('');
 const memberMsgOk = ref(false);
+const savingMeta = ref(false);
+const saveMetaMsg = ref('');
+const saveMetaOk = ref(false);
+const savingSlug = ref(false);
+const slugMsg = ref('');
+const slugMsgOk = ref(false);
 
-const checkInUrl = computed(() => `${window.location.origin}/p/${slug.value}`);
-const adminUrl = computed(() => `${window.location.origin}/p/${slug.value}/admin`);
+const origin = window.location.origin;
+
+const editForm = reactive({
+  slug: '',
+  coupleNames: '',
+  venueName: '',
+  venueHall: '',
+  weddingDate: '',
+  themeColor: '#b91c1c',
+  plan: 'standard',
+});
+
+const slugPreview = computed(() => normalizeSlug(editForm.slug));
+
+function editorInfo() {
+  if (!user.value) return null;
+  return { uid: user.value.uid, email: user.value.email || '' };
+}
+
+function syncEditForm() {
+  const m = tenant.value?.meta || {};
+  editForm.slug = tenant.value?.slug || m.slug || '';
+  editForm.coupleNames = m.couple_names || '';
+  editForm.venueName = m.venue_name || '';
+  editForm.venueHall = m.venue_hall || '';
+  editForm.weddingDate = m.wedding_date || '';
+  editForm.themeColor = m.theme_color || '#b91c1c';
+  editForm.plan = m.plan || 'standard';
+}
+
+const checkInUrl = computed(() => `${origin}/p/${slug.value}`);
+const adminUrl = computed(() => `${origin}/p/${slug.value}/admin`);
 
 const memberUids = computed(() => Object.keys(tenant.value?.members || {}));
-
-const createdLabel = computed(() => {
-  const ts = tenant.value?.meta?.created_at;
-  if (!ts) return '—';
-  return new Date(ts).toLocaleString('zh-HK');
-});
 
 async function load() {
   loading.value = true;
@@ -129,6 +217,7 @@ async function load() {
   tenant.value = null;
   try {
     tenant.value = await getTenantBySlug(slug.value);
+    if (tenant.value) syncEditForm();
   } catch (e) {
     error.value = e?.message || '載入失敗';
   } finally {
@@ -153,7 +242,7 @@ async function submitMember() {
   memberMsg.value = '';
   savingMember.value = true;
   try {
-    await addTenantMember(tenant.value.tenantId, newMemberUid.value);
+    await addTenantMember(tenant.value.tenantId, newMemberUid.value, editorInfo());
     newMemberUid.value = '';
     memberMsg.value = '已加入 members';
     memberMsgOk.value = true;
@@ -168,10 +257,62 @@ async function submitMember() {
 
 async function setStatus(status) {
   try {
-    await setTenantStatus(tenant.value.tenantId, status);
+    await setTenantStatus(tenant.value.tenantId, status, editorInfo());
     await load();
   } catch (e) {
     error.value = e?.message || '更新狀態失敗';
+  }
+}
+
+async function saveMeta() {
+  saveMetaMsg.value = '';
+  savingMeta.value = true;
+  try {
+    await updateTenantMeta(
+      tenant.value.tenantId,
+      {
+        couple_names: editForm.coupleNames.trim(),
+        venue_name: editForm.venueName.trim(),
+        venue_hall: editForm.venueHall.trim(),
+        wedding_date: editForm.weddingDate,
+        theme_color: editForm.themeColor,
+        plan: editForm.plan,
+      },
+      editorInfo(),
+    );
+    saveMetaMsg.value = '已儲存';
+    saveMetaOk.value = true;
+    await load();
+  } catch (e) {
+    saveMetaMsg.value = e?.message || '儲存失敗';
+    saveMetaOk.value = false;
+  } finally {
+    savingMeta.value = false;
+  }
+}
+
+async function saveSlug() {
+  slugMsg.value = '';
+  savingSlug.value = true;
+  try {
+    const newSlug = await renameTenantSlug(
+      tenant.value.tenantId,
+      slug.value,
+      editForm.slug,
+      editorInfo(),
+    );
+    slugMsg.value = '連結已更新';
+    slugMsgOk.value = true;
+    if (newSlug !== slug.value) {
+      await router.replace(`/super/tenants/${newSlug}`);
+    } else {
+      await load();
+    }
+  } catch (e) {
+    slugMsg.value = e?.message || '更新失敗';
+    slugMsgOk.value = false;
+  } finally {
+    savingSlug.value = false;
   }
 }
 </script>
@@ -255,19 +396,92 @@ async function setStatus(status) {
   background: #f8fafc;
   cursor: pointer;
 }
-.dl {
+.hint-block {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.edit-form .grid {
   display: grid;
-  grid-template-columns: 6rem 1fr;
-  gap: 0.35rem 0.75rem;
-  margin: 0;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+@media (max-width: 640px) {
+  .edit-form .grid {
+    grid-template-columns: 1fr;
+  }
+}
+.edit-form .field label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+.edit-form input[type='text'],
+.edit-form input[type='date'],
+.edit-form select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.5rem;
   font-size: 0.875rem;
 }
-.dl dt {
-  color: #64748b;
-  font-weight: 600;
+.edit-form input[type='color'] {
+  width: 3rem;
+  height: 2.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
 }
-.dl dd {
-  margin: 0;
+.btn-save {
+  align-self: flex-start;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.btn-save:disabled {
+  opacity: 0.7;
+}
+.meta-readonly {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+.slug-form {
+  margin-bottom: 0.75rem;
+}
+.slug-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+.slug-prefix {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+.slug-row input {
+  flex: 1;
+  min-width: 10rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.875rem;
+}
+.field-hint {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin: 0.25rem 0 0.5rem;
 }
 .uid-list {
   margin: 0 0 0.75rem;

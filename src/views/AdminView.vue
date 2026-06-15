@@ -21,6 +21,12 @@
 
     <!-- 已登入後台 -->
     <template v-else>
+      <div
+        v-if="isExpired"
+        class="mb-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs font-bold"
+      >
+        ⚠️ 此專案已設為 expired — 公開點名已停用，後台仍可編輯賓客。
+      </div>
       <header class="flex flex-wrap justify-between items-center border-b border-gray-300 pb-3 gap-3 mb-3">
         <div>
           <h1 class="text-xl font-bold text-red-700">📋 賓客名單管理後台</h1>
@@ -152,7 +158,7 @@ const route = useRoute();
 const tenantReady = ref(false);
 const adminBooted = ref(false);
 
-const { slug, coupleNames, error: tenantError, initTenant } = useTenant();
+const { slug, coupleNames, error: tenantError, isExpired, initTenant } = useTenant();
 const { user, authReady, logout } = useAuth();
 const {
   guests,
@@ -168,7 +174,7 @@ const {
 } = useAdminGuests();
 
 onMounted(async () => {
-  await initTenant(route);
+  await initTenant(route, { allowExpired: true });
   tenantReady.value = true;
 });
 
