@@ -1,6 +1,8 @@
 export const DEFAULT_MAX_SEATS = 12;
 export const ABSOLUTE_MAX_SEATS = 99;
 export const PRIMARY_TAG_KEY = 'group';
+/** 新 Project 預設枱數（0 = 無枱，由畫布手動新增） */
+export const DEFAULT_INITIAL_TABLE_COUNT = 1;
 
 export function normalizeTags(val) {
   if (!val) return [];
@@ -79,8 +81,9 @@ export function buildFloorPlanFromTableSettings(settings) {
   };
 }
 
-/** 預設 N 枱網格（新 project / 畫布未設定時） */
-export function buildDefaultTableSettings(tableCount = 10) {
+/** 預設 N 枱網格（新 project 建立時） */
+export function buildDefaultTableSettings(tableCount = DEFAULT_INITIAL_TABLE_COUNT) {
+  if (!tableCount || tableCount < 1) return {};
   const arr = [null];
   const cols = 4;
   const gapX = 440;

@@ -143,7 +143,7 @@ export async function getTenantFullData(tenantId) {
     floorLayoutSnap,
     labelColumnsSnap,
   ] = snaps;
-  const defaultTableSettings = buildDefaultTableSettings(10);
+  const defaultTableSettings = buildDefaultTableSettings();
   return {
     wedding_guests: weddingGuestsSnap.val() ?? {},
     unassigned_guests: unassignedSnap.val() ?? [],
@@ -255,7 +255,7 @@ export async function createTenant({
   };
 
   const tenantBase = `tenants/${tenantId}`;
-  const defaultTableSettings = buildDefaultTableSettings(10);
+  const defaultTableSettings = buildDefaultTableSettings();
   const defaultFloorLayout = buildFloorPlanFromTableSettings(defaultTableSettings);
   const updates = {
     [`slugs/${normalized}`]: tenantId,

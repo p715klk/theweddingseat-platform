@@ -77,7 +77,7 @@ let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
 let categoriesByColumn = {
-    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
+    'group': ['家人', '男方親戚', '女方親戚', '中學同學']
 };
 let legacyLabelKeys = null;
 let activeSelectElement = null;

@@ -1,6 +1,28 @@
-// Firebase 見 ../js/firebase_config.js
+import { createCompatTenantRef } from './compatTenantRef.js';
+import { get } from 'firebase/database';
 
-let allGuests = [];
+let tenantRefFn = null;
+function tenantRef(subPath) {
+    if (!tenantRefFn) throw new Error('Seating engine not initialized');
+    return tenantRefFn(subPath == null || subPath === '' ? '' : subPath);
+}
+let tenantSlug = '';
+const cleanupFns = [];
+let firebaseUnsubs = [];
+let engineInitialized = false;
+let rawTenantRef = null;
+let cachedMetaLabelColumns = null;
+
+function trackCleanup(fn) {
+    cleanupFns.push(fn);
+}
+
+function onEvent(target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    trackCleanup(() => target.removeEventListener(type, handler, options));
+}
+
+let allGuests = {};
 let unassignedPool = [];
 let tableSettings = {};
 let activeSettingTableNum = null;
@@ -51,26 +73,8 @@ function persistTableSettings() {
 }
 
 function ensureDefaultTablesIfEmpty() {
-    if (getTableSettingKeys().length > 0) return false;
-
-    let created = false;
-    for (let i = 1; i <= 14; i++) {
-        const row = Math.floor((i - 1) / 4);
-        const col = (i - 1) % 4;
-        const colGap = 440;
-        const rowGap = 460;
-        const gridW = 3 * colGap + TABLE_DIM;
-        const gridH = 3 * rowGap + TABLE_TOTAL_H;
-        const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
-        const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
-        tableSettings[String(i)] = {
-            max_seats: 12,
-            x: snapToGrid(startX + col * colGap),
-            y: snapToGrid(startY + row * rowGap)
-        };
-        created = true;
-    }
-    return created;
+    // 唔再自動建立預設枱；請用畫布「➕ 新增圓枱」
+    return false;
 }
 
 let selectedGuestContext = null;
@@ -426,8 +430,8 @@ let touchPanOrigin = null;
 let touchPanActive = false;
 let touchGestureActive = false;
 
-const viewport = document.getElementById('canvas-viewport');
-const canvas = document.getElementById('main-canvas');
+let viewport = null;
+let canvas = null;
 
 function getTouchDistance(touches) {
     const dx = touches[0].clientX - touches[1].clientX;
@@ -481,18 +485,6 @@ function updateAllTablePositions() {
     });
 }
 
-viewport.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const zoomFactor = 1.08;
-    const nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
-    const rect = viewport.getBoundingClientRect();
-    zoomAtPoint(
-        Math.min(2.5, Math.max(0.35, nextZoom)),
-        e.clientX - rect.left,
-        e.clientY - rect.top
-    );
-}, { passive: false });
-
 function canStartCanvasPan(target) {
     return !target.closest(
         '.seat-slot, .guest-seat-circle, .pool-guest-chip, .hub-center, .hub-title, button, input, select, a, #sidebar-content, #sidebar-panel, #sidebar-toggle-btn, .guest-drag-ghost'
@@ -508,8 +500,22 @@ function resetTouchGestures() {
     panPointerId = null;
 }
 
-if (!IS_TOUCH_DEVICE) {
-    viewport.addEventListener('pointerdown', (e) => {
+function bindViewportEvents() {
+    if (!viewport) return;
+    onEvent(viewport, 'wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = 1.08;
+        const nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
+        const rect = viewport.getBoundingClientRect();
+        zoomAtPoint(
+            Math.min(2.5, Math.max(0.35, nextZoom)),
+            e.clientX - rect.left,
+            e.clientY - rect.top
+        );
+    }, { passive: false });
+
+    if (!IS_TOUCH_DEVICE) {
+        onEvent(viewport, 'pointerdown', (e) => {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         if (!canStartCanvasPan(e.target)) return;
 
@@ -521,7 +527,7 @@ if (!IS_TOUCH_DEVICE) {
         try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     });
 
-    viewport.addEventListener('pointermove', (e) => {
+    onEvent(viewport, 'pointermove', (e) => {
         if (!isPanning || e.pointerId !== panPointerId) return;
         panX = e.clientX - startX;
         panY = e.clientY - startY;
@@ -535,11 +541,11 @@ if (!IS_TOUCH_DEVICE) {
         viewport.style.cursor = 'grab';
     }
 
-    viewport.addEventListener('pointerup', endCanvasPan);
-    viewport.addEventListener('pointercancel', endCanvasPan);
-}
+        onEvent(viewport, 'pointerup', endCanvasPan);
+        onEvent(viewport, 'pointercancel', endCanvasPan);
+    }
 
-viewport.addEventListener('touchstart', (e) => {
+    onEvent(viewport, 'touchstart', (e) => {
     if (e.touches.length === 2) {
         e.preventDefault();
         touchGestureActive = true;
@@ -560,9 +566,9 @@ viewport.addEventListener('touchstart', (e) => {
             panY
         };
     }
-}, { passive: false, capture: true });
+    }, { passive: false, capture: true });
 
-viewport.addEventListener('touchmove', (e) => {
+    onEvent(viewport, 'touchmove', (e) => {
     if (e.touches.length === 2 && lastPinchDist > 0) {
         e.preventDefault();
         const dist = getTouchDistance(e.touches);
@@ -579,9 +585,9 @@ viewport.addEventListener('touchmove', (e) => {
         panY = touchPanOrigin.panY + (e.touches[0].clientY - touchPanOrigin.y);
         applyTransform();
     }
-}, { passive: false, capture: true });
+    }, { passive: false, capture: true });
 
-viewport.addEventListener('touchend', (e) => {
+    onEvent(viewport, 'touchend', (e) => {
     if (e.touches.length === 0) {
         resetTouchGestures();
         return;
@@ -598,12 +604,11 @@ viewport.addEventListener('touchend', (e) => {
             };
         }
     }
-}, { capture: true });
+    }, { capture: true });
 
-viewport.addEventListener('touchcancel', resetTouchGestures, { capture: true });
-
-viewport.addEventListener('contextmenu', e => e.preventDefault());
-
+    onEvent(viewport, 'touchcancel', resetTouchGestures, { capture: true });
+    onEvent(viewport, 'contextmenu', e => e.preventDefault());
+}
 function getVisibleViewportCenter() {
     const rect = viewport.getBoundingClientRect();
     const sidebarWidth = isSidebarOpen ? getSidebarWidth() : 0;
@@ -1225,8 +1230,18 @@ function toggleSidebar() {
     }
 }
 
-const TABLE_LOCK_KEY = 'seating_tables_locked';
-let isTablePositionLocked = localStorage.getItem(TABLE_LOCK_KEY) === '1';
+let isTablePositionLocked = false;
+
+function getTableLockStorageKey() {
+    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
+        ? tenantSlug
+        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
+    return `seating_tables_locked_${slug}`;
+}
+
+function loadTablePositionLockState() {
+    isTablePositionLocked = localStorage.getItem(getTableLockStorageKey()) === '1';
+}
 
 function updateTableLockUI() {
     const btn = document.getElementById('btn-lock-tables');
@@ -1246,7 +1261,7 @@ function updateTableLockUI() {
 
 function toggleTablePositionLock() {
     isTablePositionLocked = !isTablePositionLocked;
-    localStorage.setItem(TABLE_LOCK_KEY, isTablePositionLocked ? '1' : '0');
+    localStorage.setItem(getTableLockStorageKey(), isTablePositionLocked ? '1' : '0');
     if (isTablePositionLocked) cancelTableDrag();
     updateTableLockUI();
 }
@@ -1300,14 +1315,16 @@ function handlePrintMenuAction(action, event) {
     else if (action === 'guest-list') printGuestListView();
 }
 
-document.addEventListener('click', (e) => {
-    if (Date.now() < printMenuIgnoreCloseUntil) return;
-    if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
-});
-document.addEventListener('click', (e) => {
-    if (Date.now() < findTableMenuIgnoreCloseUntil) return;
-    if (!e.target.closest('#find-table-wrap')) closeFindTableMenu();
-});
+function bindDocumentClickHandlers() {
+    onEvent(document, 'click', (e) => {
+        if (Date.now() < printMenuIgnoreCloseUntil) return;
+        if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
+    });
+    onEvent(document, 'click', (e) => {
+        if (Date.now() < findTableMenuIgnoreCloseUntil) return;
+        if (!e.target.closest('#find-table-wrap')) closeFindTableMenu();
+    });
+}
 
 let printPreviewCleanup = null;
 let printPreviewZoom = 1;
@@ -1640,6 +1657,14 @@ function sortGuestArraysBySeat() {
 }
 
 let suppressGuestRemoteRenderCount = 0;
+let suppressTableSettingsRemoteRenderCount = 0;
+
+function getGridSnapStorageKey() {
+    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
+        ? tenantSlug
+        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
+    return `seating_grid_snap_v1_${slug}`;
+}
 const guestPersistPendingTables = new Set();
 let guestPersistPoolDirty = false;
 let localGuestRevision = 0;
@@ -2143,6 +2168,7 @@ function runRender() {
 function bootstrapSeatingView() {
     runRender();
     initMobileExperience();
+    loadTablePositionLockState();
     updateTableLockUI();
     if (seatingViewBootstrapped) return;
     seatingViewBootstrapped = true;
@@ -2158,7 +2184,7 @@ function setGlobalStatsMessage(message) {
 
 function handleSeatingDataRoot(root) {
     root = root || {};
-    allGuests = root.wedding_guests || [];
+    allGuests = root.wedding_guests || {};
     unassignedPool = normalizeUnassignedPool(root.unassigned_guests);
     tableSettings = loadTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
@@ -2172,11 +2198,11 @@ function handleSeatingDataRoot(root) {
         return;
     }
 
-    if (!localStorage.getItem('seating_grid_snap_v1')) {
+    if (!localStorage.getItem(getGridSnapStorageKey())) {
         snapAllTablesToGrid()
             .catch(err => console.warn('枱位對齊格線失敗:', err))
             .finally(() => {
-                localStorage.setItem('seating_grid_snap_v1', '1');
+                localStorage.setItem(getGridSnapStorageKey(), '1');
                 bootstrapSeatingView();
                 scheduleFloorLayoutSync();
             });
@@ -2203,9 +2229,9 @@ function markSeatingPartialReady(key) {
 function startSeatingRealtimeSync() {
     setGlobalStatsMessage('連線中...');
 
-    tenantRef('wedding_guests').on('value', (snapshot) => {
+    firebaseUnsubs.push(tenantRef('wedding_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
-            allGuests = snapshot.val() || [];
+            allGuests = snapshot.val() || {};
         }
         markSeatingPartialReady('guests');
         if (suppressGuestRemoteRenderCount > 0) {
@@ -2217,9 +2243,9 @@ function startSeatingRealtimeSync() {
     }, err => {
         console.error('wedding_guests 讀取失敗:', err);
         setGlobalStatsMessage('賓客資料讀取失敗');
-    });
+    }));
 
-    tenantRef('unassigned_guests').on('value', (snapshot) => {
+    firebaseUnsubs.push(tenantRef('unassigned_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
             unassignedPool = normalizeUnassignedPool(snapshot.val());
         }
@@ -2230,19 +2256,25 @@ function startSeatingRealtimeSync() {
         }
         if (!shouldApplyRemoteGuestState()) return;
         runRender();
-    }, err => console.error('unassigned_guests 讀取失敗:', err));
+    }, err => console.error('unassigned_guests 讀取失敗:', err)));
 
-    tenantRef('meta_label_columns').on('value', (snapshot) => {
-        applyMetaLabelColumns(snapshot.val());
+    firebaseUnsubs.push(tenantRef('meta_label_columns').on('value', (snapshot) => {
+        cachedMetaLabelColumns = snapshot.val();
+        applyMetaLabelColumns(cachedMetaLabelColumns);
         markSeatingPartialReady('meta');
-    }, err => console.error('meta_label_columns 讀取失敗:', err));
+    }, err => console.error('meta_label_columns 讀取失敗:', err)));
 
-    tenantRef('table_settings').on('value', (snapshot) => {
+    firebaseUnsubs.push(tenantRef('table_settings').on('value', (snapshot) => {
+        if (isDraggingTable) return;
+        if (suppressTableSettingsRemoteRenderCount > 0) {
+            suppressTableSettingsRemoteRenderCount--;
+            return;
+        }
         const root = {
             wedding_guests: allGuests,
             unassigned_guests: unassignedPool,
             table_settings: snapshot.val(),
-            meta_label_columns: null,
+            meta_label_columns: cachedMetaLabelColumns,
             floor_layout: null
         };
         handleSeatingDataRoot(root);
@@ -2250,16 +2282,36 @@ function startSeatingRealtimeSync() {
     }, err => {
         console.error('table_settings 讀取失敗:', err);
         setGlobalStatsMessage('枱位資料讀取失敗');
-    });
+    }));
+
+    bootstrapSeatingFromFetch();
 }
 
-whenAdminSessionReady().then(startSeatingRealtimeSync).catch(() => {});
-
-window.addEventListener('resize', () => {
-    if (!isMobileViewport()) return;
-    clearTimeout(window._seatingResizeTimer);
-    window._seatingResizeTimer = setTimeout(() => fitViewToTables(), 200);
-});
+async function bootstrapSeatingFromFetch() {
+    if (!rawTenantRef) return;
+    try {
+        const [guestsSnap, poolSnap, metaSnap, tablesSnap] = await Promise.all([
+            get(rawTenantRef('wedding_guests')),
+            get(rawTenantRef('unassigned_guests')),
+            get(rawTenantRef('meta_label_columns')),
+            get(rawTenantRef('table_settings')),
+        ]);
+        cachedMetaLabelColumns = metaSnap.val();
+        handleSeatingDataRoot({
+            wedding_guests: guestsSnap.val(),
+            unassigned_guests: poolSnap.val(),
+            meta_label_columns: cachedMetaLabelColumns,
+            table_settings: tablesSnap.val(),
+        });
+        markSeatingPartialReady('guests');
+        markSeatingPartialReady('pool');
+        markSeatingPartialReady('meta');
+        markSeatingPartialReady('tables');
+    } catch (err) {
+        console.error('畫布初次載入失敗:', err);
+        setGlobalStatsMessage(`載入失敗：${err?.message || err}`);
+    }
+}
 
 function forEachGuestTable(callback) {
     if (Array.isArray(allGuests)) {
@@ -2379,7 +2431,14 @@ function renderCanvasTables() {
         tableWrapper.setAttribute('data-table', tableNum);
 
         const startTableDrag = (e) => {
-            if (isTablePositionLocked) return;
+            if (isTablePositionLocked) {
+                const btn = document.getElementById('btn-lock-tables');
+                if (btn) {
+                    btn.classList.add('ring-2', 'ring-amber-400');
+                    setTimeout(() => btn.classList.remove('ring-2', 'ring-amber-400'), 800);
+                }
+                return;
+            }
             if ((e.pointerType === 'mouse' && e.button !== 0) || isGuestDragging) return;
             if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
             e.stopPropagation();
@@ -2430,9 +2489,15 @@ function finishTableDrag() {
             const tableNum = draggedTableElement.getAttribute('data-table');
             tableSettings[tableNum].x = bx;
             tableSettings[tableNum].y = by;
+            suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
                 .then(() => forceFloorLayoutSync())
-                .catch(err => console.warn('枱位同步失敗:', err));
+                .catch(err => {
+                    suppressTableSettingsRemoteRenderCount = 0;
+                    console.error('枱位同步失敗:', err);
+                    alert('❌ 枱位儲存失敗，請確認已登入並有寫入權限（members）。');
+                    cancelTableDrag();
+                });
         } else {
             cancelTableDrag();
             return;
@@ -2443,22 +2508,23 @@ function finishTableDrag() {
     draggedTableElement = null;
 }
 
-document.addEventListener('pointermove', (e) => {
-    if (isGuestDragging || !isDraggingTable || !draggedTableElement) return;
-    if (draggedTableElement.dataset.dragPointerId && e.pointerId !== parseInt(draggedTableElement.dataset.dragPointerId, 10)) return;
-    const pos = screenToCanvas(e.clientX, e.clientY);
-    let bx = snapToGrid(pos.x - tableOffsetX);
-    let by = snapToGrid(pos.y - tableOffsetY);
-    if (bx < 0) bx = 0;
-    if (by < 0) by = 0;
-    draggedTableElement.dataset.baseX = bx;
-    draggedTableElement.dataset.baseY = by;
-    draggedTableElement.style.left = `${bx * zoom}px`;
-    draggedTableElement.style.top = `${by * zoom}px`;
-});
-
-document.addEventListener('pointerup', finishTableDrag);
-document.addEventListener('pointercancel', finishTableDrag);
+function bindTableDragHandlers() {
+    onEvent(document, 'pointermove', (e) => {
+        if (isGuestDragging || !isDraggingTable || !draggedTableElement) return;
+        if (draggedTableElement.dataset.dragPointerId && e.pointerId !== parseInt(draggedTableElement.dataset.dragPointerId, 10)) return;
+        const pos = screenToCanvas(e.clientX, e.clientY);
+        let bx = snapToGrid(pos.x - tableOffsetX);
+        let by = snapToGrid(pos.y - tableOffsetY);
+        if (bx < 0) bx = 0;
+        if (by < 0) by = 0;
+        draggedTableElement.dataset.baseX = bx;
+        draggedTableElement.dataset.baseY = by;
+        draggedTableElement.style.left = `${bx * zoom}px`;
+        draggedTableElement.style.top = `${by * zoom}px`;
+    });
+    onEvent(document, 'pointerup', finishTableDrag);
+    onEvent(document, 'pointercancel', finishTableDrag);
+}
 
 function allowDrop(e) { e.preventDefault(); }
 
@@ -2550,15 +2616,16 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error(err); }
 }
 
-document.addEventListener('dragover', (e) => {
-    if (!isGuestDragging) return;
-    openSidebarIfDragEntersSidebar(e.clientX);
-}, { passive: true });
-
-document.addEventListener('dragend', () => {
-    isGuestDragging = false;
-    cancelTableDrag();
-});
+function bindDragSidebarHandlers() {
+    onEvent(document, 'dragover', (e) => {
+        if (!isGuestDragging) return;
+        openSidebarIfDragEntersSidebar(e.clientX);
+    }, { passive: true });
+    onEvent(document, 'dragend', () => {
+        isGuestDragging = false;
+        cancelTableDrag();
+    });
+}
 
 function handleDropTrash(e) {
     e.preventDefault();
@@ -2589,7 +2656,10 @@ function createNewTableAction() {
         max_seats: cleanMax,
         x: snapToGrid(center.x - PLATE_SIZE / 2),
         y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
-    }).then(() => forceFloorLayoutSync());
+    }).then(() => forceFloorLayoutSync()).catch((err) => {
+        console.error('新增圓枱失敗:', err);
+        alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+    });
 }
 
 function fillTableSettingsForm(tableNum, currentMax) {
@@ -2721,4 +2791,99 @@ function deleteTableAction() {
         .catch(err => alert(`❌ 刪除失敗：${err.message || err}`));
 }
 
-applyPrintPageStyle();
+
+function exposeWindowActions(onLogout) {
+    Object.assign(globalThis, {
+        zoomCanvas, centerViewOnTables, toggleFindTableMenu, createNewTableAction,
+        toggleTablePositionLock, togglePrintMenu, handlePrintMenuAction,
+        toggleSidebar, closeGuestModal, saveGuestChangesAction, removeGuestFromSeatAction,
+        closeCustomCategoryDialog, closeDeleteTagDialog, closeSettingsModal,
+        saveTableSettingsAction, deleteTableAction, closePrintPreview,
+        stepPrintPreviewZoom, fitPrintPreviewZoom, setPrintOrientation, executePrintPreview,
+        removeModalTag, refreshModalTagColors, allowDrop, handleDropTrash,
+        flyToTable, handleModalTagAdd, updateDeleteTagUsageHint,
+        adminSignOut: onLogout,
+    });
+}
+
+function resetEngineState() {
+    seatingViewBootstrapped = false;
+    seatingDataReady = { guests: false, pool: false, tables: false, meta: false };
+    tableSettingsMigrated = false;
+    cachedMetaLabelColumns = null;
+    allGuests = {};
+    unassignedPool = [];
+    tableSettings = {};
+    zoom = 1.0;
+    panX = -900;
+    panY = -600;
+}
+
+export function initSeatingEngine({ tenantRef, slug, onLogout, adminHref }) {
+    if (engineInitialized) destroySeatingEngine();
+    rawTenantRef = tenantRef;
+    tenantRefFn = createCompatTenantRef(tenantRef);
+    tenantSlug = slug || 'default';
+    viewport = document.getElementById('canvas-viewport');
+    canvas = document.getElementById('main-canvas');
+    if (!viewport || !canvas) throw new Error('Seating canvas DOM not found');
+
+    const backLink = document.getElementById('link-back-admin');
+    if (backLink && adminHref) backLink.setAttribute('href', adminHref);
+
+    exposeWindowActions(onLogout);
+    bindViewportEvents();
+    bindDocumentClickHandlers();
+    bindTableDragHandlers();
+    bindDragSidebarHandlers();
+
+    onEvent(window, 'resize', () => {
+        if (!isMobileViewport()) return;
+        clearTimeout(window._seatingResizeTimer);
+        window._seatingResizeTimer = setTimeout(() => fitViewToTables(), 200);
+    });
+
+    applyPrintPageStyle();
+    document.body.classList.add('seating-touch');
+    startSeatingRealtimeSync();
+    engineInitialized = true;
+}
+
+export function destroySeatingEngine() {
+    firebaseUnsubs.forEach((u) => { try { u(); } catch (_) { /* ignore */ } });
+    firebaseUnsubs = [];
+    cleanupFns.forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
+    cleanupFns.length = 0;
+    document.body.classList.remove('seating-touch', 'tables-position-locked', 'print-preview-open');
+    engineInitialized = false;
+    rawTenantRef = null;
+    resetEngineState();
+}
+
+export {
+    zoomCanvas,
+    centerViewOnTables,
+    toggleFindTableMenu,
+    createNewTableAction,
+    toggleTablePositionLock,
+    togglePrintMenu,
+    handlePrintMenuAction,
+    toggleSidebar,
+    closeGuestModal,
+    saveGuestChangesAction,
+    removeGuestFromSeatAction,
+    closeCustomCategoryDialog,
+    closeDeleteTagDialog,
+    closeSettingsModal,
+    saveTableSettingsAction,
+    deleteTableAction,
+    closePrintPreview,
+    stepPrintPreviewZoom,
+    fitPrintPreviewZoom,
+    setPrintOrientation,
+    executePrintPreview,
+    allowDrop,
+    handleDropTrash,
+    refreshModalTagColors,
+    updateDeleteTagUsageHint,
+};

@@ -51,33 +51,15 @@ function persistTableSettings() {
 }
 
 function ensureDefaultTablesIfEmpty() {
-    if (getTableSettingKeys().length > 0) return false;
-
-    let created = false;
-    for (let i = 1; i <= 14; i++) {
-        const row = Math.floor((i - 1) / 4);
-        const col = (i - 1) % 4;
-        const colGap = 440;
-        const rowGap = 460;
-        const gridW = 3 * colGap + TABLE_DIM;
-        const gridH = 3 * rowGap + TABLE_TOTAL_H;
-        const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
-        const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
-        tableSettings[String(i)] = {
-            max_seats: 12,
-            x: snapToGrid(startX + col * colGap),
-            y: snapToGrid(startY + row * rowGap)
-        };
-        created = true;
-    }
-    return created;
+    // 唔再自動建立預設枱；請用畫布「➕ 新增圓枱」
+    return false;
 }
 
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
 let categoriesByColumn = {
-    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
+    'group': ['家人', '男方親戚', '女方親戚', '中學同學']
 };
 let legacyLabelKeys = null;
 let activeSelectElement = null;

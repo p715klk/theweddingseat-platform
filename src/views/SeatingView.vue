@@ -1,7 +1,14 @@
 <template>
   <div class="seating-host">
+    <TenantErrorView v-if="tenantError" :message="tenantError" />
     <div
-      v-if="!authReady"
+      v-else-if="!tenantReady"
+      class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center text-gray-500 font-bold"
+    >
+      ⏳ 載入專案...
+    </div>
+    <div
+      v-else-if="!authReady"
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center text-gray-500 font-bold"
     >
       ⏳ 驗證登入狀態...
@@ -10,44 +17,42 @@
       v-else-if="!user"
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center p-4"
     >
-      <AdminLoginForm @success="goToSeatingCanvas" />
+      <AdminLoginForm />
     </div>
-    <div
+    <SeatingCanvasApp
       v-else
-      class="fixed inset-0 bg-slate-100 z-[10000] flex flex-col items-center justify-center text-gray-600 font-bold gap-2"
-    >
-      <p>⏳ 前往畫布排位...</p>
-      <p v-if="slug" class="text-xs text-gray-400 font-normal">{{ slug }}</p>
-    </div>
+      :key="slug"
+      :slug="slug"
+      @logout="handleLogout"
+    />
   </div>
 </template>
 
 <script setup>
-import { watch } from 'vue';
+import { computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
-import { appUrl } from '@/lib/appBase';
+import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
+import SeatingCanvasApp from '@/components/seating/SeatingCanvasApp.vue';
 
 const route = useRoute();
-const { slug, initTenant } = useTenant();
-const { user, authReady } = useAuth();
+const { slug, ready, error, initTenant } = useTenant();
+const { user, authReady, logout } = useAuth();
 
 initTenant(route, { allowExpired: true });
 
-function goToSeatingCanvas() {
-  if (!slug.value) return;
-  const target = appUrl(`legacy/admin/seating.html?slug=${encodeURIComponent(slug.value)}`);
-  window.location.replace(target);
+const tenantReady = computed(() => ready.value);
+const tenantError = computed(() => error.value);
+
+async function handleLogout() {
+  await logout();
 }
 
 watch(
-  [authReady, user, slug],
-  ([ready, u, s]) => {
-    if (ready && u && s) goToSeatingCanvas();
-  },
-  { immediate: true },
+  () => route.params.slug,
+  () => initTenant(route, { allowExpired: true }),
 );
 </script>
 

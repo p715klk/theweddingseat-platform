@@ -5,7 +5,7 @@ let scrollContainer = null;
 let localGuestsList = []; 
 
 // 全局維護的分類標籤清單
-let currentCategories = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
+let currentCategories = ['家人', '男方親戚', '女方親戚', '中學同學'];
 let activeSelectElement = null; 
 let sortableInstance = null;    
 

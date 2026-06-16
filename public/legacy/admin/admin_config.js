@@ -23,7 +23,7 @@ function getMaxSeatsForTable(tableNum) {
 let labelColumnsKeys = ['group']; 
 let labelColumnsNames = ['標籤 (可多選)']; 
 let categoriesByColumn = {
-    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
+    'group': ['家人', '男方親戚', '女方親戚', '中學同學']
 };
 
 function normalizeCSVHeaderLabel(label) {
