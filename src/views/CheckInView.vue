@@ -214,7 +214,7 @@
             </div>
           </div>
         </div>
-        <div v-if="canAccessAdmin && tableOccupancy.remaining > 0" class="p-3 border-t bg-white">
+        <div v-if="canAddWalkInGuest && tableOccupancy.remaining > 0" class="p-3 border-t bg-white">
           <div v-if="!showAddGuestForm">
             <button
               type="button"
@@ -312,7 +312,7 @@ const isDev = import.meta.env.DEV;
 const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').toLowerCase() === 'true';
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
-const { canAccessAdmin } = useTenantAccess();
+const { canAccessAdmin, canAddWalkInGuest } = useTenantAccess();
 const { error, features, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
 const {
   floorLayout,

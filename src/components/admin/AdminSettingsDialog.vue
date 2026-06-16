@@ -127,6 +127,8 @@
                 <span class="member-email">{{ m.email || m.uid }}</span>
                 <span v-if="m.displayName" class="member-name">{{ m.displayName }}</span>
                 <span v-if="m.uid === ownerUid" class="member-owner">（Owner）</span>
+                <span v-else-if="m.role === 'reception'" class="member-role">（現場接待）</span>
+                <span v-else-if="m.role === 'admin'" class="member-role">（後台管理員）</span>
                 <span v-else-if="m.isSelf" class="member-self">（你）</span>
               </div>
               <button
@@ -179,6 +181,13 @@
                   autocomplete="new-password"
                   v-on="passwordInputHandlers"
                 />
+              </div>
+              <div class="field">
+                <label for="new-user-role">角色</label>
+                <select id="new-user-role" v-model="newUserRole" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
+                  <option value="admin">後台管理員</option>
+                  <option value="reception">現場接待</option>
+                </select>
               </div>
               <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
               <button type="submit" class="btn-primary" :disabled="addingUser">
@@ -238,6 +247,7 @@ const pwMsgOk = ref(false);
 const newUserEmail = ref('');
 const newUserName = ref('');
 const newUserPassword = ref('');
+const newUserRole = ref('admin');
 const addingUser = ref(false);
 const addUserMsg = ref('');
 const addUserMsgOk = ref(false);
@@ -327,10 +337,12 @@ async function submitAddUser() {
       email: newUserEmail.value,
       password: newUserPassword.value,
       displayName: newUserName.value,
+      role: newUserRole.value,
     });
     newUserEmail.value = '';
     newUserName.value = '';
     newUserPassword.value = '';
+    newUserRole.value = 'admin';
     addUserMsgOk.value = true;
     addUserMsg.value = '用戶已建立並加入後台權限';
   } catch (e) {
@@ -547,6 +559,11 @@ async function confirmRemove(member) {
   font-size: 0.7rem;
   color: #1d4ed8;
   font-weight: 800;
+}
+.member-role {
+  font-size: 0.7rem;
+  color: #374151;
+  font-weight: 700;
 }
 .btn-remove {
   flex-shrink: 0;

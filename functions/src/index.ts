@@ -268,7 +268,7 @@ export const createTenant = onCall(
       [`${tenantBase}/table_settings`]: tableSettings,
       [`${tenantBase}/floor_layout`]: floorLayout,
       [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
-      [`${tenantBase}/members/${userRecord.uid}`]: true,
+      [`${tenantBase}/members/${userRecord.uid}`]: "admin",
       [`${tenantBase}/user_profiles/${userRecord.uid}`]: profile,
     };
 

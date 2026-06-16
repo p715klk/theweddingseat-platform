@@ -13,6 +13,12 @@ export function useTenantUsers() {
   const loading = ref(false);
   const error = ref('');
 
+  function normalizeMemberRole(val) {
+    if (val === true) return 'admin'; // legacy
+    if (val === 'admin' || val === 'reception') return val;
+    return '';
+  }
+
   function editorInfo() {
     if (!user.value) return null;
     return {
@@ -32,10 +38,11 @@ export function useTenantUsers() {
       ]);
       const memberMap = membersSnap.val() || {};
       const profiles = profilesSnap.val() || {};
-      const uids = Object.keys(memberMap).filter((uid) => memberMap[uid] === true);
+      const uids = Object.keys(memberMap).filter((uid) => normalizeMemberRole(memberMap[uid]));
 
       members.value = uids.map((uid) => ({
         uid,
+        role: normalizeMemberRole(memberMap[uid]),
         email: profiles[uid]?.email || '',
         displayName: profiles[uid]?.display_name || '',
         createdAt: profiles[uid]?.created_at || null,
@@ -50,11 +57,12 @@ export function useTenantUsers() {
     }
   }
 
-  async function createMember({ email, password, displayName = '' }) {
+  async function createMember({ email, password, displayName = '', role = 'admin' }) {
     if (!tenantId.value) throw new Error('專案未就緒');
     if (meta.value?.owner_uid && meta.value.owner_uid !== user.value?.uid) {
       throw new Error('只有 owner 可以新增用戶');
     }
+    if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
     const trimmedEmail = email?.trim();
     if (!trimmedEmail) throw new Error('請輸入 Email');
     if (!password || password.length < 6) throw new Error('密碼至少需要 6 個字元');
@@ -71,7 +79,7 @@ export function useTenantUsers() {
     };
 
     await update(dbRef(database), {
-      [`tenants/${tenantId.value}/members/${uid}`]: true,
+      [`tenants/${tenantId.value}/members/${uid}`]: role,
       [`tenants/${tenantId.value}/user_profiles/${uid}`]: profile,
     });
 
@@ -89,7 +97,7 @@ export function useTenantUsers() {
 
     const membersSnap = await get(tenantRef('members'));
     const memberMap = membersSnap.val() || {};
-    const activeCount = Object.values(memberMap).filter((v) => v === true).length;
+    const activeCount = Object.values(memberMap).filter((v) => normalizeMemberRole(v) === 'admin').length;
     if (activeCount <= 1) throw new Error('至少需要保留一位後台用戶');
 
     await remove(tenantRef(`members/${uid}`));
