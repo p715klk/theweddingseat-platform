@@ -491,7 +491,7 @@ trial → active → wedding_day → archived → (30天後) deleted
 
 你個 backend 除咗「開 project」，仲要有：
 
-- **客戶列表**：姓名、婚期、狀態、賓客數、最後活動時間
+- **專案列表**：姓名、婚期、狀態、賓客數、最後活動時間
 - **一鍵進入客戶後台**（impersonate，要 audit log）
 - **資料匯出**：幫客戶 backup CSV
 - **錯誤監控**：Sentry 睇 frontend crash

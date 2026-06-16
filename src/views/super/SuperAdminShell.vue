@@ -24,7 +24,7 @@
         </div>
         <div class="header-actions">
           <RouterLink v-if="route.name !== 'super-tenants'" to="/super/tenants" class="btn-header">
-            客戶列表
+            專案列表
           </RouterLink>
           <RouterLink to="/super/members" class="btn-header" :class="{ active: route.name === 'super-members' }">
             👥 Members

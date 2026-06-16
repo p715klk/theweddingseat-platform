@@ -102,6 +102,16 @@
             <p class="field-hint">會以明文顯示，方便直接複製畀客戶。</p>
           </div>
         </div>
+
+        <div class="field">
+          <label>Owner 顯示名稱</label>
+          <input
+            v-model="form.ownerDisplayName"
+            type="text"
+            placeholder="例如：Mary（新娘）"
+            :disabled="prefilling || saving"
+          />
+        </div>
       </section>
 
       <div v-if="createdInfo" class="created-box">
@@ -164,6 +174,7 @@ const form = reactive({
   themeColor: '#b91c1c',
   ownerEmail: '',
   ownerPassword: '',
+  ownerDisplayName: '',
 });
 
 const saving = ref(false);
@@ -282,6 +293,7 @@ async function submit() {
       themeColor: form.themeColor,
       ownerEmail: form.ownerEmail,
       ownerPassword: form.ownerPassword,
+      ownerDisplayName: form.ownerDisplayName,
       editor: editorInfo(),
     };
     const result = copySourceTenantId.value
