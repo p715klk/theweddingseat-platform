@@ -1,0 +1,128 @@
+import { ref } from 'vue';
+import { get, set, remove, update, ref as dbRef } from 'firebase/database';
+import { database } from '@/firebase';
+import { useTenant } from '@/composables/useTenant';
+import { useAuth } from '@/composables/useAuth';
+import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
+
+export function useTenantUsers() {
+  const { tenantId, tenantRef, meta } = useTenant();
+  const { user } = useAuth();
+
+  const members = ref([]);
+  const loading = ref(false);
+  const error = ref('');
+
+  function editorInfo() {
+    if (!user.value) return null;
+    return {
+      uid: user.value.uid,
+      email: user.value.email || '',
+    };
+  }
+
+  async function loadMembers() {
+    if (!tenantId.value) return;
+    loading.value = true;
+    error.value = '';
+    try {
+      const [membersSnap, profilesSnap] = await Promise.all([
+        get(tenantRef('members')),
+        get(tenantRef('user_profiles')),
+      ]);
+      const memberMap = membersSnap.val() || {};
+      const profiles = profilesSnap.val() || {};
+      const uids = Object.keys(memberMap).filter((uid) => memberMap[uid] === true);
+
+      members.value = uids.map((uid) => ({
+        uid,
+        email: profiles[uid]?.email || '',
+        displayName: profiles[uid]?.display_name || '',
+        createdAt: profiles[uid]?.created_at || null,
+        createdByEmail: profiles[uid]?.created_by_email || '',
+        isSelf: uid === user.value?.uid,
+      }));
+    } catch (e) {
+      error.value = e?.message || '載入用戶清單失敗';
+      members.value = [];
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function createMember({ email, password, displayName = '' }) {
+    if (!tenantId.value) throw new Error('專案未就緒');
+    if (meta.value?.owner_uid && meta.value.owner_uid !== user.value?.uid) {
+      throw new Error('只有 owner 可以新增用戶');
+    }
+    const trimmedEmail = email?.trim();
+    if (!trimmedEmail) throw new Error('請輸入 Email');
+    if (!password || password.length < 6) throw new Error('密碼至少需要 6 個字元');
+
+    const { uid } = await createAuthUserViaRest(trimmedEmail, password);
+    const editor = editorInfo();
+
+    const profile = {
+      email: trimmedEmail,
+      display_name: displayName.trim(),
+      created_at: Date.now(),
+      created_by_uid: editor?.uid || '',
+      created_by_email: editor?.email || '',
+    };
+
+    await update(dbRef(database), {
+      [`tenants/${tenantId.value}/members/${uid}`]: true,
+      [`tenants/${tenantId.value}/user_profiles/${uid}`]: profile,
+    });
+
+    await loadMembers();
+    return { uid, email: trimmedEmail };
+  }
+
+  async function removeMember(uid) {
+    if (!tenantId.value) throw new Error('專案未就緒');
+    if (!uid) throw new Error('無效的用戶');
+    if (uid === user.value?.uid) throw new Error('不能移除自己的帳號');
+    if (meta.value?.owner_uid && meta.value.owner_uid !== user.value?.uid) {
+      throw new Error('只有 owner 可以移除用戶');
+    }
+
+    const membersSnap = await get(tenantRef('members'));
+    const memberMap = membersSnap.val() || {};
+    const activeCount = Object.values(memberMap).filter((v) => v === true).length;
+    if (activeCount <= 1) throw new Error('至少需要保留一位後台用戶');
+
+    await remove(tenantRef(`members/${uid}`));
+    try {
+      await remove(tenantRef(`user_profiles/${uid}`));
+    } catch {
+      /* profile may not exist for legacy members */
+    }
+    await loadMembers();
+  }
+
+  async function ensureSelfProfile() {
+    if (!tenantId.value || !user.value?.uid || !user.value.email) return;
+    const profileRef = tenantRef(`user_profiles/${user.value.uid}`);
+    const snap = await get(profileRef);
+    if (snap.exists()) return;
+
+    await set(profileRef, {
+      email: user.value.email,
+      display_name: '',
+      created_at: Date.now(),
+      created_by_uid: user.value.uid,
+      created_by_email: user.value.email,
+    });
+  }
+
+  return {
+    members,
+    loading,
+    error,
+    loadMembers,
+    createMember,
+    removeMember,
+    ensureSelfProfile,
+  };
+}

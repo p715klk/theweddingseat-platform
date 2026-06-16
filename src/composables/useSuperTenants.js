@@ -242,6 +242,7 @@ export async function createTenant({
   }
 
   const tenantId = normalized;
+  const resolvedOwnerUid = ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -251,6 +252,7 @@ export async function createTenant({
     status: 'active',
     slug: normalized,
     plan,
+    ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
     ...auditFields(editor, { isCreate: true }),
   };
 
@@ -268,10 +270,8 @@ export async function createTenant({
     [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
   };
 
-  if (ownerUid?.trim()) {
-    updates[`${tenantBase}/members/${ownerUid.trim()}`] = true;
-  } else if (editor?.uid) {
-    updates[`${tenantBase}/members/${editor.uid}`] = true;
+  if (resolvedOwnerUid) {
+    updates[`${tenantBase}/members/${resolvedOwnerUid}`] = true;
   }
 
   await update(dbRef(database), updates);
@@ -309,6 +309,7 @@ export async function cloneTenant({
 
   const sourceData = await getTenantFullData(sourceTenantId);
   const tenantId = normalized;
+  const resolvedOwnerUid = ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -318,6 +319,7 @@ export async function cloneTenant({
     status: 'active',
     slug: normalized,
     plan,
+    ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
     ...auditFields(editor, { isCreate: true }),
   };
 

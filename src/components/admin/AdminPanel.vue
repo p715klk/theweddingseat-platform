@@ -28,21 +28,16 @@
             {{ saving ? '儲存中…' : '💾 儲存變更' }}
           </button>
 
-          <div class="relative" id="settings-dropdown" ref="settingsRef">
+          <div class="relative" id="settings-dropdown">
             <input ref="csvInputRef" id="csv-file-input" type="file" accept=".csv" class="hidden" @change="onCsvSelected" />
             <button
               type="button"
               id="btn-settings"
               class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition"
-              @click="toggleSettingsMenu"
+              @click="settingsDialogOpen = true"
             >
               ⚙ 設定
             </button>
-            <div v-if="settingsOpen" id="settings-menu" class="settings-dropdown-menu">
-              <button type="button" @click="openCsvPicker">📥 匯入 CSV</button>
-              <button type="button" @click="exportCSV(); settingsOpen = false">📤 匯出 CSV</button>
-              <button type="button" class="danger" @click="confirmEmpty">🗑 清空所有賓客</button>
-            </div>
           </div>
 
           <button
@@ -145,6 +140,14 @@
       </div>
     </div>
 
+    <AdminSettingsDialog
+      :open="settingsDialogOpen"
+      @close="settingsDialogOpen = false"
+      @import-csv="openCsvPicker"
+      @export-csv="onExportCsv"
+      @empty-guests="confirmEmpty"
+    />
+
     <AdminCsvImportDialog
       :open="csvDialogOpen"
       :file-name="csvFileName"
@@ -164,6 +167,7 @@ import { useAdminGuests } from '@/composables/useAdminGuests';
 import { findGuestsUsingTag } from '@/lib/adminGuestModel';
 import AdminGuestTable from '@/components/admin/AdminGuestTable.vue';
 import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
+import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -202,8 +206,7 @@ const {
   showToast,
 } = useAdminGuests();
 
-const settingsOpen = ref(false);
-const settingsRef = ref(null);
+const settingsDialogOpen = ref(false);
 const csvInputRef = ref(null);
 const guestTableRef = ref(null);
 const csvDialogOpen = ref(false);
@@ -228,19 +231,20 @@ const canDeleteTag = computed(() =>
   deleteTagSelected.value && findGuestsUsingTag(guests.value, deleteTagSelected.value).length === 0,
 );
 
-function toggleSettingsMenu(e) {
-  e.stopPropagation();
-  settingsOpen.value = !settingsOpen.value;
-}
-
-function onDocClick(e) {
-  if (settingsOpen.value && settingsRef.value && !settingsRef.value.contains(e.target)) {
-    settingsOpen.value = false;
+function openCsvPicker() {
+  settingsDialogOpen.value = false;
+  if (csvInputRef.value) {
+    csvInputRef.value.value = '';
+    csvInputRef.value.click();
   }
 }
 
+function onExportCsv() {
+  settingsDialogOpen.value = false;
+  exportCSV();
+}
+
 onMounted(async () => {
-  document.addEventListener('click', onDocClick);
   startSync();
   try {
     await load(true);
@@ -250,7 +254,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  document.removeEventListener('click', onDocClick);
   stopSync();
 });
 
@@ -271,21 +274,13 @@ function handleAddGuest() {
 }
 
 function confirmEmpty() {
-  settingsOpen.value = false;
+  settingsDialogOpen.value = false;
   if (!guests.value.length) {
     showToast('目前沒有賓客可清空');
     return;
   }
   const ok = window.confirm(`確定要清空所有賓客嗎？\n\n將移除 ${guests.value.length} 位賓客，需按「儲存變更」才會同步到 Firebase。`);
   if (ok) emptyAllGuests();
-}
-
-function openCsvPicker() {
-  settingsOpen.value = false;
-  if (csvInputRef.value) {
-    csvInputRef.value.value = '';
-    csvInputRef.value.click();
-  }
 }
 
 async function onCsvSelected(e) {
