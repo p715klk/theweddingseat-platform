@@ -1,8 +1,7 @@
 import { ref as dbRef, get, set, update } from 'firebase/database';
 import { database } from '@/firebase';
 import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebaseFunctions';
+import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -246,28 +245,6 @@ export async function createTenant({
   ownerDisplayName = '',
   editor = null,
 }) {
-  // Prefer Cloud Function (creates Auth + members + profiles).
-  // Keep legacy fallback only when ownerEmail not provided.
-  const trimmedOwnerEmail = String(ownerEmail || '').trim();
-  if (trimmedOwnerEmail) {
-    const call = httpsCallable(functions, 'createTenant');
-    const payload = {
-      slug,
-      coupleNames,
-      venueName,
-      venueHall,
-      weddingDate,
-      themeColor,
-      plan,
-      ownerEmail: trimmedOwnerEmail,
-      ownerPassword: String(ownerPassword || '').trim() || undefined,
-      ownerDisplayName: String(ownerDisplayName || '').trim() || undefined,
-    };
-    const res = await call(payload);
-    return res.data;
-  }
-
-  // Legacy direct-RTDB create (no Auth provisioning)
   const normalized = normalizeSlug(slug);
   if (!isValidSlug(normalized)) {
     throw new Error('Slug 格式無效（用小寫英文、數字、連字號，例如 chen-wong-20260915）');
@@ -277,7 +254,22 @@ export async function createTenant({
   }
 
   const tenantId = normalized;
-  const resolvedOwnerUid = ownerUid?.trim() || editor?.uid || '';
+  const trimmedEmail = String(ownerEmail || '').trim().toLowerCase();
+  if (!trimmedEmail) throw new Error('請輸入 Owner Email');
+  const pw = String(ownerPassword || '').trim();
+  if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
+
+  // Create Auth user via REST (no Cloud Functions required)
+  let createdUser;
+  try {
+    createdUser = await createAuthUserViaRest(trimmedEmail, pw);
+  } catch (e) {
+    const msg = e?.message || '建立帳號失敗';
+    // Keep error message from firebaseAuthRest (e.g. EMAIL_EXISTS)
+    throw new Error(msg);
+  }
+
+  const resolvedOwnerUid = createdUser.uid || ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -307,6 +299,13 @@ export async function createTenant({
 
   if (resolvedOwnerUid) {
     updates[`${tenantBase}/members/${resolvedOwnerUid}`] = true;
+    updates[`${tenantBase}/user_profiles/${resolvedOwnerUid}`] = {
+      email: trimmedEmail,
+      display_name: String(ownerDisplayName || '').trim(),
+      created_at: Date.now(),
+      created_by_uid: editor?.uid || '',
+      created_by_email: editor?.email || '',
+    };
   }
 
   await update(dbRef(database), updates);
@@ -316,13 +315,13 @@ export async function createTenant({
     slug: normalized,
     checkInUrl: `/p/${normalized}`,
     adminUrl: `/p/${normalized}/admin`,
+    ownerUid: resolvedOwnerUid,
+    ownerEmail: trimmedEmail,
   };
 }
 
 export async function setAuthUserPassword({ uid, newPassword }) {
-  const call = httpsCallable(functions, 'setUserPassword');
-  const res = await call({ uid, newPassword });
-  return res.data;
+  throw new Error('此環境未啟用 Cloud Functions，無法直接重設其他用戶密碼。請改用 Firebase Console。');
 }
 
 /**

@@ -311,11 +311,7 @@ async function submit() {
 
     const base = code && msg ? `${code}: ${msg}` : msg || '建立失敗';
     const extra = details ? `\n${details}` : '';
-    const hint =
-      code === 'functions/internal' && msg === 'internal'
-        ? '\n（提示：多數係 Cloud Function 未 deploy／region 錯／Function runtime error。請到 Firebase Console → Functions → Logs 睇真因。）'
-        : '';
-    error.value = `${base}${extra}${hint}`;
+    error.value = `${base}${extra}`;
   } finally {
     saving.value = false;
   }

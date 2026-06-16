@@ -116,33 +116,11 @@
       </section>
 
       <section class="section">
-        <h3>重設 Owner 密碼（平台管理員）</h3>
+        <h3>重設 Owner 密碼</h3>
         <p class="hint-block">
-          Owner：
-          <span v-if="ownerEmail"><code>{{ ownerEmail }}</code></span>
-          <span v-else><code>{{ pwUid || 'owner_uid' }}</code></span>
-          （會直接更新 Firebase Auth 密碼；無需舊密碼）。
+          由於目前未啟用 Cloud Functions（Spark plan 無法 deploy），平台無法直接幫其他帳號重設密碼。
+          請到 Firebase Console → Authentication 用 email 搵到該用戶再重設。
         </p>
-        <form class="edit-form" @submit.prevent="resetOwnerPassword">
-          <div class="field">
-            <label>Owner UID（只讀）</label>
-            <input v-model="pwUid" type="text" readonly />
-          </div>
-          <div class="grid">
-            <div class="field">
-              <label>新密碼</label>
-              <input v-model="newPw" type="password" minlength="6" required autocomplete="new-password" />
-            </div>
-            <div class="field">
-              <label>確認新密碼</label>
-              <input v-model="confirmPw" type="password" minlength="6" required autocomplete="new-password" />
-            </div>
-          </div>
-          <p v-if="pwMsg" :class="pwMsgOk ? 'ok' : 'error'">{{ pwMsg }}</p>
-          <button type="submit" class="btn-save" :disabled="savingPw || !pwUid">
-            {{ savingPw ? '更新中…' : '🔒 更新 Owner 密碼' }}
-          </button>
-        </form>
       </section>
 
       <section class="section">
@@ -187,7 +165,6 @@ import {
   renameTenantSlug,
   normalizeSlug,
   formatAuditTime,
-  setAuthUserPassword,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
 
@@ -210,11 +187,6 @@ const slugMsg = ref('');
 const slugMsgOk = ref(false);
 const pwUid = ref('');
 const ownerEmail = ref('');
-const newPw = ref('');
-const confirmPw = ref('');
-const savingPw = ref(false);
-const pwMsg = ref('');
-const pwMsgOk = ref(false);
 
 const editForm = reactive({
   slug: '',
@@ -363,38 +335,6 @@ async function saveSlug() {
   }
 }
 
-async function resetOwnerPassword() {
-  pwMsg.value = '';
-  pwMsgOk.value = false;
-
-  const uid = String(pwUid.value || '').trim();
-  if (!uid) {
-    pwMsg.value = '此 Project 未設定 owner_uid';
-    return;
-  }
-  if (!newPw.value || newPw.value.length < 6) {
-    pwMsg.value = '新密碼至少需要 6 個字元';
-    return;
-  }
-  if (newPw.value !== confirmPw.value) {
-    pwMsg.value = '兩次輸入的新密碼不一致';
-    return;
-  }
-
-  savingPw.value = true;
-  try {
-    await setAuthUserPassword({ uid, newPassword: newPw.value });
-    pwMsgOk.value = true;
-    pwMsg.value = '已更新 Owner 密碼';
-    newPw.value = '';
-    confirmPw.value = '';
-  } catch (e) {
-    pwMsgOk.value = false;
-    pwMsg.value = e?.message || '更新密碼失敗';
-  } finally {
-    savingPw.value = false;
-  }
-}
 </script>
 
 <style scoped>
