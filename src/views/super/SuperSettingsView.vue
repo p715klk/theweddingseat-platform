@@ -12,7 +12,7 @@
         </div>
         <div class="info-row">
           <dt>平台權限</dt>
-          <dd><span class="badge ok">platform admin</span></dd>
+          <dd><span class="badge ok">super admin</span></dd>
         </div>
       </dl>
     </section>

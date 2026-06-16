@@ -368,7 +368,14 @@ export async function createTenant({
     });
     Object.assign(
       updates,
-      buildMemberProvisionUpdates({ tenantId, uid: resolvedOwnerUid, profile, editor, now, includeOwner: true }),
+      buildMemberProvisionUpdates({
+        tenantId,
+        uid: resolvedOwnerUid,
+        profile,
+        editor,
+        now,
+        includeMetaPaths: false,
+      }),
     );
   }
 
@@ -460,7 +467,14 @@ export async function cloneTenant({
     });
     Object.assign(
       updates,
-      buildMemberProvisionUpdates({ tenantId, uid: resolvedOwnerUid, profile, editor, now, includeOwner: true }),
+      buildMemberProvisionUpdates({
+        tenantId,
+        uid: resolvedOwnerUid,
+        profile,
+        editor,
+        now,
+        includeMetaPaths: false,
+      }),
     );
   }
 

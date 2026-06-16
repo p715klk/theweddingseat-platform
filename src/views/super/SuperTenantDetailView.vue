@@ -47,7 +47,7 @@
 
       <section class="section">
         <h3>編輯 Project 資料</h3>
-        <p class="hint-block">你係 platform admin，可以改晒以下資料。</p>
+        <p class="hint-block">你係 super admin，可以改晒以下資料。</p>
         <form class="edit-form" @submit.prevent="saveMeta">
           <div class="field">
             <label>新人姓名</label>
@@ -147,12 +147,11 @@
               <div class="pw-row">
                 <input v-model="ownerForm.password" type="text" required minlength="6" autocomplete="new-password" />
                 <button type="button" class="btn-generate" :disabled="savingOwner" @click="generateOwnerPw">生成</button>
-              </div>
-              <p class="field-hint">會以明文顯示，方便直接複製畀客戶。</p>
+              </div>              
             </div>
           </div>
           <div class="field">
-            <label>顯示名稱（選填）</label>
+            <label>顯示名稱</label>
             <input v-model="ownerForm.displayName" type="text" placeholder="例如：Mary（新娘）" />
           </div>
           <p v-if="ownerMsg" :class="ownerMsgOk ? 'ok' : 'error'">{{ ownerMsg }}</p>
@@ -165,14 +164,13 @@
       <section class="section">
         <h3>重設 Owner 密碼</h3>
         <p class="hint-block">
-          由於目前未啟用 Cloud Functions（Spark plan 無法 deploy），平台無法直接幫其他帳號重設密碼。
-          請到 Firebase Console → Authentication 用 email 搵到該用戶再重設。
+          平台無法直接幫其他帳號重設密碼。請到 Firebase Console → Authentication 用 email 搵到該用戶再重設。
         </p>
       </section>
 
       <section class="section">
         <h3>功能開關</h3>
-        <p class="hint-block">獨立控制點名頁、後台名單同排位畫布。關閉後一般用戶無法使用；platform admin 仍可進入預覽。</p>
+        <p class="hint-block">Super admin 仍可進入預覽。</p>
         <ul class="feature-toggles">
           <li v-for="item in featureItems" :key="item.key">
             <div class="feature-label">

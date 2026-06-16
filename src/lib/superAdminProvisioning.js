@@ -43,16 +43,24 @@ export function buildUserProfile({ email, displayName = '', initialPassword = ''
   };
 }
 
-export function buildMemberProvisionUpdates({ tenantId, uid, profile, editor = null, now = Date.now(), includeOwner = false }) {
+export function buildMemberProvisionUpdates({
+  tenantId,
+  uid,
+  profile,
+  editor = null,
+  now = Date.now(),
+  includeOwner = false,
+  includeMetaPaths = true,
+}) {
   const id = String(tenantId || '').trim();
   const u = String(uid || '').trim();
   if (!id || !u) throw new Error('缺少 tenantId 或 uid');
 
   return {
-    ...(includeOwner ? { [`tenants/${id}/meta/owner_uid`]: u } : {}),
+    ...(includeMetaPaths && includeOwner ? { [`tenants/${id}/meta/owner_uid`]: u } : {}),
     [`tenants/${id}/members/${u}`]: true,
     [`tenants/${id}/user_profiles/${u}`]: profile,
-    ...(editor?.uid
+    ...(includeMetaPaths && editor?.uid
       ? {
           [`tenants/${id}/meta/updated_at`]: now,
           [`tenants/${id}/meta/updated_by_uid`]: editor.uid,
