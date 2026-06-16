@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { get, set, onValue } from 'firebase/database';
 import { useTenant } from '@/composables/useTenant';
-import { normalizeTags } from '@/lib/guestUtils';
+import { useAuth } from '@/composables/useAuth';
 import {
   processFirebaseGuests,
   serializeGuestsForSave,
@@ -22,7 +22,8 @@ import {
 const DEFAULT_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
 
 export function useAdminGuests() {
-  const { tenantRef } = useTenant();
+  const { tenantRef, meta } = useTenant();
+  const { user } = useAuth();
 
   const guests = ref([]);
   const categories = ref([...DEFAULT_CATEGORIES]);
@@ -43,6 +44,25 @@ export function useAdminGuests() {
     toastTimer = setTimeout(() => {
       toast.value = '';
     }, ms);
+  }
+
+  async function ensureOwnerMemberRecord() {
+    const uid = user.value?.uid;
+    const ownerUid = meta.value?.owner_uid;
+    if (!uid || !ownerUid || ownerUid !== uid) return;
+    const snap = await get(tenantRef(`members/${uid}`));
+    const role = snap.val();
+    if (role === true || role === 'admin') return;
+    await set(tenantRef(`members/${uid}`), 'admin');
+  }
+
+  function formatSaveError(e) {
+    const code = String(e?.code || '');
+    const message = String(e?.message || '');
+    if (code === 'PERMISSION_DENIED' || /permission denied/i.test(message)) {
+      return '權限不足：請確認你已登入 Owner 或後台管理員帳號，並聯絡平台管理員更新 Firebase 規則。';
+    }
+    return message || '儲存失敗';
   }
 
   async function fetchBundle() {
@@ -84,6 +104,7 @@ export function useAdminGuests() {
     loading.value = true;
     loadError.value = '';
     try {
+      await ensureOwnerMemberRecord();
       applyBundle(await fetchBundle());
     } catch (e) {
       loadError.value = e?.message || '載入失敗';
@@ -209,6 +230,7 @@ export function useAdminGuests() {
     const { toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。' } = options;
     saving.value = true;
     try {
+      await ensureOwnerMemberRecord();
       const { wedding, unassigned } = serializeGuestsForSave(guests.value);
       await Promise.all([
         set(tenantRef('wedding_guests'), wedding),
@@ -223,7 +245,7 @@ export function useAdminGuests() {
       showToast(toastMessage, 2500);
       await load(true);
     } catch (e) {
-      throw new Error(e?.message || '儲存失敗');
+      throw new Error(formatSaveError(e));
     } finally {
       saving.value = false;
     }

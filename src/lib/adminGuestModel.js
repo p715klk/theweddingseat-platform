@@ -186,6 +186,12 @@ export function onGuestTableChange(guest, allGuests, tableSettings) {
   guest.sort = getSmallestAvailableSeat(tableNum, guest, allGuests, tableSettings);
 }
 
+/** Firebase rules expect `group` as a non-empty string (pipe-separated tags). */
+export function serializeGroupForFirebase(group) {
+  const tags = normalizeTags(group);
+  return tags.length ? tags.join('|') : '未分類';
+}
+
 export function serializeGuestsForSave(guests) {
   const wedding = {};
   const unassigned = [];
@@ -195,7 +201,7 @@ export function serializeGuestsForSave(guests) {
     const row = {
       name: g.name.trim(),
       side: g.side,
-      [PRIMARY_TAG_KEY]: normalizeTags(g.group),
+      [PRIMARY_TAG_KEY]: serializeGroupForFirebase(g.group),
     };
     if (g.table === '' || g.table == null || Number.isNaN(g.table)) {
       row.sort = 99;
