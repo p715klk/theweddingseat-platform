@@ -33,13 +33,21 @@ async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
   }
 
   try {
-    const snap = await get(dbRef(database, `tenants/${tenantId}/members/${uid}`));
-    const role = snap.val();
-    const isAdmin = role === true || role === 'admin';
+    const [memberSnap, ownerSnap] = await Promise.all([
+      get(dbRef(database, `tenants/${tenantId}/members/${uid}`)),
+      get(dbRef(database, `tenants/${tenantId}/meta/owner_uid`)),
+    ]);
+    const role = memberSnap.val();
+    const isOwner = ownerSnap.val() === uid;
+    const isAdmin = role === true || role === 'admin' || isOwner;
     const isReception = role === 'reception';
     canAccessAdmin.value = isAdmin;
     canAddWalkInGuest.value = isAdmin || isReception;
-    memberRole.value = role === true ? 'admin' : String(role || '');
+    if (isOwner && role !== true && role !== 'admin') {
+      memberRole.value = 'owner';
+    } else {
+      memberRole.value = role === true ? 'admin' : String(role || '');
+    }
     checkedKey = `${uid}:${tenantId}`;
   } catch (e) {
     console.warn('members 權限讀取失敗:', e);
