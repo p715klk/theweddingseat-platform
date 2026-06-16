@@ -13,12 +13,22 @@
       <span v-if="isPlatformAdmin">（平台預覽模式，你仍可睇到頁面）</span>
     </div>
     <header
-      class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-center items-center"
+      class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center gap-3"
       :style="{ backgroundColor: themeColor }"
     >
-      <div class="text-center">
+      <div class="flex-1" />
+      <div class="text-center flex-shrink-0">
         <h1 class="text-xl font-bold tracking-wider">{{ coupleNames || '載入中...' }}</h1>
         <p class="text-xs opacity-90 mt-1">{{ venueLabel || '載入中...' }}</p>
+      </div>
+      <div class="flex-1 flex justify-end">
+        <router-link
+          v-if="canAccessAdmin"
+          :to="adminRoute"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+        >
+          📋 後台管理
+        </router-link>
       </div>
     </header>
 
@@ -123,12 +133,17 @@
     <div
       v-if="selectedTable"
       class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-      @click.self="selectedTable = null"
+      @click.self="closeTableModal"
     >
       <div class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
-        <div class="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center">
-          <h2 class="text-lg font-bold text-red-800">第 {{ selectedTable }} 桌賓客名單</h2>
-          <button type="button" class="text-gray-500 text-2xl font-bold px-2" @click="selectedTable = null">
+        <div class="px-4 py-3 bg-red-50 border-b border-red-100 flex justify-between items-center">
+          <h2 class="text-lg font-bold text-red-800 leading-snug">
+            第 {{ selectedTable }} 桌賓客名單
+            <span class="text-sm font-bold text-red-600/80">
+              (座位數 {{ tableOccupancy.occupied }}/{{ tableOccupancy.max }} 位)
+            </span>
+          </h2>
+          <button type="button" class="text-gray-500 text-2xl font-bold px-2 leading-none" @click="closeTableModal">
             &times;
           </button>
         </div>
@@ -179,11 +194,77 @@
             </div>
           </div>
         </div>
+        <div v-if="canAccessAdmin && tableOccupancy.remaining > 0" class="p-3 border-t bg-white">
+          <div v-if="!showAddGuestForm">
+            <button
+              type="button"
+              class="w-full py-2.5 text-sm font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm"
+              :disabled="checkInLocked || addingGuest"
+              @click="showAddGuestForm = true"
+            >
+              + 填入此桌新賓客 / 臨時帶伴 (餘下 {{ tableOccupancy.remaining }} 空位)
+            </button>
+          </div>
+          <form v-else class="space-y-2" @submit.prevent="submitWalkInGuest">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 mb-1">姓名</label>
+              <input
+                v-model="walkInName"
+                type="text"
+                required
+                placeholder="若是眷屬，請遵循：主客姓名 眷屬 X"
+                class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              />
+            </div>
+            <div class="flex gap-2">
+              <div class="flex-1">
+                <label class="block text-xs font-bold text-gray-500 mb-1">來源</label>
+                <select v-model="walkInSide" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
+                  <option value="男方">男方</option>
+                  <option value="女方">女方</option>
+                </select>
+              </div>
+              <div class="flex-[2]">
+                <label class="block text-xs font-bold text-gray-500 mb-1">標籤</label>
+                <input
+                  v-model="walkInGroup"
+                  type="text"
+                  placeholder="現場加座"
+                  class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                />
+              </div>
+            </div>
+            <p v-if="walkInError" class="text-xs text-red-600 font-bold">{{ walkInError }}</p>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold"
+                :disabled="addingGuest"
+                @click="cancelWalkInForm"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                class="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold disabled:opacity-60"
+                :disabled="addingGuest"
+              >
+                {{ addingGuest ? '新增中…' : '確認新增' }}
+              </button>
+            </div>
+          </form>
+        </div>
+        <div
+          v-else-if="selectedTable && tableOccupancy.remaining <= 0"
+          class="px-4 py-3 border-t bg-gray-50 text-center text-xs font-bold text-gray-400"
+        >
+          🔒 此圍已滿 {{ tableOccupancy.max }} 人（如需加人，請先將其他賓客設為「取消」釋放座位）
+        </div>
         <div class="p-4 border-t bg-gray-50 text-right">
           <button
             type="button"
             class="bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-gray-600"
-            @click="selectedTable = null"
+            @click="closeTableModal"
           >
             關閉
           </button>
@@ -200,6 +281,7 @@ import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useCheckIn } from '@/composables/useCheckIn';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
+import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 
@@ -207,6 +289,7 @@ const route = useRoute();
 const loading = ref(true);
 const { authReady } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
+const { canAccessAdmin } = useTenantAccess();
 const { error, isExpired, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
 const {
   floorLayout,
@@ -223,12 +306,28 @@ const {
   tableStyle,
   sortedGuests,
   searchResults,
+  getTableOccupancy,
+  addWalkInGuest,
   guestStatus,
   parseArrivedStatus,
   guestStatusKey,
   normalizeTags,
   guestMatchesKeyword,
 } = useCheckIn();
+
+const showAddGuestForm = ref(false);
+const walkInName = ref('');
+const walkInSide = ref('男方');
+const walkInGroup = ref('現場加座');
+const walkInError = ref('');
+const addingGuest = ref(false);
+
+const adminRoute = computed(() => `/p/${route.params.slug}/admin`);
+
+const tableOccupancy = computed(() => {
+  if (!selectedTable.value) return { occupied: 0, max: 12, remaining: 0 };
+  return getTableOccupancy(selectedTable.value);
+});
 
 const showFloorScrollHint = ref(false);
 
@@ -294,6 +393,44 @@ onUnmounted(stopSync);
 function openTable(num) {
   selectedTable.value = String(num);
   searchKeyword.value = '';
+  resetWalkInForm();
+}
+
+function closeTableModal() {
+  selectedTable.value = null;
+  resetWalkInForm();
+}
+
+function resetWalkInForm() {
+  showAddGuestForm.value = false;
+  walkInName.value = '';
+  walkInSide.value = '男方';
+  walkInGroup.value = '現場加座';
+  walkInError.value = '';
+}
+
+function cancelWalkInForm() {
+  showAddGuestForm.value = false;
+  walkInName.value = '';
+  walkInError.value = '';
+}
+
+async function submitWalkInGuest() {
+  if (checkInLocked.value || !selectedTable.value) return;
+  walkInError.value = '';
+  addingGuest.value = true;
+  try {
+    await addWalkInGuest(selectedTable.value, {
+      name: walkInName.value,
+      side: walkInSide.value,
+      group: walkInGroup.value,
+    });
+    resetWalkInForm();
+  } catch (err) {
+    walkInError.value = err?.message || '新增失敗，請確認已登入並有寫入權限';
+  } finally {
+    addingGuest.value = false;
+  }
 }
 
 function guestArrived(table, guest) {

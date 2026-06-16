@@ -51,26 +51,8 @@ function persistTableSettings() {
 }
 
 function ensureDefaultTablesIfEmpty() {
-    if (getTableSettingKeys().length > 0) return false;
-
-    let created = false;
-    for (let i = 1; i <= 14; i++) {
-        const row = Math.floor((i - 1) / 4);
-        const col = (i - 1) % 4;
-        const colGap = 440;
-        const rowGap = 460;
-        const gridW = 3 * colGap + TABLE_DIM;
-        const gridH = 3 * rowGap + TABLE_TOTAL_H;
-        const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
-        const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
-        tableSettings[String(i)] = {
-            max_seats: 12,
-            x: snapToGrid(startX + col * colGap),
-            y: snapToGrid(startY + row * rowGap)
-        };
-        created = true;
-    }
-    return created;
+    // 唔再自動建立預設枱；請用畫布「➕ 新增圓枱」
+    return false;
 }
 
 let selectedGuestContext = null;
@@ -2258,8 +2240,21 @@ function startSeatingRealtimeSync() {
 
     tenantRef('table_settings').on('value', (snapshot) => {
         if (isDraggingTable) return;
+        const incoming = loadTableSettings(snapshot.val());
         if (suppressTableSettingsRemoteRenderCount > 0) {
             suppressTableSettingsRemoteRenderCount--;
+            let addedNew = false;
+            Object.keys(incoming).forEach((k) => {
+                if (!tableSettings[k]) {
+                    tableSettings[k] = incoming[k];
+                    addedNew = true;
+                }
+            });
+            if (addedNew) {
+                runRender();
+                refreshFindTableMenu();
+                scheduleFloorLayoutSync();
+            }
             return;
         }
         const root = {
@@ -2622,14 +2617,37 @@ function createNewTableAction() {
         viewport.getBoundingClientRect().left + viewport.getBoundingClientRect().width / 2,
         viewport.getBoundingClientRect().top + viewport.getBoundingClientRect().height / 2
     );
-    tenantRef(`table_settings/${cleanNum}`).set({
+    const newSettings = {
         max_seats: cleanMax,
         x: snapToGrid(center.x - PLATE_SIZE / 2),
-        y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
-    }).then(() => forceFloorLayoutSync()).catch((err) => {
-        console.error('新增圓枱失敗:', err);
-        alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+        y: snapToGrid(center.y - TABLE_TOTAL_H / 2),
+    };
+    tableSettings[cleanNum] = newSettings;
+    runRender();
+    refreshFindTableMenu();
+    suppressTableSettingsRemoteRenderCount = 1;
+    tenantRef(`table_settings/${cleanNum}`).set(newSettings)
+        .then(() => forceFloorLayoutSync())
+        .catch((err) => {
+            suppressTableSettingsRemoteRenderCount = 0;
+            delete tableSettings[cleanNum];
+            runRender();
+            refreshFindTableMenu();
+            console.error('新增圓枱失敗:', err);
+            alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+        });
+}
+
+function getMinAllowedMaxSeats(tableNum) {
+    const idx = parseInt(tableNum, 10);
+    const guests = (allGuests[idx] || []).filter(g => g && g.name);
+    if (!guests.length) return 1;
+    let maxSort = 0;
+    guests.forEach(g => {
+        const sort = parseInt(g.sort, 10);
+        if (!isNaN(sort) && sort >= 1) maxSort = Math.max(maxSort, sort);
     });
+    return Math.max(guests.length, maxSort, 1);
 }
 
 function fillTableSettingsForm(tableNum, currentMax) {
@@ -2638,6 +2656,7 @@ function fillTableSettingsForm(tableNum, currentMax) {
     const labelEl = document.getElementById('modal-table-label');
     const maxEl = document.getElementById('modal-max-seats');
     const numStr = String(tableNum);
+    const minMax = getMinAllowedMaxSeats(tableNum);
 
     numEl.value = '';
     numEl.defaultValue = numStr;
@@ -2645,7 +2664,8 @@ function fillTableSettingsForm(tableNum, currentMax) {
     numEl.value = numStr;
 
     labelEl.value = settings.label || '';
-    maxEl.value = String(currentMax);
+    maxEl.min = String(minMax);
+    maxEl.value = String(Math.max(currentMax, minMax));
 }
 
 function openSettingsModal(tableNum, currentMax) {
@@ -2679,6 +2699,12 @@ function saveTableSettingsAction() {
     }
     if (newNum !== oldNum && tableSettings[newNum]) {
         alert(`❌ Table ${newNum} 已存在！`);
+        return;
+    }
+
+    const minMax = getMinAllowedMaxSeats(oldNum);
+    if (newMax < minMax) {
+        alert(`❌ 此桌已有 ${minMax} 位賓客，座位上限不能少於 ${minMax}！`);
         return;
     }
 

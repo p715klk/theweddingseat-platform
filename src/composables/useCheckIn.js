@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { onValue, set } from 'firebase/database';
 import { useTenant } from '@/composables/useTenant';
+import { getMaxSeatsForTable } from '@/lib/adminGuestModel';
 import {
   buildCheckInFloorPlan,
   parseArrivedStatus,
@@ -114,6 +115,56 @@ export function useCheckIn() {
     };
   }
 
+  function getTableMaxSeats(tableNum) {
+    return getMaxSeatsForTable(tableNum, tableSettingsCache);
+  }
+
+  function getTableOccupancy(tableNum) {
+    const guests = weddingGuests.value[tableNum] || [];
+    const max = getTableMaxSeats(tableNum);
+    let occupied = 0;
+    guests.forEach((g) => {
+      const st = parseArrivedStatus(guestStatus.value[guestStatusKey(tableNum, g.name)]?.arrived);
+      if (st !== '取消') occupied += 1;
+    });
+    return { occupied, max, remaining: Math.max(0, max - occupied) };
+  }
+
+  function getNextSeatForTable(tableNum) {
+    const guests = weddingGuests.value[tableNum] || [];
+    const max = getTableMaxSeats(tableNum);
+    const occupiedActive = new Set();
+
+    guests.forEach((guest) => {
+      const key = guestStatusKey(tableNum, guest.name);
+      const st = parseArrivedStatus(guestStatus.value[key]?.arrived);
+      if (st === '取消') return;
+      const sort = parseInt(guest.sort, 10);
+      if (!Number.isNaN(sort) && sort >= 1 && sort <= max) {
+        occupiedActive.add(sort);
+      }
+    });
+
+    for (let i = 1; i <= max; i += 1) {
+      if (!occupiedActive.has(i)) return i;
+    }
+    return max;
+  }
+
+  async function addWalkInGuest(tableNum, { name, side, group }) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) throw new Error('請輸入姓名');
+    const currentGuests = weddingGuests.value[tableNum] || [];
+    const nextIndex = currentGuests.length;
+    const nextSeat = getNextSeatForTable(tableNum);
+    await set(tenantRef(`wedding_guests/${tableNum}/${nextIndex}`), {
+      name: trimmed,
+      side: side === '女方' ? '女方' : '男方',
+      group: normalizeTags(group || '現場加座'),
+      sort: nextSeat,
+    });
+  }
+
   function sortedGuests(tableNum) {
     const guests = [...(weddingGuests.value[tableNum] || [])];
     return guests.sort((a, b) => {
@@ -160,6 +211,8 @@ export function useCheckIn() {
     tableStyle,
     sortedGuests,
     searchResults,
+    getTableOccupancy,
+    addWalkInGuest,
     parseArrivedStatus,
     guestStatusKey,
     normalizeTags,

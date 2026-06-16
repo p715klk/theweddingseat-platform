@@ -224,7 +224,7 @@
           </div>
           <div>
             <label class="block text-[11px] font-bold text-slate-500 mb-1">枱標籤（顯示於枱中央）：</label>
-            <input type="text" id="modal-table-label" placeholder="例如：父親朋友、母親朋友、SU" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <input type="text" id="modal-table-label" placeholder="例如：主家席、父親朋友、母親朋友" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
           </div>
           <div>
             <label class="block text-[11px] font-bold text-slate-500 mb-1">此桌座位數量 (人數上限)：</label>
