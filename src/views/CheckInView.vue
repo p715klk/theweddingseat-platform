@@ -1,14 +1,14 @@
 <template>
   <div class="checkin-page min-h-screen">
     <TenantErrorView v-if="error" :message="error" />
-    <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
-      ⏳ 載入中...
-    </div>
     <div
       v-else-if="requireLogin && authReady && !user"
       class="min-h-screen flex items-center justify-center bg-gray-100 p-4"
     >
       <FrontendLoginForm @success="onLoggedIn" />
+    </div>
+    <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
+      ⏳ 載入中...
     </div>
     <div v-else class="bg-gray-100 text-gray-800 font-sans pb-12 select-none min-h-screen">
     <div
