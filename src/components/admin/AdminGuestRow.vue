@@ -40,7 +40,7 @@
       </span>
       <span
         v-else
-        class="row-seat-label inline-flex items-center gap-0.5 font-mono font-bold text-gray-600 flex-wrap justify-center"
+        class="row-seat-label inline-flex items-center gap-0.5 font-mono font-bold text-gray-600 flex-nowrap justify-center"
       >
         第 <span class="row-table-display-num">{{ guest.table }}</span> 桌 - 第
         <div class="row-seat-wrap">

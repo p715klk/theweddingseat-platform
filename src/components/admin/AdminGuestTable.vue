@@ -26,8 +26,8 @@
           </th>
           <th
             class="py-2 px-2 text-center text-sm font-bold text-gray-600 border-b border-gray-200"
-            style="width:100px"
-            data-min-width="88"
+            style="width:110px"
+            data-min-width="120"
           >
             桌次座位
           </th>
@@ -47,8 +47,8 @@
           </th>
           <th
             class="py-2 px-2 text-left text-sm font-bold text-red-700 bg-red-50/40 border-b border-gray-200"
-            style="width:200px"
-            data-min-width="160"
+            style="width:162px"
+            data-min-width="140"
           >
             標籤 (可多選)
           </th>
