@@ -2863,7 +2863,7 @@ function resetEngineState() {
     panY = -600;
 }
 
-export function initSeatingEngine({ tenantRef, slug, onLogout, adminHref }) {
+export function initSeatingEngine({ tenantRef, slug, onLogout }) {
     if (engineInitialized) destroySeatingEngine();
     rawTenantRef = tenantRef;
     tenantRefFn = createCompatTenantRef(tenantRef);
@@ -2871,9 +2871,6 @@ export function initSeatingEngine({ tenantRef, slug, onLogout, adminHref }) {
     viewport = document.getElementById('canvas-viewport');
     canvas = document.getElementById('main-canvas');
     if (!viewport || !canvas) throw new Error('Seating canvas DOM not found');
-
-    const backLink = document.getElementById('link-back-admin');
-    if (backLink && adminHref) backLink.setAttribute('href', adminHref);
 
     exposeWindowActions(onLogout);
     bindViewportEvents();

@@ -42,17 +42,21 @@
 
           <button
             type="button"
-            class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center disabled:opacity-70"
+            :disabled="!!navigatingTo"
+            @mouseenter="prefetchSeatingRoute"
+            @focus="prefetchSeatingRoute"
             @click="requestLeave(seatingRoute)"
           >
-            🦢 前往畫布排位
+            {{ navigatingTo === seatingRoute ? '載入畫布…' : '🦢 前往畫布排位' }}
           </button>
           <button
             type="button"
-            class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center"
+            class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition text-center disabled:opacity-70"
+            :disabled="!!navigatingTo"
             @click="requestLeave(checkInRoute)"
           >
-            🏠 前往點名首頁
+            {{ navigatingTo === checkInRoute ? '載入中…' : '🏠 前往點名首頁' }}
           </button>
           <button
             type="button"
@@ -214,6 +218,7 @@ const csvFileName = ref('');
 const csvImportedGuests = ref([]);
 const leaveDialog = ref(false);
 const pendingLeave = ref(null);
+const navigatingTo = ref('');
 const deleteTagOpen = ref(false);
 const deleteTagSelected = ref('');
 
@@ -244,7 +249,27 @@ function onExportCsv() {
   exportCSV();
 }
 
+function prefetchSeatingRoute() {
+  void import('@/views/SeatingView.vue');
+  void import('@/components/seating/SeatingCanvasApp.vue');
+}
+
+async function navigateTo(path) {
+  if (!path || navigatingTo.value) return;
+  navigatingTo.value = path;
+  try {
+    if (path === seatingRoute.value) prefetchSeatingRoute();
+    await router.push(path);
+  } catch (e) {
+    console.error('導航失敗:', e);
+    window.alert('頁面載入失敗，請重試或重新整理');
+  } finally {
+    navigatingTo.value = '';
+  }
+}
+
 onMounted(async () => {
+  prefetchSeatingRoute();
   startSync();
   try {
     await load(true);
@@ -317,8 +342,9 @@ function confirmDeleteTag() {
 }
 
 function requestLeave(path) {
+  if (navigatingTo.value) return;
   if (!dirty.value) {
-    router.push(path);
+    void navigateTo(path);
     return;
   }
   pendingLeave.value = path;
@@ -329,7 +355,7 @@ async function leaveSaveAndGo() {
   try {
     await save();
     leaveDialog.value = false;
-    if (pendingLeave.value) router.push(pendingLeave.value);
+    if (pendingLeave.value) await navigateTo(pendingLeave.value);
   } catch (e) {
     window.alert(`❌ 儲存失敗: ${e.message}`);
   }
@@ -338,7 +364,7 @@ async function leaveSaveAndGo() {
 function leaveDiscard() {
   dirty.value = false;
   leaveDialog.value = false;
-  if (pendingLeave.value) router.push(pendingLeave.value);
+  if (pendingLeave.value) void navigateTo(pendingLeave.value);
 }
 
 onBeforeRouteLeave((to) => {

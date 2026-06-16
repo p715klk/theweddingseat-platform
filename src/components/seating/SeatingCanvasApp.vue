@@ -86,13 +86,13 @@
               <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-t border-slate-100" @click="handlePrintMenuAction('guest-list', $event)">📋 打印圓枱名單（文字版）</button>
             </div>
           </div>
-          <a
+          <RouterLink
             id="link-back-admin"
-            :href="adminHref"
+            :to="adminRoute"
             class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
           >
             📋<span class="hide-mobile"> 返回</span>
-          </a>
+          </RouterLink>
           <button
             type="button"
             class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
@@ -269,9 +269,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
-import { appPath } from '@/lib/appBase';
 import {
   initSeatingEngine,
   destroySeatingEngine,
@@ -312,7 +311,11 @@ const emit = defineEmits(['logout']);
 const { tenantRef, tenantId } = useTenant();
 const initError = ref('');
 
-const adminHref = computed(() => appPath(`p/${props.slug}/admin`));
+const adminRoute = computed(() => `/p/${props.slug}/admin`);
+
+function prefetchAdminRoute() {
+  void import('@/views/AdminView.vue');
+}
 
 function mountEngine() {
   if (!tenantId.value) return;
@@ -322,7 +325,6 @@ function mountEngine() {
       tenantRef,
       slug: props.slug,
       onLogout: () => emit('logout'),
-      adminHref: adminHref.value,
     });
   } catch (err) {
     console.error('畫布引擎初始化失敗:', err);
@@ -330,13 +332,20 @@ function mountEngine() {
   }
 }
 
+async function mountEngineWhenReady() {
+  if (!tenantId.value) return;
+  await nextTick();
+  mountEngine();
+}
+
 onMounted(() => {
-  if (tenantId.value) mountEngine();
+  prefetchAdminRoute();
+  void mountEngineWhenReady();
 });
 
 watch(tenantId, (id) => {
   if (!id) return;
-  requestAnimationFrame(() => mountEngine());
+  void mountEngineWhenReady();
 });
 
 onUnmounted(() => {
