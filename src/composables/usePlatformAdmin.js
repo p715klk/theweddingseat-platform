@@ -20,7 +20,10 @@ async function refreshPlatformAdmin(uid) {
     isPlatformAdmin.value = snap.val() === true;
     checkedUid = uid;
   } catch (e) {
-    console.error('platform_admins 讀取失敗:', e);
+    const code = String(e?.code || '');
+    if (code !== 'PERMISSION_DENIED') {
+      console.error('platform_admins 讀取失敗:', e);
+    }
     isPlatformAdmin.value = false;
     checkedUid = uid;
   } finally {

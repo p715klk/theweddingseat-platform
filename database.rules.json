@@ -3,6 +3,7 @@
     "platform_admins": {
       ".read": "auth != null && root.child('platform_admins').child(auth.uid).val() === true",
       "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && root.child('platform_admins').child(auth.uid).val() === true && (newData.val() === true || !newData.exists())",
         ".validate": "!newData.exists() || (newData.isBoolean() && newData.val() === true)"
       }
