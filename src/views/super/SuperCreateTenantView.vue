@@ -59,23 +59,50 @@
         </div>
       </div>
 
-      <div class="field">
-        <label>客戶 Owner Email <span class="req">*</span></label>
-        <input v-model="form.ownerEmail" type="email" required placeholder="client@example.com" :disabled="prefilling || saving" />
-        <p class="field-hint">此 email 會用作後台登入帳號，並自動加入 <code>members</code>。</p>
-      </div>
+      <section class="owner-section">
+        <h3>客戶登入（Owner）</h3>
+        <p class="hint-block">
+          建立成功後，呢個 Email 可以登入 <code>/p/&lt;slug&gt;/admin</code>。Owner 會自動加入 <code>members</code>。
+        </p>
 
-      <div class="field">
-        <label>客戶初始密碼（選填）</label>
-        <input
-          v-model="form.ownerPassword"
-          type="password"
-          minlength="6"
-          placeholder="留空：系統自動生成臨時密碼"
-          :disabled="prefilling || saving"
-        />
-        <p class="field-hint">若留空，建立成功後會顯示一次性「臨時密碼」，請即時複製交畀客戶。</p>
-      </div>
+        <div class="grid owner-grid">
+          <div class="field">
+            <label>Owner Email <span class="req">*</span></label>
+            <input
+              v-model="form.ownerEmail"
+              type="email"
+              required
+              placeholder="client@example.com"
+              autocomplete="off"
+              :disabled="prefilling || saving"
+            />
+          </div>
+
+          <div class="field">
+            <label>初始密碼 <span class="req">*</span></label>
+            <div class="pw-row">
+              <input
+                v-model="form.ownerPassword"
+                type="text"
+                required
+                minlength="6"
+                placeholder="至少 6 個字元"
+                autocomplete="new-password"
+                :disabled="prefilling || saving"
+              />
+              <button
+                type="button"
+                class="btn-generate"
+                :disabled="prefilling || saving"
+                @click="generateRandomPassword"
+              >
+                生成
+              </button>
+            </div>
+            <p class="field-hint">會以明文顯示，方便直接複製畀客戶。</p>
+          </div>
+        </div>
+      </section>
 
       <div v-if="createdInfo" class="created-box">
         <p class="created-title">✅ 已建立客戶登入</p>
@@ -269,7 +296,26 @@ async function submit() {
     }
     router.push(`/super/tenants/${result.slug}`);
   } catch (e) {
-    error.value = e?.message || '建立失敗';
+    const code = e?.code ? String(e.code) : '';
+    const msg = e?.message ? String(e.message) : '';
+    const details =
+      e?.details != null
+        ? (() => {
+            try {
+              return typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
+            } catch {
+              return String(e.details);
+            }
+          })()
+        : '';
+
+    const base = code && msg ? `${code}: ${msg}` : msg || '建立失敗';
+    const extra = details ? `\n${details}` : '';
+    const hint =
+      code === 'functions/internal' && msg === 'internal'
+        ? '\n（提示：多數係 Cloud Function 未 deploy／region 錯／Function runtime error。請到 Firebase Console → Functions → Logs 睇真因。）'
+        : '';
+    error.value = `${base}${extra}${hint}`;
   } finally {
     saving.value = false;
   }
@@ -281,6 +327,15 @@ async function copy(text) {
   } catch {
     /* ignore */
   }
+}
+
+function generateRandomPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let out = '';
+  for (let i = 0; i < 12; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  form.ownerPassword = out;
 }
 
 onUnmounted(() => {
@@ -331,7 +386,9 @@ onUnmounted(() => {
   color: #dc2626;
 }
 .field input[type='text'],
-.field input[type='date'] {
+.field input[type='date'],
+.field input[type='email'],
+.field input[type='password'] {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 0.5rem;
@@ -390,6 +447,43 @@ onUnmounted(() => {
   background: #f0fdf4;
   border-radius: 0.75rem;
   padding: 0.75rem;
+}
+.owner-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+.hint-block {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+.pw-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.pw-row input {
+  flex: 1;
+}
+.owner-grid {
+  align-items: end;
+}
+.btn-generate {
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 700;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.btn-generate:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 .created-title {
   margin: 0 0 0.5rem;

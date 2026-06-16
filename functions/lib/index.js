@@ -146,11 +146,49 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
     // Create Auth user first; if DB write fails later, caller can delete user manually.
     // (We try to reduce the chance by using multi-path update afterwards.)
     const auth = getAuth();
-    const userRecord = await auth.createUser({
-        email: ownerEmail,
-        password: ownerPassword,
-        displayName: ownerDisplayName || undefined,
-    });
+    let userRecord;
+    let authUserWasCreated = false;
+    try {
+        userRecord = await auth.createUser({
+            email: ownerEmail,
+            password: ownerPassword,
+            displayName: ownerDisplayName || undefined,
+        });
+        authUserWasCreated = true;
+    }
+    catch (e) {
+        console.error("createTenant: auth.createUser failed", {
+            ownerEmail,
+            code: e?.code,
+            message: e?.message,
+        });
+        const code = String(e?.code || "");
+        if (code === "auth/email-already-exists") {
+            // Reuse existing Auth user (same email can join multiple projects).
+            try {
+                const existing = await auth.getUserByEmail(ownerEmail);
+                userRecord = { uid: existing.uid };
+                authUserWasCreated = false;
+            }
+            catch (lookupErr) {
+                console.error("createTenant: getUserByEmail failed", {
+                    ownerEmail,
+                    code: lookupErr?.code,
+                    message: lookupErr?.message,
+                });
+                throw new HttpsError("internal", lookupErr?.message || "找不到既有帳號");
+            }
+        }
+        else if (code === "auth/invalid-email") {
+            throw new HttpsError("invalid-argument", "Email 格式無效");
+        }
+        else if (code === "auth/invalid-password") {
+            throw new HttpsError("invalid-argument", "密碼格式無效（至少 6 個字元）");
+        }
+        else {
+            throw new HttpsError("internal", e?.message || "建立 Auth 帳號失敗");
+        }
+    }
     const now = Date.now();
     const editorEmail = req.auth.token.email ? String(req.auth.token.email) : "";
     const meta = {
@@ -170,15 +208,18 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
         updated_by_uid: req.auth.uid,
         updated_by_email: editorEmail,
     };
+    const tenantId = normalized;
+    const tenantBase = `tenants/${tenantId}`;
+    // Preserve existing profile audit if it already exists (email reuse)
+    const existingProfileSnap = await db.ref(`${tenantBase}/user_profiles/${userRecord.uid}`).get();
+    const existingProfile = existingProfileSnap.exists() ? existingProfileSnap.val() : null;
     const profile = {
         email: ownerEmail,
         display_name: ownerDisplayName,
-        created_at: now,
-        created_by_uid: req.auth.uid,
-        created_by_email: editorEmail,
+        created_at: existingProfile?.created_at ?? now,
+        created_by_uid: existingProfile?.created_by_uid ?? req.auth.uid,
+        created_by_email: existingProfile?.created_by_email ?? editorEmail,
     };
-    const tenantId = normalized;
-    const tenantBase = `tenants/${tenantId}`;
     const tableSettings = buildDefaultTableSettings(1);
     const floorLayout = buildFloorPlanFromTableSettings(tableSettings);
     const updates = {
@@ -197,9 +238,17 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
         await db.ref().update(updates);
     }
     catch (e) {
+        console.error("createTenant: rtdb update failed", {
+            tenantId,
+            ownerEmail,
+            ownerUid: userRecord.uid,
+            message: e?.message,
+        });
         // Best-effort rollback for the newly created Auth user
         try {
-            await auth.deleteUser(userRecord.uid);
+            if (authUserWasCreated) {
+                await auth.deleteUser(userRecord.uid);
+            }
         }
         catch {
             // ignore
@@ -213,7 +262,7 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
         adminUrl: `/p/${normalized}/admin`,
         ownerUid: userRecord.uid,
         ownerEmail,
-        ...(ownerPasswordRaw ? {} : { ownerTempPassword: ownerPassword }),
+        ...(authUserWasCreated && !ownerPasswordRaw ? { ownerTempPassword: ownerPassword } : {}),
     };
 });
 export const setUserPassword = onCall({ region: "asia-southeast1" }, async (req) => {
