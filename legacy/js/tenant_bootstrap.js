@@ -103,6 +103,14 @@ function isAdminContext() {
     return new URLSearchParams(location.search).get('admin') === '1';
 }
 
+function isCheckinDisabled(meta) {
+    if (!meta) return false;
+    if (meta.features && typeof meta.features.checkin === 'boolean') {
+        return meta.features.checkin === false;
+    }
+    return meta.status === 'expired';
+}
+
 function initTenant() {
     tenantSlug = resolveTenantSlug();
 
@@ -117,9 +125,9 @@ function initTenant() {
                 showTenantError(`找不到專案「${tenantSlug}」。請確認 URL 或 Firebase 內 tenants/${tenantSlug}/meta 已建立。`);
                 throw new Error(`Tenant not found: ${tenantSlug}`);
             }
-            if (tenantMeta.status === 'expired' && !isAdminContext()) {
-                showTenantError('此婚宴專案已結束，如有疑問請聯絡婚禮統籌。');
-                throw new Error(`Tenant expired: ${tenantSlug}`);
+            if (isCheckinDisabled(tenantMeta) && !isAdminContext()) {
+                showTenantError('此婚宴專案點名功能已停用，如有疑問請聯絡婚禮統籌。');
+                throw new Error(`Tenant checkin disabled: ${tenantSlug}`);
             }
             applyTenantBranding();
             return tenantMeta;

@@ -10,6 +10,7 @@ import {
   normalizePassword,
   assertPassword,
 } from '@/lib/superAdminProvisioning';
+import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -335,6 +336,7 @@ export async function createTenant({
     wedding_date: weddingDate,
     theme_color: themeColor,
     status: 'active',
+    features: { ...DEFAULT_TENANT_FEATURES },
     slug: normalized,
     plan,
     ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
@@ -428,6 +430,7 @@ export async function cloneTenant({
     wedding_date: weddingDate,
     theme_color: themeColor,
     status: 'active',
+    features: { ...DEFAULT_TENANT_FEATURES },
     slug: normalized,
     plan,
     ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
@@ -474,7 +477,31 @@ export async function cloneTenant({
 }
 
 export async function setTenantStatus(tenantId, status, editor = null) {
-  await updateTenantMeta(tenantId, { status }, editor);
+  const checkin = status !== 'expired';
+  await updateTenantMeta(
+    tenantId,
+    {
+      status,
+      features: { checkin, guestlist: true, seating: true },
+    },
+    editor,
+  );
+}
+
+export async function setTenantFeatures(tenantId, features, editor = null) {
+  const normalized = {
+    checkin: features?.checkin !== false,
+    guestlist: features?.guestlist !== false,
+    seating: features?.seating !== false,
+  };
+  await updateTenantMeta(
+    tenantId,
+    {
+      features: normalized,
+      status: normalized.checkin ? 'active' : 'expired',
+    },
+    editor,
+  );
 }
 
 /** 永久刪除 tenant（含 slug 對應及所有資料） */

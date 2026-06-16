@@ -42,7 +42,7 @@
             <span>{{ formatUpdated(t.meta) }}</span>
           </td>
           <td>
-            <span class="badge" :class="t.meta.status || 'active'">{{ t.meta.status || 'active' }}</span>
+            <span class="badge" :class="featureBadgeClass(t.meta)">{{ featureStatusLabel(t.meta) }}</span>
           </td>
           <td class="actions-cell" @click.stop>
             <div class="actions-wrap">
@@ -138,6 +138,7 @@ import { useRouter } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
 import { listTenants, deleteTenant, formatAuditTime } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
+import { featureStatusLabel, resolveTenantFeatures } from '@/lib/tenantFeatures';
 
 const router = useRouter();
 const { verifyPassword } = useAuth();
@@ -157,6 +158,12 @@ let toastTimer = null;
 function venueLabel(meta) {
   const parts = [meta.venue_name, meta.venue_hall].filter(Boolean);
   return parts.length ? parts.join(' · ') : '—';
+}
+
+function featureBadgeClass(meta) {
+  const f = resolveTenantFeatures(meta);
+  if (f.checkin && f.guestlist && f.seating) return 'active';
+  return 'partial';
 }
 
 function formatUpdated(meta) {
@@ -426,6 +433,10 @@ defineExpose({ load });
 .badge.expired {
   background: #fee2e2;
   color: #991b1b;
+}
+.badge.partial {
+  background: #fff7ed;
+  color: #c2410c;
 }
 code {
   font-size: 0.8em;

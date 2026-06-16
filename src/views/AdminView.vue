@@ -33,6 +33,7 @@ import { computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
+import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import AdminPanel from '@/components/admin/AdminPanel.vue';
@@ -40,11 +41,20 @@ import AdminPanel from '@/components/admin/AdminPanel.vue';
 const route = useRoute();
 const { slug, ready, error, coupleNames, initTenant } = useTenant();
 const { user, authReady, logout } = useAuth();
-
-initTenant(route, { allowExpired: true });
+const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);
+
+async function bootAdmin() {
+  if (!platformAdminReady.value) return;
+  await initTenant(route, {
+    featureGate: 'guestlist',
+    allowWhenDisabled: isPlatformAdmin.value,
+  });
+}
+
+watch([platformAdminReady, () => route.params.slug], bootAdmin, { immediate: true });
 
 function onLoggedIn() {
   /* auth state updates automatically */
@@ -53,11 +63,6 @@ function onLoggedIn() {
 async function handleLogout() {
   await logout();
 }
-
-watch(
-  () => route.params.slug,
-  () => initTenant(route, { allowExpired: true }),
-);
 </script>
 
 <style scoped>

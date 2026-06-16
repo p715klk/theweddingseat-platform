@@ -18,10 +18,10 @@
     </div>
     <div v-else class="bg-gray-100 text-gray-800 font-sans pb-12 select-none min-h-screen">
     <div
-      v-if="isExpired"
+      v-if="!features.checkin"
       class="sticky top-0 z-[60] bg-amber-100 border-b border-amber-300 text-amber-950 text-center text-xs font-bold py-2 px-3"
     >
-      ⚠️ 此專案已 expired — 公開點名已停用
+      ⚠️ 點名功能已停用
       <span v-if="isPlatformAdmin">（平台預覽模式，你仍可睇到頁面）</span>
     </div>
     <header
@@ -313,7 +313,7 @@ const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').t
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin } = useTenantAccess();
-const { error, isExpired, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
+const { error, features, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
 const {
   floorLayout,
   selectedTable,
@@ -370,7 +370,7 @@ watch(
   { immediate: true },
 );
 
-const checkInLocked = computed(() => isExpired.value);
+const checkInLocked = computed(() => !features.value.checkin);
 
 function onCycleArrived(table, name, current) {
   if (checkInLocked.value) return;
@@ -385,7 +385,10 @@ function onCycleGift(table, name, current) {
 async function bootCheckIn() {
   loading.value = true;
   try {
-    await initTenant(route, { allowExpired: isPlatformAdmin.value });
+    await initTenant(route, {
+      featureGate: 'checkin',
+      allowWhenDisabled: isPlatformAdmin.value,
+    });
     if (!error.value) startSync();
   } finally {
     loading.value = false;

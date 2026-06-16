@@ -33,6 +33,7 @@ import { computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
+import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import SeatingCanvasApp from '@/components/seating/SeatingCanvasApp.vue';
@@ -40,27 +41,29 @@ import SeatingCanvasApp from '@/components/seating/SeatingCanvasApp.vue';
 const route = useRoute();
 const { slug, ready, error, initTenant } = useTenant();
 const { user, authReady, logout } = useAuth();
-
-initTenant(route, { allowExpired: true });
+const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);
 
+async function bootSeating() {
+  if (!platformAdminReady.value) return;
+  await initTenant(route, {
+    featureGate: 'seating',
+    allowWhenDisabled: isPlatformAdmin.value,
+  });
+}
+
+watch([platformAdminReady, () => route.params.slug], bootSeating, { immediate: true });
+
 async function handleLogout() {
   await logout();
 }
-
-watch(
-  () => route.params.slug,
-  () => initTenant(route, { allowExpired: true }),
-);
 </script>
 
 <style scoped>
 .seating-host {
-  height: 100vh;
-  width: 100%;
-  overflow: hidden;
-  background: #0f172a;
+  min-height: 100vh;
+  background: #f1f5f9;
 }
 </style>

@@ -54,7 +54,7 @@
 - [ ] 新增 `js/tenant_bootstrap.js`，負責：
   - 從 URL 讀 `slug`（`/p/chen-wong_20260915` 或 local dev 用 `?slug=demo`）
   - 提供 `tenantRef('wedding_guests')` → 自動加 prefix `tenants/{slug}/`
-  - 載入 `tenants/{slug}/meta`，檢查 `status`（active / expired）
+  - 載入 `tenants/{slug}/meta`，檢查 `meta.features`（點名／名單／畫布；見 §0.5「Project 功能開關」）
 - [ ] **本地開發**：暫時用 `?slug=demo` 或固定 `demo`，唔使即刻搞 SPA routing
 
 #### Step 5 — 手動建立第一個測試 tenant
@@ -70,6 +70,11 @@
   "wedding_date": "2026-12-01",
   "theme_color": "#b91c1c",
   "status": "active",
+  "features": {
+    "checkin": true,
+    "guestlist": true,
+    "seating": true
+  },
   "slug": "demo"
 }
 
@@ -169,7 +174,47 @@ Security Rules（概念）：
 
 - **super admin**：可寫 `slugs`、可建/改所有 `tenants/{id}/*`
 - **user admin**：可寫自己 `tenants/{id}/*`（包含 members / user_profiles 之 user 管理）
-- **user**：只可讀點名所需資料；只可寫 `guest_status` 指定欄位；只可「新增賓客」到指定 safe path/欄位；**不可寫後台資料/不可寫 members**
+- **user**：只可讀點名所需資料；只可寫 `guest_status` 指定欄位（`features.checkin` 關閉時 Rules 亦會拒絕）；只可「新增賓客」到指定 safe path/欄位；**不可寫後台資料/不可寫 members**
+
+#### Project 功能開關（`meta.features`）— 2026-06-16 實作
+
+Super Admin 詳情頁 `/super/tenants/{slug}` 用三個獨立開關控制各模組，取代舊版單一 `active` / `expired` 按鈕。
+
+| 開關（UI） | RTDB 欄位 | 控制範圍 | 關閉後行為 |
+|------------|-----------|----------|------------|
+| **點名** | `features.checkin` | `/p/{slug}` 公開點名頁 | 一般用戶無法進入；無法寫 `guest_status`；platform admin 可預覽 |
+| **名單** | `features.guestlist` | `/p/{slug}/admin` 後台賓客名單 | members 無法進入後台；Rules 拒絕寫 `wedding_guests` 等 |
+| **畫布** | `features.seating` | `/p/{slug}/seating` 排位畫布 | members 無法進入畫布；Rules 拒絕寫 `table_settings` / `floor_layout` |
+
+**資料結構：**
+
+```json
+// tenants/{id}/meta
+{
+  "status": "active",
+  "features": {
+    "checkin": true,
+    "guestlist": true,
+    "seating": true
+  }
+}
+```
+
+- 新 tenant 建立時預設三項全開（`src/lib/tenantFeatures.js` → `DEFAULT_TENANT_FEATURES`）。
+- 切換開關時會寫入完整 `features` 物件，並同步舊欄位 `status`：`checkin: false` → `status: "expired"`；`checkin: true` → `status: "active"`（向後相容 legacy 頁面）。
+- **向後相容**：舊 project 若只有 `status: "expired"`、未有 `features`，視為只關閉點名，名單同畫布仍開啟。
+- 列表／詳情頁狀態顯示：`全部開啟` 或 `已關：點名、名單…`（`featureStatusLabel()`）。
+- 實作檔案：`SuperTenantDetailView.vue`、`useSuperTenants.js`（`setTenantFeatures`）、`useTenant.js`、`CheckInView.vue`、`AdminView.vue`、`SeatingView.vue`、`database.rules.json`。
+
+**Security Rules（摘要）：**
+
+| 路徑 | 寫入條件（members，非 platform admin） |
+|------|----------------------------------------|
+| `guest_status/*` | `features.checkin !== false`（無 `features` 時 fallback `status != expired`） |
+| `wedding_guests`、`unassigned_guests`、`meta_label_columns` | `features.guestlist !== false` |
+| `table_settings`、`floor_layout` | `features.seating !== false` |
+
+> 改完 `database.rules.json` 後要喺 Firebase Console **Publish** 先會線上生效。
 
 #### 賣 service 最終 flow
 
@@ -203,7 +248,8 @@ createTenant()
 - [x] RTDB 加 `platform_admins/{你的UID}: true`（Console bootstrap）
 - [x] 更新 `database.rules.json` 支援 `platform_admins`
 - [x] Vue 路由 `/super`、列表、新增、詳情（改 slug / audit）
-- [x] expired：平台 admin 可預覽點名頁；user backend 仍可入
+- [x] **功能開關**：點名／名單／畫布三個 toggle（`meta.features`）
+- [x] 點名關閉：平台 admin 可預覽；名單／畫布可獨立開關
 - [x] GitHub Pages Actions deploy（見 README）
 - [ ] Cloud Functions `createTenant`（自動開 Auth + members）
 
@@ -272,6 +318,11 @@ createTenant()
         "theme_color": "#b91c1c",
         "logo_url": "https://...",
         "status": "active",
+        "features": {
+          "checkin": true,
+          "guestlist": true,
+          "seating": true
+        },
         "plan": "standard",
         "created_at": 1718000000
       },
@@ -309,8 +360,8 @@ createTenant()
 | `POST /admin/tenants` | 建立新 project（你按掣） |
 | `GET /admin/tenants` | 列出所有客戶 |
 | `PATCH /admin/tenants/:id/meta` | 改新人、酒店、主題色等 |
+| `PATCH /admin/tenants/:id/features` | 開關點名／名單／畫布（現由 Super Admin UI 直接寫 RTDB） |
 | `POST /admin/tenants/:id/clone-template` | 從酒店模板複製枱位佈局 |
-| `PATCH /admin/tenants/:id/status` | 停用 / 封存 |
 | `GET /tenants/:slug` | 公開讀取 meta（點名頁用） |
 | `POST /webhooks/stripe` | 付款成功後自動開 tenant |
 
@@ -424,7 +475,7 @@ match /tenants/{tenantId}/wedding_guests {
 | 價格參考 | HK$800–3000/場，視乎功能（模板、支援、自訂 domain） |
 | 技術 | Stripe（香港可用）+ webhook 開 tenant |
 | 試用 | 14 天或 50 賓客上限免費 |
-| 到期 | `meta.status = expired` → 點名頁顯示「已結束」，後台唯讀 |
+| 到期／封存 | 關閉 `features.checkin`（或舊版 `status: expired`）→ 點名停用；可另關 `guestlist` / `seating` 限制後台 |
 
 **Lifecycle：**
 
@@ -479,7 +530,7 @@ trial → active → wedding_day → archived → (30天後) deleted
 
 - `index_script.js`、`admin_config.js`、`seating.js` — 統一 tenant path
 - `index.html` — header 改為 JS 動態 render
-- 新增 `tenant_bootstrap.js` — 解析 slug、載入 config、處理 404/expired
+- 新增 `tenant_bootstrap.js` — 解析 slug、載入 config、處理 404／功能關閉（`features.checkin` 或舊 `status: expired`）
 
 Firebase config 可以共用一個 project，只改 path prefix。
 
@@ -555,7 +606,7 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 ### Phase 1 — 可賣第一個客戶（進行中）
 
-- [x] **Super Admin** `/super`（列表、新增、詳情、改 slug、audit）
+- [x] **Super Admin** `/super`（列表、新增、詳情、改 slug、audit、**功能開關**）
 - [x] `platform_admins` + Rules
 - [x] GitHub Pages deploy workflow
 - [ ] Push main + 設定 GitHub Secrets + Firebase Authorized domains

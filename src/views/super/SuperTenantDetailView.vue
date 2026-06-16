@@ -12,9 +12,7 @@
           <h2>{{ tenant.meta.couple_names || slug }}</h2>
           <p class="sub"><code>{{ slug }}</code> · tenantId: <code>{{ tenant.tenantId }}</code></p>
         </div>
-        <span class="badge" :class="tenant.meta.status || 'active'">
-          {{ tenant.meta.status || 'active' }}
-        </span>
+        <span class="badge" :class="featureBadgeClass">{{ featureLabel }}</span>
       </header>
 
       <section class="section">
@@ -49,7 +47,7 @@
 
       <section class="section">
         <h3>編輯 Project 資料</h3>
-        <p class="hint-block">你係 platform admin，可以改晒以下資料（包括 expired 狀態嘅 project）。</p>
+        <p class="hint-block">你係 platform admin，可以改晒以下資料。</p>
         <form class="edit-form" @submit.prevent="saveMeta">
           <div class="field">
             <label>新人姓名</label>
@@ -173,29 +171,26 @@
       </section>
 
       <section class="section">
-        <h3>狀態</h3>
-        <p class="hint-block">
-          <strong>expired</strong> 只會停用<strong>公開點名</strong>（改唔到「已到／未到」）。
-          你同客戶後台仍然可以改賓客名單。
-        </p>
-        <div class="status-row">
-          <button
-            type="button"
-            class="btn-status"
-            :disabled="tenant.meta.status === 'active'"
-            @click="setStatus('active')"
-          >
-            設為 active
-          </button>
-          <button
-            type="button"
-            class="btn-status expired"
-            :disabled="tenant.meta.status === 'expired'"
-            @click="setStatus('expired')"
-          >
-            設為 expired（停用點名）
-          </button>
-        </div>
+        <h3>功能開關</h3>
+        <p class="hint-block">獨立控制點名頁、後台名單同排位畫布。關閉後一般用戶無法使用；platform admin 仍可進入預覽。</p>
+        <ul class="feature-toggles">
+          <li v-for="item in featureItems" :key="item.key">
+            <div class="feature-label">
+              <strong>{{ item.label }}</strong>
+              <span class="feature-desc">{{ item.desc }}</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="featureForm[item.key]"
+                :disabled="savingFeatures"
+                @change="toggleFeature(item.key, $event.target.checked)"
+              />
+              <span class="slider" aria-hidden="true" />
+            </label>
+          </li>
+        </ul>
+        <p v-if="featureMsg" :class="featureMsgOk ? 'ok' : 'error'">{{ featureMsg }}</p>
       </section>
     </template>
   </div>
@@ -210,13 +205,18 @@ import {
   getTenantOwnerProfile,
   createTenantMemberUser,
   getTenantUserProfiles,
-  setTenantStatus,
+  setTenantFeatures,
   updateTenantMeta,
   renameTenantSlug,
   normalizeSlug,
   formatAuditTime,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
+import {
+  DEFAULT_TENANT_FEATURES,
+  resolveTenantFeatures,
+  featureStatusLabel,
+} from '@/lib/tenantFeatures';
 
 const route = useRoute();
 const router = useRouter();
@@ -241,6 +241,28 @@ const ownerMsgOk = ref(false);
 const createdOwner = ref(null);
 const memberProfiles = ref({});
 const pwVisible = reactive({});
+const savingFeatures = ref(false);
+const featureMsg = ref('');
+const featureMsgOk = ref(true);
+
+const featureForm = reactive({ ...DEFAULT_TENANT_FEATURES });
+
+const featureItems = [
+  { key: 'checkin', label: '點名', desc: '公開點名頁；可改已到／未到' },
+  { key: 'guestlist', label: '名單', desc: '後台賓客名單、匯入 CSV' },
+  { key: 'seating', label: '畫布', desc: '排位畫布同枱位設定' },
+];
+
+const featureLabel = computed(() =>
+  tenant.value ? featureStatusLabel(tenant.value.meta) : '',
+);
+
+const featureBadgeClass = computed(() => {
+  if (!tenant.value) return 'active';
+  const f = resolveTenantFeatures(tenant.value.meta);
+  if (f.checkin && f.guestlist && f.seating) return 'active';
+  return 'partial';
+});
 
 const editForm = reactive({
   slug: '',
@@ -277,6 +299,13 @@ function syncEditForm() {
   pwUid.value = m.owner_uid || '';
 }
 
+function syncFeatureForm() {
+  const f = resolveTenantFeatures(tenant.value?.meta);
+  featureForm.checkin = f.checkin;
+  featureForm.guestlist = f.guestlist;
+  featureForm.seating = f.seating;
+}
+
 const checkInUrl = computed(() => appUrl(`p/${slug.value}`));
 const adminUrl = computed(() => appUrl(`p/${slug.value}/admin`));
 
@@ -302,6 +331,7 @@ async function load() {
     tenant.value = await getTenantBySlug(slug.value);
     if (tenant.value) {
       syncEditForm();
+      syncFeatureForm();
       const uid = tenant.value?.meta?.owner_uid || '';
       if (uid) {
         const profile = await getTenantOwnerProfile(tenant.value.tenantId, uid);
@@ -364,12 +394,29 @@ async function submitOwner() {
   }
 }
 
-async function setStatus(status) {
+async function toggleFeature(key, enabled) {
+  featureForm[key] = enabled;
+  savingFeatures.value = true;
+  featureMsg.value = '';
   try {
-    await setTenantStatus(tenant.value.tenantId, status, editorInfo());
+    await setTenantFeatures(
+      tenant.value.tenantId,
+      {
+        checkin: featureForm.checkin,
+        guestlist: featureForm.guestlist,
+        seating: featureForm.seating,
+      },
+      editorInfo(),
+    );
+    featureMsg.value = '已更新';
+    featureMsgOk.value = true;
     await load();
   } catch (e) {
-    error.value = e?.message || '更新狀態失敗';
+    featureMsg.value = e?.message || '更新失敗';
+    featureMsgOk.value = false;
+    syncFeatureForm();
+  } finally {
+    savingFeatures.value = false;
   }
 }
 
@@ -684,6 +731,84 @@ async function saveSlug() {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+.feature-toggles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.feature-toggles li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+.feature-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.feature-label strong {
+  font-size: 0.875rem;
+  color: #334155;
+}
+.feature-desc {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 2.75rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+.slider::before {
+  content: '';
+  position: absolute;
+  height: 1.125rem;
+  width: 1.125rem;
+  left: 0.2rem;
+  bottom: 0.1875rem;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+.switch input:checked + .slider {
+  background: #16a34a;
+}
+.switch input:checked + .slider::before {
+  transform: translateX(1.2rem);
+}
+.switch input:disabled + .slider {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.badge.partial {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
 }
 .btn-status {
   padding: 0.4rem 0.75rem;

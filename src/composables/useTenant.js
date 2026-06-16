@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { ref as dbRef, get, child } from 'firebase/database';
 import { database } from '@/firebase';
+import { resolveTenantFeatures } from '@/lib/tenantFeatures';
 
 const slug = ref('');
 const tenantId = ref('');
@@ -8,6 +9,13 @@ const meta = ref(null);
 const ready = ref(false);
 const error = ref(null);
 const isExpired = ref(false);
+const features = ref({ checkin: true, guestlist: true, seating: true });
+
+const FEATURE_LABELS = {
+  checkin: '點名',
+  guestlist: '名單',
+  seating: '畫布',
+};
 
 function resolveSlugFromRoute(route) {
   if (route.params.slug) return String(route.params.slug);
@@ -26,10 +34,11 @@ function tenantRef(subPath = '') {
 }
 
 async function initTenant(route, options = {}) {
-  const { allowExpired = false } = options;
+  const { featureGate = null, allowWhenDisabled = false, allowExpired = false } = options;
   ready.value = false;
   error.value = null;
   isExpired.value = false;
+
   slug.value = resolveSlugFromRoute(route);
 
   try {
@@ -42,13 +51,18 @@ async function initTenant(route, options = {}) {
       error.value = `找不到專案「${slug.value}」`;
       return;
     }
-    if (metaVal.status === 'expired') {
-      isExpired.value = true;
-      if (!allowExpired) {
-        error.value = '此婚宴專案已結束';
-        return;
-      }
+
+    const resolved = resolveTenantFeatures(metaVal);
+    features.value = resolved;
+    isExpired.value = !resolved.checkin;
+
+    const gate = featureGate || null;
+    const bypass = allowWhenDisabled || allowExpired;
+    if (gate && !resolved[gate] && !bypass) {
+      error.value = `此專案${FEATURE_LABELS[gate] || gate}功能已停用`;
+      return;
     }
+
     meta.value = metaVal;
     ready.value = true;
   } catch (e) {
@@ -71,6 +85,7 @@ export function useTenant() {
     ready,
     error,
     isExpired,
+    features,
     themeColor,
     coupleNames,
     venueLabel,
