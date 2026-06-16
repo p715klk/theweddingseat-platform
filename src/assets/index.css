@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+
 /* 自訂全域樣式 */
 body {
     -webkit-user-select: none;
