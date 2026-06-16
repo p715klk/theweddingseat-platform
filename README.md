@@ -18,7 +18,7 @@ npm run dev
 
 | 路由 | 頁面 |
 |------|------|
-| `/p/:slug` | 點名頁（公開） |
+| `/p/:slug` | 點名頁（預設公開；可用 `VITE_FRONTEND_REQUIRE_LOGIN=true` 變成需登入） |
 | `/p/:slug/admin` | 賓客後台（Vue，要登入） |
 | `/p/:slug/seating` | 畫布排位（要登入，暫用 legacy iframe） |
 | `/super` | 平台 Super Admin（開客戶 project） |

@@ -4,6 +4,12 @@
     <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
       ⏳ 載入中...
     </div>
+    <div
+      v-else-if="requireLogin && authReady && !user"
+      class="min-h-screen flex items-center justify-center bg-gray-100 p-4"
+    >
+      <FrontendLoginForm @success="onLoggedIn" />
+    </div>
     <div v-else class="bg-gray-100 text-gray-800 font-sans pb-12 select-none min-h-screen">
     <div
       v-if="isExpired"
@@ -284,10 +290,12 @@ import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
+import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
 
 const route = useRoute();
 const loading = ref(true);
-const { authReady } = useAuth();
+const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').toLowerCase() === 'true';
+const { user, authReady } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin } = useTenantAccess();
 const { error, isExpired, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
@@ -372,9 +380,10 @@ async function bootCheckIn() {
 let authGatePassed = false;
 
 watch(
-  [authReady, platformAdminReady],
-  ([authOk, platformOk]) => {
+  [authReady, platformAdminReady, user],
+  ([authOk, platformOk, u]) => {
     if (!authOk || !platformOk || authGatePassed) return;
+    if (requireLogin && !u) return;
     authGatePassed = true;
     bootCheckIn();
   },
@@ -388,7 +397,22 @@ watch(
   },
 );
 
+watch(
+  user,
+  (u) => {
+    if (!requireLogin) return;
+    if (!u) {
+      authGatePassed = false;
+      stopSync();
+    }
+  },
+);
+
 onUnmounted(stopSync);
+
+function onLoggedIn() {
+  /* auth state updates automatically */
+}
 
 function openTable(num) {
   selectedTable.value = String(num);

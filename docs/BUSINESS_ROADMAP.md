@@ -155,18 +155,21 @@ Phase 0f（之後）    正式 /p/{slug} URL + 買 domain + Super Admin 頁
 | **Phase 1 Super Admin** | 你喺 `/super` 撳掣寫入 RTDB；Auth 帳號可暫時手動開，再填 UID 入 members |
 | **Phase 2 自動化** | `createTenant` Cloud Function 自動：建 slug、meta、Auth 用戶、`members`、發 email |
 
-#### 權限兩層（RBAC）
+#### 權限模型（RBAC）— 3 層角色（現行目標）
 
-| 節點 / 角色 | 路徑 | 權限 |
-|-------------|------|------|
-| `platform_admins/{uid}` | RTDB 根 | 開/停 tenant、寫 `slugs`、管理所有 `tenants/*` |
-| `tenants/{id}/members/{uid}` | 每個 tenant 下 | 只改**該場**婚宴嘅賓客、排位、meta |
+> 命名對齊你口述：**super admin / user admin / user**。
 
-最終 Security Rules 邏輯：
+| 角色 | 可去邊個路由 | 主要能力 | Firebase 對應 |
+|------|--------------|----------|--------------|
+| **super admin** | `/super/*` + 任何 `/p/{slug}/*` | 管理平台同所有 tenants（開/停 tenant、改 plan/slug、加/移 owner 等） | `platform_admins/{uid} = true` |
+| **user admin（tenant owner/admin）** | 自己 tenant：`/p/{slug}/admin`、`/p/{slug}/seating`、`/p/{slug}` | 管自己 tenant 後台 + 前台；**可新增/修改/移除自己 tenant 內嘅用戶** | `tenants/{id}/meta/owner_uid = <uid>` + `tenants/{id}/members/{uid} = true` |
+| **user（前台用戶 / check-in staff）** | 自己 tenant：`/p/{slug}` | 只用前台：可改 `guest_status`（點名）；可喺前台新增賓客（受限欄位）但**唔可入後台** | （規則層：允許寫 `guest_status` + 受限寫入新增賓客） |
 
-- `platform_admin` → 可寫 `slugs`、可建/改 `tenants/{id}/*`
-- `tenant_owner`（在 members 內）→ 只可寫自己 tenant
-- 未登入 → 可讀點名所需資料 + 只寫 `guest_status` 指定欄位
+Security Rules（概念）：
+
+- **super admin**：可寫 `slugs`、可建/改所有 `tenants/{id}/*`
+- **user admin**：可寫自己 `tenants/{id}/*`（包含 members / user_profiles 之 user 管理）
+- **user**：只可讀點名所需資料；只可寫 `guest_status` 指定欄位；只可「新增賓客」到指定 safe path/欄位；**不可寫後台資料/不可寫 members**
 
 #### 賣 service 最終 flow
 
@@ -395,11 +398,10 @@ const devSlug = new URLSearchParams(location.search).get('slug');
 
 | 角色 | 權限 |
 |------|------|
-| `platform_admin` | 開/停 tenant、改 plan、睇所有客戶 |
-| `tenant_owner` | 改 meta、賓客、排位、匯入 CSV |
-| `tenant_editor` | 改賓客同排位，唔可以刪 project |
-| `checkin_staff` | 只可以改 `guest_status`（點名） |
-| `viewer` | 只讀（給家長睇進度） |
+| `super_admin` | 可入 `/super`；可管理所有 tenants（開/停、改 plan/slug、加/移 owner） |
+| `user_admin` | 可入自己 `/p/{slug}/admin`；可管理賓客/排位/匯入 CSV；**可管理自己 tenant 內用戶（新增/修改/移除）** |
+| `user` | 只可用 `/p/{slug}` 前台；可改 `guest_status`；可喺前台新增賓客（受限欄位）；不可入後台 |
+| `viewer` | 只讀（例如俾家長睇進度） |
 
 Firebase Security Rules 範例概念：
 
