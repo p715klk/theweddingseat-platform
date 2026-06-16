@@ -16,6 +16,12 @@ npm run dev
 
 開啟 `http://localhost:5173/p/demo`
 
+如要前台 `/p/:slug` 都需要登入（開發時可切換），可以喺 `.env.local` 設定：
+
+```bash
+VITE_FRONTEND_REQUIRE_LOGIN=true
+```
+
 | 路由 | 頁面 |
 |------|------|
 | `/p/:slug` | 點名頁（預設公開；可用 `VITE_FRONTEND_REQUIRE_LOGIN=true` 變成需登入） |

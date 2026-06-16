@@ -1,5 +1,11 @@
 <template>
   <div class="checkin-page min-h-screen">
+    <div
+      v-if="isDev"
+      class="fixed bottom-2 left-2 z-[9999] text-[11px] font-mono bg-black/70 text-white px-2 py-1 rounded"
+    >
+      requireLogin={{ requireLogin }} · authReady={{ authReady }} · user={{ user ? 'yes' : 'no' }}
+    </div>
     <TenantErrorView v-if="error" :message="error" />
     <div
       v-else-if="requireLogin && authReady && !user"
@@ -27,7 +33,7 @@
         <h1 class="text-xl font-bold tracking-wider">{{ coupleNames || '載入中...' }}</h1>
         <p class="text-xs opacity-90 mt-1">{{ venueLabel || '載入中...' }}</p>
       </div>
-      <div class="flex-1 flex justify-end">
+      <div class="flex-1 flex justify-end items-center gap-2">
         <router-link
           v-if="canAccessAdmin"
           :to="adminRoute"
@@ -35,6 +41,14 @@
         >
           📋 後台管理
         </router-link>
+        <button
+          v-if="user"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          @click="handleLogout"
+        >
+          登出
+        </button>
       </div>
     </header>
 
@@ -294,8 +308,9 @@ import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
 
 const route = useRoute();
 const loading = ref(true);
+const isDev = import.meta.env.DEV;
 const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').toLowerCase() === 'true';
-const { user, authReady } = useAuth();
+const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin } = useTenantAccess();
 const { error, isExpired, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
@@ -412,6 +427,14 @@ onUnmounted(stopSync);
 
 function onLoggedIn() {
   /* auth state updates automatically */
+}
+
+async function handleLogout() {
+  closeTableModal();
+  stopSync();
+  authGatePassed = false;
+  loading.value = false;
+  await logout();
 }
 
 function openTable(num) {

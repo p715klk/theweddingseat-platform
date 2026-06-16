@@ -1,11 +1,12 @@
 node_modules/
 dist/
 .DS_Store
-*.local
+# Local env (secrets / dev toggles)
 .env
 .env.*
-!.env.example
 .env.local
+!.env.example
+*.local
 public/legacy/js/firebase_config.js
 firebase-debug.log
 .firebase/
