@@ -116,6 +116,36 @@
       </section>
 
       <section class="section">
+        <h3>重設 Owner 密碼（平台管理員）</h3>
+        <p class="hint-block">
+          Owner：
+          <span v-if="ownerEmail"><code>{{ ownerEmail }}</code></span>
+          <span v-else><code>{{ pwUid || 'owner_uid' }}</code></span>
+          （會直接更新 Firebase Auth 密碼；無需舊密碼）。
+        </p>
+        <form class="edit-form" @submit.prevent="resetOwnerPassword">
+          <div class="field">
+            <label>Owner UID（只讀）</label>
+            <input v-model="pwUid" type="text" readonly />
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label>新密碼</label>
+              <input v-model="newPw" type="password" minlength="6" required autocomplete="new-password" />
+            </div>
+            <div class="field">
+              <label>確認新密碼</label>
+              <input v-model="confirmPw" type="password" minlength="6" required autocomplete="new-password" />
+            </div>
+          </div>
+          <p v-if="pwMsg" :class="pwMsgOk ? 'ok' : 'error'">{{ pwMsg }}</p>
+          <button type="submit" class="btn-save" :disabled="savingPw || !pwUid">
+            {{ savingPw ? '更新中…' : '🔒 更新 Owner 密碼' }}
+          </button>
+        </form>
+      </section>
+
+      <section class="section">
         <h3>狀態</h3>
         <p class="hint-block">
           <strong>expired</strong> 只會停用<strong>公開點名</strong>（改唔到「已到／未到」）。
@@ -150,12 +180,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
 import {
   getTenantBySlug,
+  getTenantOwnerProfile,
   addTenantMember,
   setTenantStatus,
   updateTenantMeta,
   renameTenantSlug,
   normalizeSlug,
   formatAuditTime,
+  setAuthUserPassword,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
 
@@ -176,6 +208,13 @@ const saveMetaOk = ref(false);
 const savingSlug = ref(false);
 const slugMsg = ref('');
 const slugMsgOk = ref(false);
+const pwUid = ref('');
+const ownerEmail = ref('');
+const newPw = ref('');
+const confirmPw = ref('');
+const savingPw = ref(false);
+const pwMsg = ref('');
+const pwMsgOk = ref(false);
 
 const editForm = reactive({
   slug: '',
@@ -203,6 +242,7 @@ function syncEditForm() {
   editForm.weddingDate = m.wedding_date || '';
   editForm.themeColor = m.theme_color || '#b91c1c';
   editForm.plan = m.plan || 'standard';
+  pwUid.value = m.owner_uid || '';
 }
 
 const checkInUrl = computed(() => appUrl(`p/${slug.value}`));
@@ -214,9 +254,17 @@ async function load() {
   loading.value = true;
   error.value = '';
   tenant.value = null;
+  ownerEmail.value = '';
   try {
     tenant.value = await getTenantBySlug(slug.value);
-    if (tenant.value) syncEditForm();
+    if (tenant.value) {
+      syncEditForm();
+      const uid = tenant.value?.meta?.owner_uid || '';
+      if (uid) {
+        const profile = await getTenantOwnerProfile(tenant.value.tenantId, uid);
+        ownerEmail.value = profile?.email || '';
+      }
+    }
   } catch (e) {
     error.value = e?.message || '載入失敗';
   } finally {
@@ -312,6 +360,39 @@ async function saveSlug() {
     slugMsgOk.value = false;
   } finally {
     savingSlug.value = false;
+  }
+}
+
+async function resetOwnerPassword() {
+  pwMsg.value = '';
+  pwMsgOk.value = false;
+
+  const uid = String(pwUid.value || '').trim();
+  if (!uid) {
+    pwMsg.value = '此 Project 未設定 owner_uid';
+    return;
+  }
+  if (!newPw.value || newPw.value.length < 6) {
+    pwMsg.value = '新密碼至少需要 6 個字元';
+    return;
+  }
+  if (newPw.value !== confirmPw.value) {
+    pwMsg.value = '兩次輸入的新密碼不一致';
+    return;
+  }
+
+  savingPw.value = true;
+  try {
+    await setAuthUserPassword({ uid, newPassword: newPw.value });
+    pwMsgOk.value = true;
+    pwMsg.value = '已更新 Owner 密碼';
+    newPw.value = '';
+    confirmPw.value = '';
+  } catch (e) {
+    pwMsgOk.value = false;
+    pwMsg.value = e?.message || '更新密碼失敗';
+  } finally {
+    savingPw.value = false;
   }
 }
 </script>

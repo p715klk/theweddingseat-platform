@@ -1,6 +1,8 @@
 import { ref as dbRef, get, set, update } from 'firebase/database';
 import { database } from '@/firebase';
 import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/firebaseFunctions';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -120,6 +122,14 @@ export async function getTenantBySlug(slug) {
   };
 }
 
+export async function getTenantOwnerProfile(tenantId, ownerUid) {
+  const id = String(tenantId || '').trim();
+  const uid = String(ownerUid || '').trim();
+  if (!id || !uid) return null;
+  const snap = await get(dbRef(database, `tenants/${id}/user_profiles/${uid}`));
+  return snap.val() || null;
+}
+
 const TENANT_DATA_PATHS = [
   'wedding_guests',
   'unassigned_guests',
@@ -231,8 +241,33 @@ export async function createTenant({
   themeColor = '#b91c1c',
   plan = 'standard',
   ownerUid = '',
+  ownerEmail = '',
+  ownerPassword = '',
+  ownerDisplayName = '',
   editor = null,
 }) {
+  // Prefer Cloud Function (creates Auth + members + profiles).
+  // Keep legacy fallback only when ownerEmail not provided.
+  const trimmedOwnerEmail = String(ownerEmail || '').trim();
+  if (trimmedOwnerEmail) {
+    const call = httpsCallable(functions, 'createTenant');
+    const payload = {
+      slug,
+      coupleNames,
+      venueName,
+      venueHall,
+      weddingDate,
+      themeColor,
+      plan,
+      ownerEmail: trimmedOwnerEmail,
+      ownerPassword: String(ownerPassword || '').trim() || undefined,
+      ownerDisplayName: String(ownerDisplayName || '').trim() || undefined,
+    };
+    const res = await call(payload);
+    return res.data;
+  }
+
+  // Legacy direct-RTDB create (no Auth provisioning)
   const normalized = normalizeSlug(slug);
   if (!isValidSlug(normalized)) {
     throw new Error('Slug 格式無效（用小寫英文、數字、連字號，例如 chen-wong-20260915）');
@@ -282,6 +317,12 @@ export async function createTenant({
     checkInUrl: `/p/${normalized}`,
     adminUrl: `/p/${normalized}/admin`,
   };
+}
+
+export async function setAuthUserPassword({ uid, newPassword }) {
+  const call = httpsCallable(functions, 'setUserPassword');
+  const res = await call({ uid, newPassword });
+  return res.data;
 }
 
 /**

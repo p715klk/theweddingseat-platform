@@ -6,7 +6,7 @@
       由 <code>{{ copyFromSlug }}</code> 複製賓客、枱位等資料。修改後儲存為新 Project。
     </p>
     <p v-else class="intro">
-      建立 slug、meta 同預設資料。客戶 Firebase Auth 帳號仍要喺 Console 開，再貼 UID 落「Owner UID」。
+      建立 slug、meta 同預設資料；同時會自動建立客戶 Firebase Auth 帳號並加入 <code>members</code>（Owner）。
     </p>
 
     <form class="form" @submit.prevent="submit">
@@ -60,11 +60,34 @@
       </div>
 
       <div class="field">
-        <label>客戶 Owner UID（選填）</label>
-        <input v-model="form.ownerUid" type="text" placeholder="Firebase Auth → User UID" :disabled="prefilling || saving" />
-        <p class="field-hint">
-          喺 Authentication 開好客戶帳號後，貼 UID 會自動寫入 <code>members/{uid}</code>
-        </p>
+        <label>客戶 Owner Email <span class="req">*</span></label>
+        <input v-model="form.ownerEmail" type="email" required placeholder="client@example.com" :disabled="prefilling || saving" />
+        <p class="field-hint">此 email 會用作後台登入帳號，並自動加入 <code>members</code>。</p>
+      </div>
+
+      <div class="field">
+        <label>客戶初始密碼（選填）</label>
+        <input
+          v-model="form.ownerPassword"
+          type="password"
+          minlength="6"
+          placeholder="留空：系統自動生成臨時密碼"
+          :disabled="prefilling || saving"
+        />
+        <p class="field-hint">若留空，建立成功後會顯示一次性「臨時密碼」，請即時複製交畀客戶。</p>
+      </div>
+
+      <div v-if="createdInfo" class="created-box">
+        <p class="created-title">✅ 已建立客戶登入</p>
+        <ul class="created-list">
+          <li>Owner Email：<code>{{ createdInfo.ownerEmail }}</code></li>
+          <li v-if="createdInfo.ownerUid" class="muted-uid">（技術用）UID：<code>{{ createdInfo.ownerUid }}</code></li>
+          <li v-if="createdInfo.ownerTempPassword">
+            臨時密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
+            <button type="button" class="btn-copy" @click="copy(createdInfo.ownerTempPassword)">複製</button>
+          </li>
+        </ul>
+        <p class="field-hint">建議客戶首次登入後即刻喺「設定 → 我的帳號」更改密碼。</p>
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
@@ -112,11 +135,13 @@ const form = reactive({
   venueHall: '',
   weddingDate: '',
   themeColor: '#b91c1c',
-  ownerUid: '',
+  ownerEmail: '',
+  ownerPassword: '',
 });
 
 const saving = ref(false);
 const error = ref('');
+const createdInfo = ref(null);
 
 const slugPreview = computed(() => normalizeSlug(form.slug));
 
@@ -218,6 +243,7 @@ watch(() => form.slug, (raw) => scheduleSlugCheck(raw));
 
 async function submit() {
   error.value = '';
+  createdInfo.value = null;
   saving.value = true;
   try {
     const payload = {
@@ -227,17 +253,33 @@ async function submit() {
       venueHall: form.venueHall,
       weddingDate: form.weddingDate,
       themeColor: form.themeColor,
-      ownerUid: form.ownerUid,
+      ownerEmail: form.ownerEmail,
+      ownerPassword: form.ownerPassword,
       editor: editorInfo(),
     };
     const result = copySourceTenantId.value
       ? await cloneTenant({ ...payload, sourceTenantId: copySourceTenantId.value, plan: copyPlan.value })
       : await createTenant(payload);
+    if (result?.ownerUid) {
+      createdInfo.value = {
+        ownerUid: result.ownerUid,
+        ownerEmail: result.ownerEmail || form.ownerEmail,
+        ownerTempPassword: result.ownerTempPassword,
+      };
+    }
     router.push(`/super/tenants/${result.slug}`);
   } catch (e) {
     error.value = e?.message || '建立失敗';
   } finally {
     saving.value = false;
+  }
+}
+
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -342,6 +384,37 @@ onUnmounted(() => {
 .error {
   color: #dc2626;
   font-size: 0.875rem;
+}
+.created-box {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+.created-title {
+  margin: 0 0 0.5rem;
+  font-weight: 800;
+  color: #166534;
+  font-size: 0.875rem;
+}
+.created-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: #14532d;
+}
+.btn-copy {
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.35rem;
+  background: #fff;
+  cursor: pointer;
+}
+.muted-uid {
+  color: #64748b;
+  font-size: 0.75rem;
 }
 .actions {
   display: flex;
