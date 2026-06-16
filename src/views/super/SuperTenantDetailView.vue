@@ -98,8 +98,12 @@
         </p>
         <p class="meta-readonly">
           Owner：
-          <span v-if="ownerEmail"><code>{{ ownerEmail }}</code></span>
-          <span v-else>—</span>
+          <select v-model="pwUid" class="owner-select" @change="saveOwnerUid">
+            <option value="">—</option>
+            <option v-for="m in memberEntries" :key="m.uid" :value="m.uid">
+              {{ m.email || m.uid }}
+            </option>
+          </select>
         </p>
       </section>
 
@@ -137,7 +141,7 @@
         <form class="edit-form" @submit.prevent="submitOwner">
           <div class="grid">
             <div class="field">
-              <label>Owner Email <span class="req">*</span></label>
+              <label>用戶 Email <span class="req">*</span></label>
               <input v-model="ownerForm.email" type="email" required autocomplete="off" placeholder="client@example.com" />
             </div>
             <div class="field">
@@ -155,7 +159,7 @@
           </div>
           <p v-if="ownerMsg" :class="ownerMsgOk ? 'ok' : 'error'">{{ ownerMsg }}</p>
           <button type="submit" class="btn-save" :disabled="savingOwner">
-            {{ savingOwner ? '建立中…' : '👤 建立並設為 Owner' }}
+            {{ savingOwner ? '建立中…' : '➕ 建立並加入 members' }}
           </button>
         </form>
       </section>
@@ -366,6 +370,16 @@ async function setStatus(status) {
     await load();
   } catch (e) {
     error.value = e?.message || '更新狀態失敗';
+  }
+}
+
+async function saveOwnerUid() {
+  try {
+    const uid = String(pwUid.value || '').trim();
+    await updateTenantMeta(tenant.value.tenantId, { owner_uid: uid || null }, editorInfo());
+    await load();
+  } catch (e) {
+    error.value = e?.message || '更新 Owner 失敗';
   }
 }
 
@@ -606,6 +620,15 @@ async function saveSlug() {
   margin: 0.35rem 0 0;
   font-size: 0.75rem;
   color: #94a3b8;
+}
+.owner-select {
+  margin-left: 0.35rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: #fff;
+  color: #334155;
 }
 .owner-uid {
   margin-left: 0.35rem;

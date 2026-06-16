@@ -1,7 +1,15 @@
 import { ref as dbRef, get, set, update } from 'firebase/database';
 import { database } from '@/firebase';
 import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
-import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
+import {
+  assertPlatformAdmin,
+  createAuthUserForEmail,
+  buildUserProfile,
+  buildMemberProvisionUpdates,
+  normalizeEmail,
+  normalizePassword,
+  assertPassword,
+} from '@/lib/superAdminProvisioning';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -232,38 +240,17 @@ export async function createTenantMemberUser({
 }) {
   const id = String(tenantId || '').trim();
   if (!id) throw new Error('缺少 tenantId');
-  const trimmedEmail = String(email || '').trim().toLowerCase();
-  if (!trimmedEmail) throw new Error('請輸入 Email');
-  const pw = String(password || '').trim();
-  if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
-
-  if (!editor?.uid) throw new Error('未登入（缺少 editor uid）');
-  const adminSnap = await get(dbRef(database, `platform_admins/${editor.uid}`));
-  if (adminSnap.val() !== true) {
-    throw new Error('此帳號未列入 platform_admins，無權新增用戶');
-  }
-
-  // Create Auth user via REST (no Cloud Functions required)
-  const createdUser = await createAuthUserViaRest(trimmedEmail, pw);
-  const uid = createdUser.uid;
-  if (!uid) throw new Error('建立帳號失敗（缺少 uid）');
-
+  await assertPlatformAdmin(editor);
+  const { uid, email: trimmedEmail, password: pw } = await createAuthUserForEmail({ email, password });
   const now = Date.now();
-  await update(dbRef(database), {
-    [`tenants/${id}/members/${uid}`]: true,
-    [`tenants/${id}/user_profiles/${uid}`]: {
-      email: trimmedEmail,
-      display_name: String(displayName || '').trim(),
-      initial_password: pw,
-      created_at: now,
-      created_by_uid: editor?.uid || '',
-      created_by_email: editor?.email || '',
-    },
-    [`tenants/${id}/meta/updated_at`]: now,
-    [`tenants/${id}/meta/updated_by_uid`]: editor?.uid || '',
-    [`tenants/${id}/meta/updated_by_email`]: editor?.email || '',
+  const profile = buildUserProfile({
+    email: trimmedEmail,
+    displayName,
+    initialPassword: pw,
+    editor,
+    now,
   });
-
+  await update(dbRef(database), buildMemberProvisionUpdates({ tenantId: id, uid, profile, editor, now }));
   return { uid, email: trimmedEmail };
 }
 
@@ -334,35 +321,13 @@ export async function createTenant({
   }
 
   const tenantId = normalized;
-  const trimmedEmail = String(ownerEmail || '').trim().toLowerCase();
+  const trimmedEmail = normalizeEmail(ownerEmail);
   if (!trimmedEmail) throw new Error('請輸入 Owner Email');
-  const pw = String(ownerPassword || '').trim();
-  if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
-
-  // Guardrail: avoid creating Auth users when caller can't write RTDB (permission_denied)
-  if (!editor?.uid) throw new Error('未登入（缺少 editor uid）');
-  try {
-    const adminSnap = await get(dbRef(database, `platform_admins/${editor.uid}`));
-    if (adminSnap.val() !== true) {
-      throw new Error('此帳號未列入 platform_admins，無權建立 Project');
-    }
-  } catch (e) {
-    // If platform_admins path is unreadable, treat as not admin
-    const msg = e?.message || '此帳號未列入 platform_admins，無權建立 Project';
-    throw new Error(msg);
-  }
-
-  // Create Auth user via REST (no Cloud Functions required)
-  let createdUser;
-  try {
-    createdUser = await createAuthUserViaRest(trimmedEmail, pw);
-  } catch (e) {
-    const msg = e?.message || '建立帳號失敗';
-    // Keep error message from firebaseAuthRest (e.g. EMAIL_EXISTS)
-    throw new Error(msg);
-  }
-
-  const resolvedOwnerUid = createdUser.uid || ownerUid?.trim() || editor?.uid || '';
+  const pw = normalizePassword(ownerPassword);
+  assertPassword(pw);
+  await assertPlatformAdmin(editor);
+  const created = await createAuthUserForEmail({ email: trimmedEmail, password: pw });
+  const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -391,15 +356,18 @@ export async function createTenant({
   };
 
   if (resolvedOwnerUid) {
-    updates[`${tenantBase}/members/${resolvedOwnerUid}`] = true;
-    updates[`${tenantBase}/user_profiles/${resolvedOwnerUid}`] = {
+    const now = Date.now();
+    const profile = buildUserProfile({
       email: trimmedEmail,
-      display_name: String(ownerDisplayName || '').trim(),
-      initial_password: pw,
-      created_at: Date.now(),
-      created_by_uid: editor?.uid || '',
-      created_by_email: editor?.email || '',
-    };
+      displayName: ownerDisplayName,
+      initialPassword: pw,
+      editor,
+      now,
+    });
+    Object.assign(
+      updates,
+      buildMemberProvisionUpdates({ tenantId, uid: resolvedOwnerUid, profile, editor, now, includeOwner: true }),
+    );
   }
 
   await update(dbRef(database), updates);
@@ -431,6 +399,9 @@ export async function cloneTenant({
   themeColor = '#b91c1c',
   plan = 'standard',
   ownerUid = '',
+  ownerEmail = '',
+  ownerPassword = '',
+  ownerDisplayName = '',
   editor = null,
 }) {
   const normalized = normalizeSlug(slug);
@@ -443,7 +414,13 @@ export async function cloneTenant({
 
   const sourceData = await getTenantFullData(sourceTenantId);
   const tenantId = normalized;
-  const resolvedOwnerUid = ownerUid?.trim() || editor?.uid || '';
+  const trimmedEmail = normalizeEmail(ownerEmail);
+  if (!trimmedEmail) throw new Error('請輸入 Owner Email');
+  const pw = normalizePassword(ownerPassword);
+  assertPassword(pw);
+  await assertPlatformAdmin(editor);
+  const created = await createAuthUserForEmail({ email: trimmedEmail, password: pw });
+  const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -469,10 +446,19 @@ export async function cloneTenant({
     [`${tenantBase}/meta_label_columns`]: sourceData.meta_label_columns,
   };
 
-  if (ownerUid?.trim()) {
-    updates[`${tenantBase}/members/${ownerUid.trim()}`] = true;
-  } else if (editor?.uid) {
-    updates[`${tenantBase}/members/${editor.uid}`] = true;
+  if (resolvedOwnerUid) {
+    const now = Date.now();
+    const profile = buildUserProfile({
+      email: trimmedEmail,
+      displayName: ownerDisplayName,
+      initialPassword: pw,
+      editor,
+      now,
+    });
+    Object.assign(
+      updates,
+      buildMemberProvisionUpdates({ tenantId, uid: resolvedOwnerUid, profile, editor, now, includeOwner: true }),
+    );
   }
 
   await update(dbRef(database), updates);
@@ -482,6 +468,8 @@ export async function cloneTenant({
     slug: normalized,
     checkInUrl: `/p/${normalized}`,
     adminUrl: `/p/${normalized}/admin`,
+    ownerUid: resolvedOwnerUid,
+    ownerEmail: trimmedEmail,
   };
 }
 
