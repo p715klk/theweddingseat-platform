@@ -29,6 +29,9 @@
           <RouterLink to="/super/members" class="btn-header" :class="{ active: route.name === 'super-members' }">
             👥 Members
           </RouterLink>
+          <RouterLink to="/super/admins" class="btn-header" :class="{ active: route.name === 'super-admins' }">
+            🛡️ Admins
+          </RouterLink>
           <RouterLink v-if="route.name !== 'super-tenant-new'" to="/super/tenants/new" class="btn-header primary">
             ➕ 新增 Project
           </RouterLink>
