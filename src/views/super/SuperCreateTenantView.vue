@@ -12,7 +12,7 @@
     <form class="form" @submit.prevent="submit">
       <div class="field">
         <label>Slug <span class="req">*</span></label>
-        <input v-model="form.slug" type="text" placeholder="chen-wong-20260915" required :disabled="prefilling || saving" />
+        <input v-model="form.slug" type="text" placeholder="Mary-Paul-20260915" required :disabled="prefilling || saving" />
         <p class="field-hint">
           預覽（實際儲存嘅 slug）：<code>{{ slugPreview || '…' }}</code>
           <span class="field-hint-note">小寫、空格變 -、首尾 - 會忽略</span>
@@ -34,7 +34,7 @@
 
       <div class="field">
         <label>新人姓名 <span class="req">*</span></label>
-        <input v-model="form.coupleNames" type="text" required placeholder="陳大文 & 李小美" :disabled="prefilling || saving" />
+        <input v-model="form.coupleNames" type="text" required placeholder="Mary & Paul" :disabled="prefilling || saving" />
       </div>
 
       <div class="grid">

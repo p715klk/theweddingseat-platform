@@ -198,11 +198,16 @@ function openDelete(tenant) {
   deleteMsgOk.value = false;
 }
 
-function closeDelete() {
-  if (deleting.value) return;
+function resetDeleteModal() {
   deleteTarget.value = null;
   deletePassword.value = '';
   deleteMsg.value = '';
+  deleteMsgOk.value = false;
+}
+
+function closeDelete() {
+  if (deleting.value) return;
+  resetDeleteModal();
 }
 
 function deleteErrorMessage(e) {
@@ -221,8 +226,9 @@ async function confirmDelete() {
   try {
     await verifyPassword(deletePassword.value);
     await deleteTenant(deleteTarget.value.slug, deleteTarget.value.tenantId);
-    tenants.value = tenants.value.filter((t) => t.tenantId !== deleteTarget.value.tenantId);
-    closeDelete();
+    const removedId = deleteTarget.value.tenantId;
+    tenants.value = tenants.value.filter((t) => t.tenantId !== removedId);
+    resetDeleteModal();
     showToast('已刪除 Project');
   } catch (e) {
     deleteMsgOk.value = false;
