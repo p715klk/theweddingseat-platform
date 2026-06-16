@@ -56,8 +56,41 @@
               <dd>{{ user?.email || '—' }}</dd>
             </div>
             <div class="profile-row">
+              <dt>顯示名稱</dt>
+              <dd>
+                <div class="profile-edit-row">
+                  <span v-if="!editingName">{{ displayName || '—' }}</span>
+                  <form v-else class="profile-edit-form" @submit.prevent="submitDisplayName">
+                    <input
+                      v-model="displayName"
+                      type="text"
+                      maxlength="40"
+                      placeholder="例如：統籌 Amy"
+                      :disabled="savingName"
+                    />
+                    <button type="submit" class="btn-mini primary" :disabled="savingName">
+                      {{ savingName ? '儲存中…' : '儲存' }}
+                    </button>
+                    <button type="button" class="btn-mini" :disabled="savingName" @click="cancelEditName">
+                      取消
+                    </button>
+                  </form>
+
+                  <button
+                    v-if="!editingName"
+                    type="button"
+                    class="btn-mini"
+                    @click="startEditName"
+                  >
+                    修改
+                  </button>
+                </div>
+                <p v-if="nameMsg" :class="nameMsgOk ? 'msg-ok' : 'msg-error'">{{ nameMsg }}</p>
+              </dd>
+            </div>
+            <div class="profile-row">
               <dt>權限</dt>
-              <dd><span class="badge">後台管理員</span></dd>
+              <dd><span class="badge">{{ roleLabel }}</span></dd>
             </div>
           </dl>
 
@@ -114,7 +147,7 @@
           <p class="hint">
             管理可登入此婚宴後台的帳號。新增用戶會建立 Firebase 登入帳號並授予後台權限。
           </p>
-          <p v-if="!isOwner" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
+          <p v-if="!canManageUsers" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
             你而家係一般後台用戶（非 Owner），只能查看用戶清單；如要新增／移除用戶，請用 Owner 帳號登入。
           </p>
 
@@ -146,7 +179,7 @@
             尚未有用戶資料。如你係平台管理員手動開嘅帳號，可能只顯示 UID。
           </p>
 
-          <template v-if="isOwner">
+          <template v-if="canManageUsers">
             <form class="add-user-form" @submit.prevent="submitAddUser">
               <h4 class="section-title">➕ 新增用戶</h4>
               <div class="field">
@@ -185,8 +218,8 @@
               <div class="field">
                 <label for="new-user-role">角色</label>
                 <select id="new-user-role" v-model="newUserRole" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
-                  <option value="admin">後台管理員</option>
-                  <option value="reception">現場接待</option>
+                  <option value="admin">後台管理員 - 可以進入後台 管理賓客、排位、CSV</option>
+                  <option value="reception">現場接待 - 點名、取消賓客座位、現場加座, 不能進入後台</option>
                 </select>
               </div>
               <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
@@ -205,6 +238,8 @@
 import { computed, ref, watch } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useTenant } from '@/composables/useTenant';
+import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
+import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 
@@ -223,9 +258,17 @@ const tabs = [
 const activeTab = ref('data');
 
 const { user, changePassword } = useAuth();
+const { isPlatformAdmin } = usePlatformAdmin();
+const { memberRole } = useTenantAccess();
 const { meta } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
 const isOwner = computed(() => !ownerUid.value || ownerUid.value === user.value?.uid);
+const canManageUsers = computed(() => isPlatformAdmin.value || isOwner.value);
+const roleLabel = computed(() => {
+  if (memberRole.value === 'platform_admin') return 'Super Admin';
+  if (memberRole.value === 'reception') return '現場接待';
+  return '後台管理員';
+});
 const {
   members,
   loading: usersLoading,
@@ -234,6 +277,7 @@ const {
   createMember,
   removeMember,
   ensureSelfProfile,
+  updateSelfDisplayName,
 } = useTenantUsers();
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
@@ -243,6 +287,13 @@ const confirmPassword = ref('');
 const changingPw = ref(false);
 const pwMsg = ref('');
 const pwMsgOk = ref(false);
+
+const displayName = ref('');
+const savingName = ref(false);
+const nameMsg = ref('');
+const nameMsgOk = ref(false);
+const editingName = ref(false);
+const originalDisplayName = ref('');
 
 const newUserEmail = ref('');
 const newUserName = ref('');
@@ -259,10 +310,15 @@ watch(
     if (!isOpen) return;
     activeTab.value = 'data';
     pwMsg.value = '';
+    nameMsg.value = '';
     addUserMsg.value = '';
+    editingName.value = false;
     try {
       await ensureSelfProfile();
       await loadMembers();
+      const self = members.value.find((m) => m.isSelf);
+      displayName.value = self?.displayName || '';
+      originalDisplayName.value = displayName.value;
     } catch {
       /* errors shown in UI */
     }
@@ -323,10 +379,42 @@ async function submitPassword() {
   }
 }
 
+async function submitDisplayName() {
+  nameMsg.value = '';
+  nameMsgOk.value = false;
+  savingName.value = true;
+  try {
+    await updateSelfDisplayName(displayName.value);
+    nameMsgOk.value = true;
+    nameMsg.value = '已儲存';
+    originalDisplayName.value = displayName.value;
+    editingName.value = false;
+  } catch (e) {
+    nameMsgOk.value = false;
+    nameMsg.value = e?.message || '儲存失敗';
+  } finally {
+    savingName.value = false;
+  }
+}
+
+function startEditName() {
+  nameMsg.value = '';
+  nameMsgOk.value = false;
+  originalDisplayName.value = displayName.value;
+  editingName.value = true;
+}
+
+function cancelEditName() {
+  displayName.value = originalDisplayName.value;
+  editingName.value = false;
+  nameMsg.value = '';
+  nameMsgOk.value = false;
+}
+
 async function submitAddUser() {
   addUserMsg.value = '';
   addUserMsgOk.value = false;
-  if (!isOwner.value) {
+  if (!canManageUsers.value) {
     addUserMsgOk.value = false;
     addUserMsg.value = '只有 owner 可以新增用戶';
     return;
@@ -354,7 +442,7 @@ async function submitAddUser() {
 }
 
 async function confirmRemove(member) {
-  if (!isOwner.value) {
+  if (!canManageUsers.value) {
     addUserMsgOk.value = false;
     addUserMsg.value = '只有 owner 可以移除用戶';
     return;
@@ -454,6 +542,45 @@ async function confirmRemove(member) {
   margin: 0;
   flex: 1;
   word-break: break-all;
+}
+.profile-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.profile-edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.profile-edit-form input {
+  width: 100%;
+  max-width: 16rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.875rem;
+}
+.btn-mini {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #1e293b;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-mini.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.btn-mini:disabled {
+  opacity: 0.7;
+  cursor: wait;
 }
 .badge {
   display: inline-block;

@@ -81,7 +81,7 @@
         "user_profiles": {
           ".read": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).exists())",
           "$profileUid": {
-            ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid)",
+            ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid || ($profileUid === auth.uid && root.child('tenants').child($tenantId).child('members').child(auth.uid).exists()))",
             ".validate": "newData.hasChildren(['email']) && newData.child('email').isString() && newData.child('email').val().length > 0 && (!newData.child('display_name').exists() || newData.child('display_name').isString()) && (!newData.child('initial_password').exists() || newData.child('initial_password').isString()) && (!newData.child('created_at').exists() || newData.child('created_at').isNumber()) && (!newData.child('created_by_uid').exists() || newData.child('created_by_uid').isString()) && (!newData.child('created_by_email').exists() || newData.child('created_by_email').isString())"
           }
         },
