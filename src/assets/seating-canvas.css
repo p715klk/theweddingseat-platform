@@ -1,9 +1,19 @@
 html, body.seating-touch {
+    height: 100%;
+    overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;
     overscroll-behavior: none;
     -webkit-touch-callout: none;
+}
+body.seating-touch {
+    height: 100vh;
+    height: 100dvh;
+}
+#seating-app {
+    height: 100%;
+    min-height: 0;
 }
 #seating-app > header,
 #seating-app > header button,

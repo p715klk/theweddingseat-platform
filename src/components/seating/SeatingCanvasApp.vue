@@ -104,7 +104,7 @@
       </div>
     </header>
 
-    <div class="flex-1 relative overflow-hidden w-full bg-slate-100">
+    <div class="flex-1 relative overflow-hidden w-full bg-slate-100 min-h-0">
       <main class="absolute inset-0 overflow-hidden" id="canvas-viewport">
         <div
           class="workspace-canvas"
@@ -269,7 +269,7 @@
 </template>
 
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
 import { appPath } from '@/lib/appBase';
 import {
@@ -330,23 +330,17 @@ function mountEngine() {
   }
 }
 
-watch(
-  tenantId,
-  (id) => {
-    if (!id) return;
-    requestAnimationFrame(() => mountEngine());
-  },
-  { immediate: true },
-);
+onMounted(() => {
+  if (tenantId.value) mountEngine();
+});
+
+watch(tenantId, (id) => {
+  if (!id) return;
+  requestAnimationFrame(() => mountEngine());
+});
 
 onUnmounted(() => {
   destroySeatingEngine();
 });
 </script>
 
-<style scoped>
-.seating-host,
-:deep(#seating-app) {
-  height: 100%;
-}
-</style>

@@ -63,7 +63,9 @@ async function handleLogout() {
 
 <style scoped>
 .seating-host {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: #f1f5f9;
 }
 </style>
