@@ -223,6 +223,86 @@ export async function addTenantMember(tenantId, uid, editor = null) {
   }
 }
 
+export async function createTenantMemberUser({
+  tenantId,
+  email,
+  password,
+  displayName = '',
+  editor = null,
+}) {
+  const id = String(tenantId || '').trim();
+  if (!id) throw new Error('缺少 tenantId');
+  const trimmedEmail = String(email || '').trim().toLowerCase();
+  if (!trimmedEmail) throw new Error('請輸入 Email');
+  const pw = String(password || '').trim();
+  if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
+
+  if (!editor?.uid) throw new Error('未登入（缺少 editor uid）');
+  const adminSnap = await get(dbRef(database, `platform_admins/${editor.uid}`));
+  if (adminSnap.val() !== true) {
+    throw new Error('此帳號未列入 platform_admins，無權新增用戶');
+  }
+
+  // Create Auth user via REST (no Cloud Functions required)
+  const createdUser = await createAuthUserViaRest(trimmedEmail, pw);
+  const uid = createdUser.uid;
+  if (!uid) throw new Error('建立帳號失敗（缺少 uid）');
+
+  const now = Date.now();
+  await update(dbRef(database), {
+    [`tenants/${id}/members/${uid}`]: true,
+    [`tenants/${id}/user_profiles/${uid}`]: {
+      email: trimmedEmail,
+      display_name: String(displayName || '').trim(),
+      initial_password: pw,
+      created_at: now,
+      created_by_uid: editor?.uid || '',
+      created_by_email: editor?.email || '',
+    },
+    [`tenants/${id}/meta/updated_at`]: now,
+    [`tenants/${id}/meta/updated_by_uid`]: editor?.uid || '',
+    [`tenants/${id}/meta/updated_by_email`]: editor?.email || '',
+  });
+
+  return { uid, email: trimmedEmail };
+}
+
+export async function getTenantUserProfiles(tenantId) {
+  const id = String(tenantId || '').trim();
+  if (!id) throw new Error('缺少 tenantId');
+  const snap = await get(dbRef(database, `tenants/${id}/user_profiles`));
+  return snap.val() || {};
+}
+
+export async function setTenantMemberProfile(tenantId, uid, patch, editor = null) {
+  const id = String(tenantId || '').trim();
+  const u = String(uid || '').trim();
+  if (!id || !u) throw new Error('缺少 tenantId 或 uid');
+  const now = Date.now();
+  const current = (await get(dbRef(database, `tenants/${id}/user_profiles/${u}`))).val() || {};
+  await set(dbRef(database, `tenants/${id}/user_profiles/${u}`), {
+    ...current,
+    ...patch,
+    ...(current.created_at ? {} : { created_at: now }),
+    ...(current.created_by_uid ? {} : { created_by_uid: editor?.uid || '' }),
+    ...(current.created_by_email ? {} : { created_by_email: editor?.email || '' }),
+  });
+  if (editor?.uid) {
+    await update(dbRef(database, `tenants/${id}/meta`), auditFields(editor));
+  }
+}
+
+export async function removeTenantMember(tenantId, uid, { removeProfile = true } = {}) {
+  const id = String(tenantId || '').trim();
+  const u = String(uid || '').trim();
+  if (!id || !u) throw new Error('缺少 tenantId 或 uid');
+  const updates = {
+    [`tenants/${id}/members/${u}`]: null,
+    ...(removeProfile ? { [`tenants/${id}/user_profiles/${u}`]: null } : {}),
+  };
+  await update(dbRef(database), updates);
+}
+
 export async function isSlugTaken(slug) {
   const snap = await get(dbRef(database, `slugs/${slug}`));
   return snap.exists();
@@ -258,6 +338,19 @@ export async function createTenant({
   if (!trimmedEmail) throw new Error('請輸入 Owner Email');
   const pw = String(ownerPassword || '').trim();
   if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
+
+  // Guardrail: avoid creating Auth users when caller can't write RTDB (permission_denied)
+  if (!editor?.uid) throw new Error('未登入（缺少 editor uid）');
+  try {
+    const adminSnap = await get(dbRef(database, `platform_admins/${editor.uid}`));
+    if (adminSnap.val() !== true) {
+      throw new Error('此帳號未列入 platform_admins，無權建立 Project');
+    }
+  } catch (e) {
+    // If platform_admins path is unreadable, treat as not admin
+    const msg = e?.message || '此帳號未列入 platform_admins，無權建立 Project';
+    throw new Error(msg);
+  }
 
   // Create Auth user via REST (no Cloud Functions required)
   let createdUser;
@@ -302,6 +395,7 @@ export async function createTenant({
     updates[`${tenantBase}/user_profiles/${resolvedOwnerUid}`] = {
       email: trimmedEmail,
       display_name: String(ownerDisplayName || '').trim(),
+      initial_password: pw,
       created_at: Date.now(),
       created_by_uid: editor?.uid || '',
       created_by_email: editor?.email || '',

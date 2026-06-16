@@ -26,6 +26,9 @@
           <RouterLink v-if="route.name !== 'super-tenants'" to="/super/tenants" class="btn-header">
             客戶列表
           </RouterLink>
+          <RouterLink to="/super/members" class="btn-header" :class="{ active: route.name === 'super-members' }">
+            👥 Members
+          </RouterLink>
           <RouterLink v-if="route.name !== 'super-tenant-new'" to="/super/tenants/new" class="btn-header primary">
             ➕ 新增 Project
           </RouterLink>

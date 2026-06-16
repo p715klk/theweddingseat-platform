@@ -96,22 +96,67 @@
           最後修改：{{ formatAuditTime(tenant.meta.updated_at) }}
           <span v-if="tenant.meta.updated_by_email"> · {{ tenant.meta.updated_by_email }}</span>
         </p>
+        <p class="meta-readonly">
+          Owner：
+          <span v-if="ownerEmail"><code>{{ ownerEmail }}</code></span>
+          <span v-else>—</span>
+        </p>
       </section>
 
       <section class="section">
         <h3>後台權限（members）</h3>
         <p v-if="!memberUids.length" class="hint">尚未設定。客戶無法登入後台改賓客。</p>
         <ul v-else class="uid-list">
-          <li v-for="uid in memberUids" :key="uid"><code>{{ uid }}</code></li>
+          <li v-for="m in memberEntries" :key="m.uid">
+            <code>{{ m.email || m.uid }}</code>
+            <span v-if="m.initialPassword" class="pw-chip">
+              密碼：
+              <code>{{ pwVisible[m.uid] ? m.initialPassword : '********' }}</code>
+              <button type="button" class="btn-eye" @click="pwVisible[m.uid] = !pwVisible[m.uid]">
+                {{ pwVisible[m.uid] ? '隱藏' : '顯示' }}
+              </button>
+            </span>
+          </li>
         </ul>
+      </section>
 
-        <form class="member-form" @submit.prevent="submitMember">
-          <label>新增 Owner UID</label>
-          <div class="member-row">
-            <input v-model="newMemberUid" type="text" placeholder="Firebase Auth User UID" />
-            <button type="submit" :disabled="savingMember">{{ savingMember ? '加入中…' : '加入' }}</button>
+      <section class="section">
+        <h3>新增後台用戶（members）</h3>
+        <p class="hint-block">會建立一個新登入帳號，並加入此 Project 嘅 <code>members</code>。</p>
+        <div v-if="createdOwner" class="created-box">
+          <p class="created-title">✅ 已加入 members</p>
+          <ul class="created-list">
+            <li>Email：<code>{{ createdOwner.email }}</code></li>
+            <li>
+              初始密碼：<code>{{ createdOwner.password }}</code>
+              <button type="button" class="btn-copy" @click="copy(createdOwner.password)">複製</button>
+            </li>
+          </ul>
+          <p class="field-hint">此密碼會儲存喺 members 清單（預設遮住）；請即時複製交畀客戶。</p>
+        </div>
+        <form class="edit-form" @submit.prevent="submitOwner">
+          <div class="grid">
+            <div class="field">
+              <label>Owner Email <span class="req">*</span></label>
+              <input v-model="ownerForm.email" type="email" required autocomplete="off" placeholder="client@example.com" />
+            </div>
+            <div class="field">
+              <label>初始密碼 <span class="req">*</span></label>
+              <div class="pw-row">
+                <input v-model="ownerForm.password" type="text" required minlength="6" autocomplete="new-password" />
+                <button type="button" class="btn-generate" :disabled="savingOwner" @click="generateOwnerPw">生成</button>
+              </div>
+              <p class="field-hint">會以明文顯示，方便直接複製畀客戶。</p>
+            </div>
           </div>
-          <p v-if="memberMsg" :class="memberMsgOk ? 'ok' : 'error'">{{ memberMsg }}</p>
+          <div class="field">
+            <label>顯示名稱（選填）</label>
+            <input v-model="ownerForm.displayName" type="text" placeholder="例如：Mary（新娘）" />
+          </div>
+          <p v-if="ownerMsg" :class="ownerMsgOk ? 'ok' : 'error'">{{ ownerMsg }}</p>
+          <button type="submit" class="btn-save" :disabled="savingOwner">
+            {{ savingOwner ? '建立中…' : '👤 建立並設為 Owner' }}
+          </button>
         </form>
       </section>
 
@@ -159,7 +204,8 @@ import { useAuth } from '@/composables/useAuth';
 import {
   getTenantBySlug,
   getTenantOwnerProfile,
-  addTenantMember,
+  createTenantMemberUser,
+  getTenantUserProfiles,
   setTenantStatus,
   updateTenantMeta,
   renameTenantSlug,
@@ -175,8 +221,6 @@ const slug = computed(() => String(route.params.slug || ''));
 const tenant = ref(null);
 const loading = ref(true);
 const error = ref('');
-const newMemberUid = ref('');
-const savingMember = ref(false);
 const memberMsg = ref('');
 const memberMsgOk = ref(false);
 const savingMeta = ref(false);
@@ -187,6 +231,12 @@ const slugMsg = ref('');
 const slugMsgOk = ref(false);
 const pwUid = ref('');
 const ownerEmail = ref('');
+const savingOwner = ref(false);
+const ownerMsg = ref('');
+const ownerMsgOk = ref(false);
+const createdOwner = ref(null);
+const memberProfiles = ref({});
+const pwVisible = reactive({});
 
 const editForm = reactive({
   slug: '',
@@ -196,6 +246,12 @@ const editForm = reactive({
   weddingDate: '',
   themeColor: '#b91c1c',
   plan: 'standard',
+});
+
+const ownerForm = reactive({
+  email: '',
+  password: '',
+  displayName: '',
 });
 
 const slugPreview = computed(() => normalizeSlug(editForm.slug));
@@ -221,12 +277,23 @@ const checkInUrl = computed(() => appUrl(`p/${slug.value}`));
 const adminUrl = computed(() => appUrl(`p/${slug.value}/admin`));
 
 const memberUids = computed(() => Object.keys(tenant.value?.members || {}));
+const memberEntries = computed(() =>
+  memberUids.value.map((uid) => {
+    const p = memberProfiles.value?.[uid] || {};
+    return {
+      uid,
+      email: p.email || '',
+      initialPassword: p.initial_password || '',
+    };
+  }),
+);
 
 async function load() {
   loading.value = true;
   error.value = '';
   tenant.value = null;
   ownerEmail.value = '';
+  memberProfiles.value = {};
   try {
     tenant.value = await getTenantBySlug(slug.value);
     if (tenant.value) {
@@ -236,6 +303,7 @@ async function load() {
         const profile = await getTenantOwnerProfile(tenant.value.tenantId, uid);
         ownerEmail.value = profile?.email || '';
       }
+      memberProfiles.value = await getTenantUserProfiles(tenant.value.tenantId);
     }
   } catch (e) {
     error.value = e?.message || '載入失敗';
@@ -257,20 +325,38 @@ async function copy(text) {
   }
 }
 
-async function submitMember() {
-  memberMsg.value = '';
-  savingMember.value = true;
+function generateOwnerPw() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let out = '';
+  for (let i = 0; i < 12; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  ownerForm.password = out;
+}
+
+async function submitOwner() {
+  ownerMsg.value = '';
+  ownerMsgOk.value = false;
+  createdOwner.value = null;
+  savingOwner.value = true;
   try {
-    await addTenantMember(tenant.value.tenantId, newMemberUid.value, editorInfo());
-    newMemberUid.value = '';
-    memberMsg.value = '已加入 members';
-    memberMsgOk.value = true;
+    await createTenantMemberUser({
+      tenantId: tenant.value.tenantId,
+      email: ownerForm.email,
+      password: ownerForm.password,
+      displayName: ownerForm.displayName,
+      editor: editorInfo(),
+    });
+    ownerMsgOk.value = true;
+    ownerMsg.value = '已建立並加入 members';
+    createdOwner.value = { email: ownerForm.email.trim(), password: ownerForm.password };
+    ownerForm.email = '';
+    ownerForm.password = '';
+    ownerForm.displayName = '';
     await load();
   } catch (e) {
-    memberMsg.value = e?.message || '加入失敗';
-    memberMsgOk.value = false;
+    ownerMsgOk.value = false;
+    ownerMsg.value = e?.message || '建立失敗';
   } finally {
-    savingMember.value = false;
+    savingOwner.value = false;
   }
 }
 
@@ -444,6 +530,7 @@ async function saveSlug() {
   margin-bottom: 0.2rem;
 }
 .edit-form input[type='text'],
+.edit-form input[type='email'],
 .edit-form input[type='date'],
 .edit-form select {
   width: 100%;
@@ -451,6 +538,49 @@ async function saveSlug() {
   border-radius: 0.5rem;
   padding: 0.45rem 0.5rem;
   font-size: 0.875rem;
+}
+
+.pw-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.pw-row input {
+  flex: 1;
+}
+.btn-generate {
+  flex-shrink: 0;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 800;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.btn-generate:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.created-box {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.created-title {
+  margin: 0 0 0.5rem;
+  font-weight: 800;
+  color: #166534;
+  font-size: 0.875rem;
+}
+.created-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: #14532d;
 }
 .edit-form input[type='color'] {
   width: 3rem;
@@ -476,6 +606,11 @@ async function saveSlug() {
   margin: 0.35rem 0 0;
   font-size: 0.75rem;
   color: #94a3b8;
+}
+.owner-uid {
+  margin-left: 0.35rem;
+  color: #94a3b8;
+  font-size: 0.75rem;
 }
 .slug-form {
   margin-bottom: 0.75rem;
@@ -508,31 +643,18 @@ async function saveSlug() {
   padding-left: 1.1rem;
   font-size: 0.8rem;
 }
-.member-form label {
-  display: block;
+.pw-chip {
+  margin-left: 0.4rem;
+  color: #64748b;
   font-size: 0.75rem;
-  font-weight: 700;
-  margin-bottom: 0.25rem;
 }
-.member-row {
-  display: flex;
-  gap: 0.5rem;
-}
-.member-row input {
-  flex: 1;
+.btn-eye {
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
   border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  padding: 0.45rem 0.5rem;
-  font-size: 0.8rem;
-}
-.member-row button {
-  padding: 0.45rem 0.75rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.8rem;
+  border-radius: 0.35rem;
+  background: #f8fafc;
   cursor: pointer;
 }
 .status-row {

@@ -9,6 +9,7 @@ const SuperTenantsView = () => import('@/views/super/SuperTenantsView.vue');
 const SuperCreateTenantView = () => import('@/views/super/SuperCreateTenantView.vue');
 const SuperTenantDetailView = () => import('@/views/super/SuperTenantDetailView.vue');
 const SuperSettingsView = () => import('@/views/super/SuperSettingsView.vue');
+const SuperMembersView = () => import('@/views/super/SuperMembersView.vue');
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -50,6 +51,11 @@ const router = createRouter({
           path: 'tenants/:slug',
           name: 'super-tenant-detail',
           component: SuperTenantDetailView,
+        },
+        {
+          path: 'members',
+          name: 'super-members',
+          component: SuperMembersView,
         },
         {
           path: 'settings',
