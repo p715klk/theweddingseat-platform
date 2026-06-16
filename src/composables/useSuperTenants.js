@@ -47,6 +47,39 @@ export function isValidSlug(slug) {
   return slug.length >= 2 && slug.length <= 48 && SLUG_PATTERN.test(slug);
 }
 
+/** 輸入階段狀態：duplicate check 只應對 phase === 'ready' 嘅 normalized slug */
+export function getSlugInputState(rawInput) {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) {
+    return { phase: 'idle', normalized: '' };
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('-')) {
+    return {
+      phase: 'incomplete',
+      normalized: normalizeSlug(rawInput),
+      message: 'Slug 唔可以以連字號開頭',
+    };
+  }
+  if (lower.endsWith('-')) {
+    return {
+      phase: 'incomplete',
+      normalized: normalizeSlug(rawInput),
+      message: '連字號後仲要輸入字元（結尾嘅 - 唔會計入 slug）',
+    };
+  }
+
+  const normalized = normalizeSlug(rawInput);
+  if (!normalized) {
+    return { phase: 'idle', normalized: '' };
+  }
+  if (!isValidSlug(normalized)) {
+    return { phase: 'invalid', normalized };
+  }
+  return { phase: 'ready', normalized };
+}
+
 export async function listTenants() {
   const slugsSnap = await get(dbRef(database, 'slugs'));
   const slugs = slugsSnap.val() || {};
@@ -85,6 +118,54 @@ export async function getTenantBySlug(slug) {
     meta: metaSnap.val() || {},
     members: membersSnap.val() || {},
   };
+}
+
+const TENANT_DATA_PATHS = [
+  'wedding_guests',
+  'unassigned_guests',
+  'guest_status',
+  'table_settings',
+  'floor_layout',
+  'meta_label_columns',
+];
+
+export async function getTenantFullData(tenantId) {
+  const id = String(tenantId || '').trim();
+  if (!id) throw new Error('缺少 tenantId');
+  const snaps = await Promise.all(
+    TENANT_DATA_PATHS.map((path) => get(dbRef(database, `tenants/${id}/${path}`))),
+  );
+  const [
+    weddingGuestsSnap,
+    unassignedSnap,
+    guestStatusSnap,
+    tableSettingsSnap,
+    floorLayoutSnap,
+    labelColumnsSnap,
+  ] = snaps;
+  const defaultTableSettings = buildDefaultTableSettings(10);
+  return {
+    wedding_guests: weddingGuestsSnap.val() ?? {},
+    unassigned_guests: unassignedSnap.val() ?? [],
+    guest_status: guestStatusSnap.val() ?? {},
+    table_settings: tableSettingsSnap.val() ?? defaultTableSettings,
+    floor_layout: floorLayoutSnap.val() ?? buildFloorPlanFromTableSettings(defaultTableSettings),
+    meta_label_columns: labelColumnsSnap.val() ?? DEFAULT_LABEL_COLUMNS,
+  };
+}
+
+export async function suggestCloneSlug(sourceSlug) {
+  const base = normalizeSlug(sourceSlug);
+  if (!base) return '';
+  let candidate = `${base}-copy`;
+  if (!(await isSlugTaken(candidate))) return candidate;
+  let n = 2;
+  while (n < 100) {
+    candidate = `${base}-copy-${n}`;
+    if (!(await isSlugTaken(candidate))) return candidate;
+    n += 1;
+  }
+  throw new Error('無法產生可用 slug，請手動輸入');
 }
 
 export async function updateTenantMeta(tenantId, patch, editor = null) {
@@ -203,6 +284,82 @@ export async function createTenant({
   };
 }
 
+/**
+ * 複製現有 tenant 為新 Project（含賓客、枱位、標籤等；members 預設不複製）
+ */
+export async function cloneTenant({
+  sourceTenantId,
+  slug,
+  coupleNames,
+  venueName,
+  venueHall,
+  weddingDate,
+  themeColor = '#b91c1c',
+  plan = 'standard',
+  ownerUid = '',
+  editor = null,
+}) {
+  const normalized = normalizeSlug(slug);
+  if (!isValidSlug(normalized)) {
+    throw new Error('Slug 格式無效（用小寫英文、數字、連字號，例如 chen-wong-20260915）');
+  }
+  if (await isSlugTaken(normalized)) {
+    throw new Error(`Slug「${normalized}」已被使用`);
+  }
+
+  const sourceData = await getTenantFullData(sourceTenantId);
+  const tenantId = normalized;
+  const meta = {
+    couple_names: coupleNames.trim(),
+    venue_name: venueName.trim(),
+    venue_hall: venueHall.trim(),
+    wedding_date: weddingDate,
+    theme_color: themeColor,
+    status: 'active',
+    slug: normalized,
+    plan,
+    ...auditFields(editor, { isCreate: true }),
+  };
+
+  const tenantBase = `tenants/${tenantId}`;
+  const updates = {
+    [`slugs/${normalized}`]: tenantId,
+    [`${tenantBase}/meta`]: meta,
+    [`${tenantBase}/wedding_guests`]: sourceData.wedding_guests,
+    [`${tenantBase}/unassigned_guests`]: sourceData.unassigned_guests,
+    [`${tenantBase}/guest_status`]: sourceData.guest_status,
+    [`${tenantBase}/table_settings`]: sourceData.table_settings,
+    [`${tenantBase}/floor_layout`]: sourceData.floor_layout,
+    [`${tenantBase}/meta_label_columns`]: sourceData.meta_label_columns,
+  };
+
+  if (ownerUid?.trim()) {
+    updates[`${tenantBase}/members/${ownerUid.trim()}`] = true;
+  } else if (editor?.uid) {
+    updates[`${tenantBase}/members/${editor.uid}`] = true;
+  }
+
+  await update(dbRef(database), updates);
+
+  return {
+    tenantId,
+    slug: normalized,
+    checkInUrl: `/p/${normalized}`,
+    adminUrl: `/p/${normalized}/admin`,
+  };
+}
+
 export async function setTenantStatus(tenantId, status, editor = null) {
   await updateTenantMeta(tenantId, { status }, editor);
+}
+
+/** 永久刪除 tenant（含 slug 對應及所有資料） */
+export async function deleteTenant(slug, tenantId) {
+  const trimmedSlug = String(slug || '').trim();
+  const id = String(tenantId || '').trim();
+  if (!trimmedSlug || !id) throw new Error('缺少 slug 或 tenantId');
+  await update(dbRef(database), {
+    [`slugs/${trimmedSlug}`]: null,
+    [`tenants/${id}`]: null,
+  });
 }

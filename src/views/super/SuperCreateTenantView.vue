@@ -1,47 +1,67 @@
 <template>
   <div class="panel">
-    <h2>新增客戶 Project</h2>
-    <p class="intro">
+    <h2>{{ copyFromSlug ? '複製 Project' : '新增客戶 Project' }}</h2>
+    <p v-if="prefilling" class="intro muted">⏳ 載入複製資料…</p>
+    <p v-else-if="copyFromSlug" class="intro">
+      由 <code>{{ copyFromSlug }}</code> 複製賓客、枱位等資料。修改後儲存為新 Project。
+    </p>
+    <p v-else class="intro">
       建立 slug、meta 同預設資料。客戶 Firebase Auth 帳號仍要喺 Console 開，再貼 UID 落「Owner UID」。
     </p>
 
     <form class="form" @submit.prevent="submit">
       <div class="field">
         <label>Slug <span class="req">*</span></label>
-        <input v-model="form.slug" type="text" placeholder="chen-wong-20260915" required />
-        <p class="field-hint">預覽：<code>{{ slugPreview || '…' }}</code></p>
+        <input v-model="form.slug" type="text" placeholder="chen-wong-20260915" required :disabled="prefilling || saving" />
+        <p class="field-hint">
+          預覽（實際儲存嘅 slug）：<code>{{ slugPreview || '…' }}</code>
+          <span class="field-hint-note">小寫、空格變 -、首尾 - 會忽略</span>
+        </p>
+        <p v-if="slugStatus === 'incomplete'" class="slug-status incomplete">
+          {{ slugIncompleteMsg }}
+          <span v-if="slugPreview">（若而家停止輸入，會變成 <code>{{ slugPreview }}</code>）</span>
+        </p>
+        <p v-else-if="slugStatus === 'checking'" class="slug-status checking">檢查「{{ slugPreview }}」是否可用…</p>
+        <p v-else-if="slugStatus === 'invalid'" class="slug-status invalid">
+          Slug 格式無效（小寫英文、數字、連字號，至少 2 個字元）
+        </p>
+        <p v-else-if="slugStatus === 'taken'" class="slug-status taken">
+          <span v-if="slugIncompleteMsg" class="taken-sub">{{ slugIncompleteMsg }}</span>
+          Slug「{{ slugPreview }}」已被使用，請改用其他名稱          
+        </p>
+        <p v-else-if="slugStatus === 'available'" class="slug-status available">✓ 此 slug 可用</p>
       </div>
 
       <div class="field">
         <label>新人姓名 <span class="req">*</span></label>
-        <input v-model="form.coupleNames" type="text" required placeholder="陳大文 & 李小美" />
+        <input v-model="form.coupleNames" type="text" required placeholder="陳大文 & 李小美" :disabled="prefilling || saving" />
       </div>
 
       <div class="grid">
         <div class="field">
           <label>酒店 <span class="req">*</span></label>
-          <input v-model="form.venueName" type="text" required />
+          <input v-model="form.venueName" type="text" required :disabled="prefilling || saving" />
         </div>
         <div class="field">
           <label>宴會廳</label>
-          <input v-model="form.venueHall" type="text" />
+          <input v-model="form.venueHall" type="text" :disabled="prefilling || saving" />
         </div>
       </div>
 
       <div class="grid">
         <div class="field">
           <label>婚期 <span class="req">*</span></label>
-          <input v-model="form.weddingDate" type="date" required />
+          <input v-model="form.weddingDate" type="date" required :disabled="prefilling || saving" />
         </div>
         <div class="field">
           <label>主題色</label>
-          <input v-model="form.themeColor" type="color" />
+          <input v-model="form.themeColor" type="color" :disabled="prefilling || saving" />
         </div>
       </div>
 
       <div class="field">
         <label>客戶 Owner UID（選填）</label>
-        <input v-model="form.ownerUid" type="text" placeholder="Firebase Auth → User UID" />
+        <input v-model="form.ownerUid" type="text" placeholder="Firebase Auth → User UID" :disabled="prefilling || saving" />
         <p class="field-hint">
           喺 Authentication 開好客戶帳號後，貼 UID 會自動寫入 <code>members/{uid}</code>
         </p>
@@ -51,8 +71,8 @@
 
       <div class="actions">
         <RouterLink to="/super/tenants" class="btn-cancel">取消</RouterLink>
-        <button type="submit" class="btn-submit" :disabled="saving">
-          {{ saving ? '建立中…' : '建立 Project' }}
+        <button type="submit" class="btn-submit" :disabled="saving || prefilling || !canSubmit">
+          {{ saving ? '建立中…' : (copyFromSlug ? '儲存為新 Project' : '建立 Project') }}
         </button>
       </div>
     </form>
@@ -60,13 +80,30 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, reactive, ref, watch, onUnmounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
-import { createTenant, normalizeSlug } from '@/composables/useSuperTenants';
+import {
+  createTenant,
+  cloneTenant,
+  getTenantBySlug,
+  suggestCloneSlug,
+  normalizeSlug,
+  getSlugInputState,
+  isValidSlug,
+  isSlugTaken,
+} from '@/composables/useSuperTenants';
 
+const route = useRoute();
 const router = useRouter();
 const { user } = useAuth();
+
+const copyFromSlug = computed(() => String(route.query.copy || '').trim());
+const copySourceTenantId = ref('');
+const copyPlan = ref('standard');
+const prefilling = ref(false);
+const slugStatus = ref('idle');
+const slugIncompleteMsg = ref('');
 
 const form = reactive({
   slug: '',
@@ -83,11 +120,107 @@ const error = ref('');
 
 const slugPreview = computed(() => normalizeSlug(form.slug));
 
+const canSubmit = computed(() => slugStatus.value === 'available');
+
+let slugCheckTimer = null;
+let slugCheckSeq = 0;
+
+async function checkSlugAvailability(rawInput) {
+  const state = getSlugInputState(rawInput);
+
+  if (state.phase === 'idle') {
+    slugStatus.value = 'idle';
+    slugIncompleteMsg.value = '';
+    return;
+  }
+  if (state.phase === 'incomplete') {
+    slugIncompleteMsg.value = state.message;
+    if (state.normalized && isValidSlug(state.normalized)) {
+      const seq = ++slugCheckSeq;
+      slugStatus.value = 'checking';
+      try {
+        const taken = await isSlugTaken(state.normalized);
+        if (seq !== slugCheckSeq) return;
+        slugStatus.value = taken ? 'taken' : 'incomplete';
+        if (!taken) slugIncompleteMsg.value = state.message;
+      } catch {
+        if (seq !== slugCheckSeq) return;
+        slugStatus.value = 'incomplete';
+      }
+    } else {
+      slugStatus.value = 'incomplete';
+    }
+    return;
+  }
+  slugIncompleteMsg.value = '';
+  if (state.phase === 'invalid') {
+    slugStatus.value = 'invalid';
+    return;
+  }
+
+  const seq = ++slugCheckSeq;
+  slugStatus.value = 'checking';
+  try {
+    const taken = await isSlugTaken(state.normalized);
+    if (seq !== slugCheckSeq) return;
+    slugStatus.value = taken ? 'taken' : 'available';
+  } catch {
+    if (seq !== slugCheckSeq) return;
+    slugStatus.value = 'idle';
+  }
+}
+
+function scheduleSlugCheck(rawInput) {
+  clearTimeout(slugCheckTimer);
+  slugCheckTimer = setTimeout(() => checkSlugAvailability(rawInput), 350);
+}
+
+function editorInfo() {
+  if (!user.value) return null;
+  return { uid: user.value.uid, email: user.value.email || '' };
+}
+
+async function loadCopySource(slug) {
+  if (!slug) {
+    copySourceTenantId.value = '';
+    return;
+  }
+  prefilling.value = true;
+  error.value = '';
+  try {
+    const tenant = await getTenantBySlug(slug);
+    if (!tenant) {
+      error.value = `找不到來源 Project「${slug}」`;
+      copySourceTenantId.value = '';
+      return;
+    }
+    copySourceTenantId.value = tenant.tenantId;
+    copyPlan.value = tenant.meta.plan || 'standard';
+    const m = tenant.meta;
+    form.coupleNames = m.couple_names || '';
+    form.venueName = m.venue_name || '';
+    form.venueHall = m.venue_hall || '';
+    form.weddingDate = m.wedding_date || '';
+    form.themeColor = m.theme_color || '#b91c1c';
+    form.ownerUid = '';
+    form.slug = await suggestCloneSlug(slug);
+  } catch (e) {
+    error.value = e?.message || '載入複製資料失敗';
+    copySourceTenantId.value = '';
+  } finally {
+    prefilling.value = false;
+  }
+}
+
+watch(copyFromSlug, (slug) => loadCopySource(slug), { immediate: true });
+
+watch(() => form.slug, (raw) => scheduleSlugCheck(raw));
+
 async function submit() {
   error.value = '';
   saving.value = true;
   try {
-    const result = await createTenant({
+    const payload = {
       slug: form.slug,
       coupleNames: form.coupleNames,
       venueName: form.venueName,
@@ -95,10 +228,11 @@ async function submit() {
       weddingDate: form.weddingDate,
       themeColor: form.themeColor,
       ownerUid: form.ownerUid,
-      editor: user.value
-        ? { uid: user.value.uid, email: user.value.email || '' }
-        : null,
-    });
+      editor: editorInfo(),
+    };
+    const result = copySourceTenantId.value
+      ? await cloneTenant({ ...payload, sourceTenantId: copySourceTenantId.value, plan: copyPlan.value })
+      : await createTenant(payload);
     router.push(`/super/tenants/${result.slug}`);
   } catch (e) {
     error.value = e?.message || '建立失敗';
@@ -106,6 +240,10 @@ async function submit() {
     saving.value = false;
   }
 }
+
+onUnmounted(() => {
+  clearTimeout(slugCheckTimer);
+});
 </script>
 
 <style scoped>
@@ -122,6 +260,9 @@ async function submit() {
   font-size: 0.875rem;
   color: #64748b;
   margin: 0 0 1.25rem;
+}
+.intro.muted {
+  color: #94a3b8;
 }
 .form {
   display: flex;
@@ -167,6 +308,37 @@ async function submit() {
   color: #94a3b8;
   margin: 0.25rem 0 0;
 }
+.slug-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0.35rem 0 0;
+}
+.slug-status.checking,
+.slug-status.incomplete {
+  color: #64748b;
+}
+.slug-status.incomplete code {
+  font-size: 0.85em;
+}
+.field-hint-note {
+  display: block;
+  margin-top: 0.15rem;
+  color: #94a3b8;
+}
+.slug-status.invalid,
+.slug-status.taken {
+  color: #dc2626;
+}
+.slug-status.taken .taken-sub {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #64748b;
+}
+.slug-status.available {
+  color: #15803d;
+}
 .error {
   color: #dc2626;
   font-size: 0.875rem;
@@ -197,34 +369,6 @@ async function submit() {
 }
 .btn-submit:disabled {
   opacity: 0.7;
-}
-.success {
-  margin-top: 1.5rem;
-  padding: 1rem;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 0.5rem;
-}
-.success h3 {
-  margin: 0 0 0.5rem;
-  color: #166534;
-}
-.success ul {
-  margin: 0;
-  padding-left: 1.25rem;
-  font-size: 0.875rem;
-}
-.warn {
-  font-size: 0.8rem;
-  color: #b45309;
-  margin: 0.75rem 0 0;
-}
-.link {
-  display: inline-block;
-  margin-top: 0.75rem;
-  color: #2563eb;
-  font-weight: 700;
-  font-size: 0.875rem;
 }
 code {
   font-size: 0.85em;

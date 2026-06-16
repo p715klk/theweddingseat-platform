@@ -72,20 +72,25 @@ async function logout() {
   await signOut(auth);
 }
 
-async function changePassword(currentPassword, newPassword) {
+async function reauthenticateWithPassword(password) {
   const auth = getAuthInstance();
   if (!auth?.currentUser) throw new Error('未登入');
-  if (!auth.currentUser.email) throw new Error('此帳號無 email，無法驗證舊密碼');
+  if (!auth.currentUser.email) throw new Error('此帳號無 email，無法驗證密碼');
   authError.value = null;
   const credential = EmailAuthProvider.credential(
     auth.currentUser.email,
-    currentPassword,
+    password,
   );
   await reauthenticateWithCredential(auth.currentUser, credential);
+}
+
+async function changePassword(currentPassword, newPassword) {
+  await reauthenticateWithPassword(currentPassword);
+  const auth = getAuthInstance();
   await updatePassword(auth.currentUser, newPassword);
 }
 
 export function useAuth() {
   initAuth();
-  return { user, authReady, authError, login, logout, changePassword };
+  return { user, authReady, authError, login, logout, changePassword, verifyPassword: reauthenticateWithPassword };
 }
