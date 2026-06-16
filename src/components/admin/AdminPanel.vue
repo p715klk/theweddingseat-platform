@@ -169,6 +169,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { useAdminGuests } from '@/composables/useAdminGuests';
 import { findGuestsUsingTag } from '@/lib/adminGuestModel';
+import { isChunkLoadError, reloadForStaleChunk } from '@/lib/chunkReload';
 import AdminGuestTable from '@/components/admin/AdminGuestTable.vue';
 import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
 import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
@@ -261,6 +262,7 @@ async function navigateTo(path) {
     if (path === seatingRoute.value) prefetchSeatingRoute();
     await router.push(path);
   } catch (e) {
+    if (isChunkLoadError(e) && reloadForStaleChunk()) return;
     console.error('導航失敗:', e);
     window.alert('頁面載入失敗，請重試或重新整理');
   } finally {
