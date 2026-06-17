@@ -1533,8 +1533,10 @@ function getTableViewModel(tableNum) {
             index: i,
             x,
             y,
+            // 必須保留原始 guest 欄位（id/side/group/sort...）
+            // 否則拖拽/編輯 modal 會失去標籤與來源資訊
             guest: guest ? {
-                name: guest.name,
+                ...guest,
                 displayHtml: formatGuestDisplayName(guest.name),
                 nameClass: getGuestNameTextClass(guest.name),
                 sideClass: guest.side === '女方' ? 'side-female' : 'side-male',
