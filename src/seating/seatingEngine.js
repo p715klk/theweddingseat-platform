@@ -22,7 +22,7 @@ let uiHooks = {
     onTableSettingsModalChange: null,
     onGlobalStatsChange: null,
     onPrintPreviewChange: null,
-    onZoomChange: null,
+    onCanvasTransformChange: null,
     onLockButtonFlash: null,
     onSidebarChange: null,
     onPoolChange: null,
@@ -313,11 +313,18 @@ function screenToCanvas(screenX, screenY) {
     };
 }
 
+function notifyCanvasTransformChange() {
+    uiHooks.onCanvasTransformChange?.({
+        panX,
+        panY,
+        zoom,
+        zoomPercent: Math.round(zoom * 100),
+    });
+}
+
 function applyTransform() {
-    canvas.style.transform = `translate(${panX}px, ${panY}px)`;
-    canvas.style.setProperty('--zoom', zoom);
-    uiHooks.onZoomChange?.(Math.round(zoom * 100));
     guestNameFontRatioCache.clear();
+    notifyCanvasTransformChange();
 }
 
 function canStartCanvasPan(target) {
@@ -831,7 +838,7 @@ function measureGuestNameFontRatio(circle) {
     const textSpan = circle.querySelector('.guest-name-text');
     if (!textSpan) return 0.19;
 
-    const zoomVal = parseFloat(getComputedStyle(canvas).getPropertyValue('--zoom')) || 1;
+    const zoomVal = zoom;
     const nameKey = textSpan.getAttribute('title') || textSpan.textContent || '';
     const cacheKey = `${nameKey}|${guestSize}|${Math.round(zoomVal * 1000)}`;
     if (guestNameFontRatioCache.has(cacheKey)) {
@@ -1041,6 +1048,7 @@ let printPreviewZoom = 1;
 let printPreviewOrientation = 'portrait';
 let printLayoutZoom = 1;
 let printPreviewBuilder = null;
+let nativePrintSnapshot = null;
 const PRINT_ZOOM_STEP = 0.2;
 const PRINT_ZOOM_MIN = 0.2;
 const PRINT_ZOOM_MAX = 3;
@@ -1098,6 +1106,31 @@ function notifyPrintPreviewChange(override = {}) {
     uiHooks.onPrintPreviewChange?.({ ...getPrintPreviewState(), ...override });
 }
 
+function buildTablePlatePrintHTML(tableNum) {
+    const table = getTableViewModel(tableNum);
+    if (!table) return '';
+    const seatsHTML = table.seats.map((seat) => {
+        const pos = `left:calc(${seat.x}px * var(--zoom));top:calc(${seat.y}px * var(--zoom))`;
+        if (seat.guest) {
+            return `<div class="seat-slot guest-seat-circle ${seat.guest.sideClass}" style="${pos}" data-table-num="${table.num}" data-seat-index="${seat.index}"><span class="${seat.guest.nameClass}" title="${escapeHtml(seat.guest.name)}">${seat.guest.displayHtml}</span></div>`;
+        }
+        return `<div class="seat-slot seat-empty" style="${pos}" data-table-num="${table.num}" data-seat-index="${seat.index}"><span>+</span></div>`;
+    }).join('');
+    const hubHTML = [
+        `<span class="hub-title">Table ${table.num}</span>`,
+        table.label ? `<span class="hub-category">${escapeHtml(table.label)}</span>` : '',
+        `<span class="hub-num">${table.filled} ppl</span>`,
+    ].join('');
+    return `<div class="table-plate" style="--guest-size:${table.guestSize}px">${seatsHTML}${table.hubRingHtml}<div class="hub-center">${hubHTML}</div></div>`;
+}
+
+function fitPrintPreviewGuestFonts() {
+    document.querySelectorAll('.print-preview-sheet .guest-seat-circle').forEach((circle) => {
+        const ratio = measureGuestNameFontRatio(circle);
+        circle.style.setProperty('--name-font-ratio', ratio.toFixed(4));
+    });
+}
+
 function openPrintPreview(buildHTML) {
     if (!requireTablesBounds()) return;
     printPreviewBuilder = buildHTML;
@@ -1110,17 +1143,8 @@ function openPrintPreview(buildHTML) {
     notifyPrintPreviewChange();
 }
 
-function cloneTablePlateForPrint(plate) {
-    const plateClone = plate.cloneNode(true);
-    plateClone.querySelectorAll('[draggable]').forEach(node => node.removeAttribute('draggable'));
-    plateClone.querySelectorAll('[ondragover],[ondrop]').forEach(node => {
-        node.removeAttribute('ondragover');
-        node.removeAttribute('ondrop');
-    });
-    return plateClone.outerHTML;
-}
-
-function buildCanvasPrintHTML() {
+function buildCanvasPrintHTML(options = {}) {
+    const bakeScale = options?.bakeScale === true;
     const bounds = getTablesBoundingBox();
     if (!bounds) return `<p class="print-empty">${PRINT_EMPTY_MSG}</p>`;
 
@@ -1141,16 +1165,26 @@ function buildCanvasPrintHTML() {
     const tablesHTML = getTableSettingKeys().map((tableNum) => {
         const settings = tableSettings[tableNum];
         if (!settings) return '';
-        const el = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
-        const plate = el?.querySelector('.table-plate');
-        if (!plate) return '';
         const bx = Number(settings.x);
         const by = Number(settings.y);
         if (!Number.isFinite(bx) || !Number.isFinite(by)) return '';
-        const left = bx - bounds.minX + pad;
-        const top = by - bounds.minY + pad;
-        return `<div class="draggable-table" style="left:${left}px;top:${top}px;--zoom:1">${cloneTablePlateForPrint(plate)}</div>`;
+        const relLeft = bx - bounds.minX + pad;
+        const relTop = by - bounds.minY + pad;
+        if (bakeScale) {
+            const left = offsetX + relLeft * fitScale;
+            const top = offsetY + relTop * fitScale;
+            return `<div class="draggable-table" style="left:${left}px;top:${top}px;--zoom:${fitScale}">${buildTablePlatePrintHTML(tableNum)}</div>`;
+        }
+        return `<div class="draggable-table" style="left:${relLeft}px;top:${relTop}px;--zoom:1">${buildTablePlatePrintHTML(tableNum)}</div>`;
     }).join('');
+
+    if (!tablesHTML) {
+        return `<p class="print-empty">${PRINT_EMPTY_MSG}</p>`;
+    }
+
+    if (bakeScale) {
+        return `<div class="print-tables-layout" style="width:${page.w}px;height:${page.h}px;--zoom:1">${tablesHTML}</div>`;
+    }
 
     return `<div class="print-tables-layout" style="width:${page.w}px;height:${page.h}px;--zoom:1">
         <div class="print-tables-scale-group" style="left:${offsetX}px;top:${offsetY}px;width:${innerW}px;height:${innerH}px;transform:scale(${fitScale})">${tablesHTML}</div>
@@ -1204,7 +1238,68 @@ function setPrintOrientation(orientation) {
     notifyPrintPreviewChange();
 }
 
+function applyNativePrintLayout() {
+    if (!printPreviewOpen) return;
+    const content = document.querySelector('.print-preview-content');
+    const sheet = document.querySelector('.print-preview-sheet');
+    const viewport = document.querySelector('.print-preview-viewport');
+    if (!content) return;
+
+    const page = getPrintPageInnerSize();
+    nativePrintSnapshot = {
+        contentHtml: content.innerHTML,
+        sheetStyle: sheet ? {
+            transform: sheet.style.transform,
+            width: sheet.style.width,
+            height: sheet.style.height,
+        } : null,
+        viewportStyle: viewport ? {
+            width: viewport.style.width,
+            height: viewport.style.height,
+        } : null,
+    };
+
+    const bakedHtml = (printPreviewBuilder === buildCanvasPrintHTML)
+        ? buildCanvasPrintHTML({ bakeScale: true })
+        : content.innerHTML;
+
+    content.innerHTML = bakedHtml;
+
+    if (sheet) {
+        sheet.style.transform = 'none';
+        sheet.style.width = `${page.w}px`;
+        sheet.style.height = `${page.h}px`;
+    }
+    if (viewport) {
+        viewport.style.width = '100%';
+        viewport.style.height = 'auto';
+    }
+
+    fitPrintPreviewGuestFonts();
+}
+
+function restoreNativePrintLayout() {
+    if (!nativePrintSnapshot) return;
+    const content = document.querySelector('.print-preview-content');
+    const sheet = document.querySelector('.print-preview-sheet');
+    const viewport = document.querySelector('.print-preview-viewport');
+
+    if (content) content.innerHTML = nativePrintSnapshot.contentHtml;
+    if (sheet && nativePrintSnapshot.sheetStyle) {
+        sheet.style.transform = nativePrintSnapshot.sheetStyle.transform;
+        sheet.style.width = nativePrintSnapshot.sheetStyle.width;
+        sheet.style.height = nativePrintSnapshot.sheetStyle.height;
+    }
+    if (viewport && nativePrintSnapshot.viewportStyle) {
+        viewport.style.width = nativePrintSnapshot.viewportStyle.width;
+        viewport.style.height = nativePrintSnapshot.viewportStyle.height;
+    }
+
+    nativePrintSnapshot = null;
+}
+
 function closePrintPreview() {
+    restoreNativePrintLayout();
     if (!printPreviewOpen) return;
     printPreviewOpen = false;
     printPreviewBuilder = null;
@@ -1217,6 +1312,12 @@ function closePrintPreview() {
 
 function executePrintPreview() {
     applyPrintPageStyle();
+    applyNativePrintLayout();
+    const onDone = () => {
+        restoreNativePrintLayout();
+        window.removeEventListener('afterprint', onDone);
+    };
+    window.addEventListener('afterprint', onDone);
     window.print();
 }
 
@@ -2572,7 +2673,7 @@ function resetEngineState() {
         onTableSettingsModalChange: null,
         onGlobalStatsChange: null,
         onPrintPreviewChange: null,
-        onZoomChange: null,
+        onCanvasTransformChange: null,
         onLockButtonFlash: null,
         onSidebarChange: null,
         onPoolChange: null,
@@ -2586,6 +2687,7 @@ function resetEngineState() {
     printPreviewHtml = '';
     printPreviewZoom = 1;
     printPreviewBuilder = null;
+    nativePrintSnapshot = null;
 }
 
 export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
@@ -2601,7 +2703,7 @@ export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
         onTableSettingsModalChange: hooks.onTableSettingsModalChange || null,
         onGlobalStatsChange: hooks.onGlobalStatsChange || null,
         onPrintPreviewChange: hooks.onPrintPreviewChange || null,
-        onZoomChange: hooks.onZoomChange || null,
+        onCanvasTransformChange: hooks.onCanvasTransformChange || null,
         onLockButtonFlash: hooks.onLockButtonFlash || null,
         onSidebarChange: hooks.onSidebarChange || null,
         onPoolChange: hooks.onPoolChange || null,
@@ -2634,6 +2736,7 @@ export function destroySeatingEngine() {
     firebaseUnsubs = [];
     cleanupFns.forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
     cleanupFns.length = 0;
+    restoreNativePrintLayout();
     document.body.classList.remove('seating-touch', 'tables-position-locked', 'print-preview-open');
     engineInitialized = false;
     rawTenantRef = null;
@@ -2668,6 +2771,7 @@ export {
     stepPrintPreviewZoom,
     fitPrintPreviewZoom,
     autoFitPrintPreviewOnOpen,
+    fitPrintPreviewGuestFonts,
     setPrintOrientation,
     executePrintPreview,
     allowDrop,

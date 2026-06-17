@@ -131,6 +131,8 @@
       <main class="absolute inset-0 overflow-hidden" id="canvas-viewport">
         <SeatingCanvasTables
           :tables="canvasTables"
+          :pan-x="canvasPan.x"
+          :pan-y="canvasPan.y"
           :zoom="canvasZoom"
           :dragging-table-num="draggingTableNum"
         />
@@ -218,7 +220,7 @@
       @fit-zoom="fitPrintPreviewZoom"
       @set-orientation="setPrintOrientation"
       @print="executePrintPreview()"
-      @opened="autoFitPrintPreviewOnOpen"
+      @opened="onPrintPreviewOpened"
     />
   </div>
 </template>
@@ -256,6 +258,7 @@ import {
   stepPrintPreviewZoom,
   fitPrintPreviewZoom,
   autoFitPrintPreviewOnOpen,
+  fitPrintPreviewGuestFonts,
   setPrintOrientation,
   executePrintPreview,
   handleDropTrash,
@@ -272,6 +275,7 @@ const { tenantRef, tenantId } = useTenant();
 const initError = ref('');
 const globalStatsText = ref('載入中...');
 const canvasZoomPercent = ref(100);
+const canvasPan = ref({ x: -900, y: -600 });
 const findTableItems = ref([]);
 const tablesLocked = ref(false);
 const lockButtonFlash = ref(false);
@@ -387,6 +391,11 @@ function onPrintMenuSelect(action) {
   closePrintMenu();
   if (action === 'canvas') printCanvasView();
   else if (action === 'guest-list') printGuestListView();
+}
+
+function onPrintPreviewOpened(size) {
+  autoFitPrintPreviewOnOpen(size);
+  requestAnimationFrame(() => fitPrintPreviewGuestFonts());
 }
 
 function onDocumentClick(e) {
@@ -520,8 +529,9 @@ function mountEngine() {
         onGlobalStatsChange(text) {
           globalStatsText.value = text;
         },
-        onZoomChange(percent) {
-          canvasZoomPercent.value = percent;
+        onCanvasTransformChange({ panX, panY, zoom, zoomPercent }) {
+          canvasPan.value = { x: panX, y: panY };
+          canvasZoomPercent.value = zoomPercent ?? Math.round((zoom ?? 1) * 100);
         },
         onLockButtonFlash() {
           flashLockButton();

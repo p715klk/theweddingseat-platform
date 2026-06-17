@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <div v-if="open" class="print-preview-overlay flex flex-col">
     <div class="print-preview-toolbar min-h-14 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 px-4 py-2 shrink-0">
       <button type="button" class="text-sm font-bold text-slate-600 hover:text-slate-900 shrink-0" @click="emit('close')">
@@ -47,14 +48,13 @@
         class="print-preview-viewport shrink-0"
         :style="{ width: `${viewportWidth}px`, height: `${viewportHeight}px` }"
       >
-        <div
-          class="print-preview-sheet"
-          :style="{ transform: `scale(${zoom})`, transformOrigin: 'top left' }"
-          v-html="html"
-        />
+        <div class="print-preview-sheet" :style="sheetStyle">
+          <div class="print-preview-content" v-html="html" />
+        </div>
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -76,6 +76,12 @@ const scrollRef = ref(null);
 
 const viewportWidth = computed(() => Math.ceil(props.pageWidth * props.zoom));
 const viewportHeight = computed(() => Math.ceil(props.pageHeight * props.zoom));
+const sheetStyle = computed(() => ({
+  width: `${props.pageWidth}px`,
+  height: `${props.pageHeight}px`,
+  transform: `scale(${props.zoom})`,
+  transformOrigin: 'top left',
+}));
 
 function emitOpened() {
   const el = scrollRef.value;
