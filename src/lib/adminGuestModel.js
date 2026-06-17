@@ -1,4 +1,4 @@
-import { get, update } from 'firebase/database';
+import { get, update } from '@/rtdb';
 import {
   normalizeTags,
   PRIMARY_TAG_KEY,

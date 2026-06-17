@@ -18,8 +18,8 @@ body.seating-touch {
 #seating-app > header,
 #seating-app > header button,
 #seating-app > header a,
-#print-menu,
-#print-menu button,
+#print-menu-wrap .print-menu,
+#print-menu-wrap .print-menu button,
 #find-table-menu,
 #find-table-menu button {
     touch-action: manipulation;
@@ -199,18 +199,18 @@ body.seating-touch {
     .pool-group-title { font-size: 13px !important; }
     .pool-section-label { font-size: 13px !important; }
     .sidebar-title { font-size: 1.35rem !important; }
-    #guest-detail-modal .modal-form-text { font-size: 14px; }
-    #guest-detail-modal .modal-form-text input,
-    #guest-detail-modal .modal-form-text select { font-size: 14px !important; }
-    #guest-detail-modal .modal-form-label { font-size: 12px !important; }
-    #guest-detail-modal .modal-heading { font-size: 1rem !important; }
-    #guest-detail-modal #edit-guest-tags .tag-chip,
-    #guest-detail-modal #edit-guest-tags .row-tag-add-select { font-size: 14px !important; }
+    .guest-detail-modal .modal-form-text { font-size: 14px; }
+    .guest-detail-modal .modal-form-text input,
+    .guest-detail-modal .modal-form-text select { font-size: 14px !important; }
+    .guest-detail-modal .modal-form-label { font-size: 12px !important; }
+    .guest-detail-modal .modal-heading { font-size: 1rem !important; }
+    .guest-detail-modal #edit-guest-tags .tag-chip,
+    .guest-detail-modal #edit-guest-tags .row-tag-add-select { font-size: 14px !important; }
 }
 
 /* 彈窗標籤：跟隨表單字級，唔用 10px */
-#guest-detail-modal #edit-guest-tags .tag-chip,
-#guest-detail-modal #edit-guest-tags .row-tag-add-select {
+.guest-detail-modal #edit-guest-tags .tag-chip,
+.guest-detail-modal #edit-guest-tags .row-tag-add-select {
     font-size: 0.875rem;
 }
 
@@ -311,13 +311,13 @@ body.tables-position-locked .table-plate:active {
     position: relative;
     z-index: 110;
 }
-#print-menu,
+#print-menu-wrap .print-menu,
 #find-table-menu {
     min-width: 11rem;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
 }
-#print-menu.is-fixed,
+#print-menu-wrap .print-menu.is-fixed,
 #find-table-menu.is-fixed {
     position: fixed;
     z-index: 120;
@@ -361,36 +361,32 @@ body.tables-position-locked .table-plate:active {
 }
 
 /* 頁內列印預覽（唔開新分頁） */
-#print-preview-overlay {
+.print-preview-overlay {
     position: fixed;
     inset: 0;
     z-index: 10000;
-    flex-direction: column;
     background: #e2e8f0;
 }
-body.print-preview-open #print-preview-overlay {
-    display: flex !important;
-}
-#print-preview-sheet {
+.print-preview-sheet {
     background: #fff;
     box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
     box-sizing: border-box;
     overflow: hidden;
     flex-shrink: 0;
 }
-#print-preview-viewport {
+.print-preview-viewport {
     transform-origin: top center;
     flex-shrink: 0;
 }
-body[data-print-orientation="portrait"] #print-preview-sheet {
+body[data-print-orientation="portrait"] .print-preview-sheet {
     width: 756px;
     height: 1085px;
 }
-body[data-print-orientation="landscape"] #print-preview-sheet {
+body[data-print-orientation="landscape"] .print-preview-sheet {
     width: 1085px;
     height: 756px;
 }
-body.print-preview-open #print-preview-scroll {
+body.print-preview-open .print-preview-scroll {
     touch-action: pan-x pan-y;
 }
 .print-tables-layout {
@@ -464,12 +460,11 @@ body.print-preview-open #print-preview-scroll {
 
 @media print {
     body.print-preview-open #seating-app,
-    body.print-preview-open #guest-detail-modal,
-    body.print-preview-open #custom-dialog-overlay,
-    body.print-preview-open #table-settings-modal {
+    body.print-preview-open .guest-detail-modal,
+    body.print-preview-open .table-settings-modal {
         display: none !important;
     }
-    body.print-preview-open #print-preview-overlay {
+    body.print-preview-open .print-preview-overlay {
         display: block !important;
         position: static;
         background: #fff;
@@ -477,17 +472,17 @@ body.print-preview-open #print-preview-scroll {
     body.print-preview-open .print-preview-toolbar {
         display: none !important;
     }
-    body.print-preview-open #print-preview-scroll {
+    body.print-preview-open .print-preview-scroll {
         overflow: visible !important;
         padding: 0 !important;
         background: #fff !important;
     }
-    body.print-preview-open #print-preview-viewport {
+    body.print-preview-open .print-preview-viewport {
         width: auto !important;
         height: auto !important;
         transform: none !important;
     }
-    body.print-preview-open #print-preview-sheet {
+    body.print-preview-open .print-preview-sheet {
         box-shadow: none !important;
         margin: 0 !important;
         padding: 0 !important;
@@ -499,8 +494,8 @@ body.print-preview-open #print-preview-scroll {
     #sidebar-panel { width: min(88vw, 300px); }
     #sidebar-content { width: min(88vw, 300px) !important; }
     .header-actions .hide-mobile { display: none; }
-    #global-stats { display: none; }
+    .global-stats { display: none; }
     header h1 span:last-child { font-size: 0.85rem; }
     .pool-guest-chip { font-size: 15px !important; padding: 12px 10px !important; }
-    #print-preview-scroll { padding: 12px; }
+    .print-preview-scroll { padding: 12px; }
 }

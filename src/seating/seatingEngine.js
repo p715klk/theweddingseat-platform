@@ -1,5 +1,6 @@
 import { createCompatTenantRef } from './compatTenantRef.js';
-import { get } from 'firebase/database';
+import { get } from '@/rtdb';
+import { serializeGroupForFirebase } from '@/lib/adminGuestModel';
 
 let tenantRefFn = null;
 function tenantRef(subPath) {
@@ -12,6 +13,16 @@ let firebaseUnsubs = [];
 let engineInitialized = false;
 let rawTenantRef = null;
 let cachedMetaLabelColumns = null;
+/** Vue 組件注入 UI 更新（取代 legacy globalThis / innerHTML onclick） */
+let uiHooks = {
+    onFindTableItemsChange: null,
+    onTableLockChange: null,
+    onGuestModalChange: null,
+    onCategoryPoolChange: null,
+    onTableSettingsModalChange: null,
+    onGlobalStatsChange: null,
+    onPrintPreviewChange: null,
+};
 
 function trackCleanup(fn) {
     cleanupFns.push(fn);
@@ -72,11 +83,6 @@ function persistTableSettings() {
     return tenantRef('table_settings').set(tableSettings);
 }
 
-function ensureDefaultTablesIfEmpty() {
-    // 唔再自動建立預設枱；請用畫布「➕ 新增圓枱」
-    return false;
-}
-
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
@@ -84,8 +90,6 @@ let categoriesByColumn = {
     'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
 };
 let legacyLabelKeys = null;
-let activeSelectElement = null;
-let activeColumnKey = null;
 
 function normalizeGuestTags(val) {
     if (!val) return [];
@@ -121,11 +125,11 @@ function applyMetaLabelColumns(meta) {
         categoriesByColumn = meta.categories;
         legacyLabelKeys = null;
     }
+    notifyCategoryPoolChange();
 }
 
-function getModalGuestSide() {
-    const el = document.getElementById('edit-guest-side');
-    return el && el.value === '女方' ? '女方' : '男方';
+function notifyCategoryPoolChange() {
+    uiHooks.onCategoryPoolChange?.([...(categoriesByColumn[PRIMARY_TAG_KEY] || [])]);
 }
 
 function tagChipSideClasses(side) {
@@ -143,82 +147,6 @@ function tagChipSideClasses(side) {
         select: 'border-blue-200 bg-blue-50/20',
         pool: 'bg-blue-50 text-blue-700 border-blue-200'
     };
-}
-
-function buildTagChipHTML(tag, columnKey, side = getModalGuestSide()) {
-    const safe = tag.replace(/"/g, '&quot;');
-    const c = tagChipSideClasses(side);
-    return `<span class="tag-chip inline-flex items-center gap-1 ${c.chip} px-2 py-1 rounded font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeModalTag(this,'${columnKey}')" class="${c.btn} font-black leading-none">×</button></span>`;
-}
-
-function buildTagAddSelectHTML(columnKey, selectedTags, side = getModalGuestSide()) {
-    const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
-    const available = optionsArr.filter(cat => !selectedTags.includes(cat));
-    const c = tagChipSideClasses(side);
-    let optsHTML = `<option value="">＋</option>`;
-    optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
-    optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
-    optsHTML += `<option value="__DELETE__" class="text-red-600 font-bold">− 刪除標籤...</option>`;
-    return `<select onchange="handleModalTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border ${c.select} rounded px-2 py-1 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
-}
-
-function refreshModalTagColors() {
-    renderModalTags(readModalTags());
-}
-
-function readModalTags() {
-    const container = document.getElementById('edit-guest-tags');
-    if (!container) return [];
-    return [...container.querySelectorAll('.tag-chip')].map(chip => chip.dataset.tag);
-}
-
-function renderModalTags(tags) {
-    const container = document.getElementById('edit-guest-tags');
-    if (!container) return;
-    const normalized = normalizeGuestTags(tags);
-    normalized.forEach(t => {
-        const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
-        if (!pool.includes(t)) pool.push(t);
-    });
-    const chips = normalized.map(t => buildTagChipHTML(t, PRIMARY_TAG_KEY)).join('');
-    container.innerHTML = chips + buildTagAddSelectHTML(PRIMARY_TAG_KEY, normalized);
-}
-
-function insertModalTagChip(columnKey, tag) {
-    const container = document.getElementById('edit-guest-tags');
-    const select = container.querySelector(`.row-tag-add-select-${columnKey}`);
-    if (!select) return;
-    const current = readModalTags();
-    if (!current.includes(tag)) {
-        select.insertAdjacentHTML('beforebegin', buildTagChipHTML(tag, columnKey));
-    }
-}
-
-function refreshModalTagAddSelect(columnKey) {
-    const container = document.getElementById('edit-guest-tags');
-    const select = container.querySelector(`.row-tag-add-select-${columnKey}`);
-    if (!select) return;
-    select.outerHTML = buildTagAddSelectHTML(columnKey, readModalTags());
-}
-
-function handleModalTagAdd(selectEl, columnKey) {
-    const val = selectEl.value;
-    if (!val) return;
-    if (val === '__NEW__') {
-        activeSelectElement = selectEl;
-        activeColumnKey = columnKey;
-        document.getElementById('custom-category-input').value = '';
-        showModal(document.getElementById('custom-dialog-overlay'));
-        selectEl.value = '';
-        return;
-    }
-    if (val === '__DELETE__') {
-        openDeleteTagDialog(columnKey, selectEl);
-        selectEl.value = '';
-        return;
-    }
-    insertModalTagChip(columnKey, val);
-    refreshModalTagAddSelect(columnKey);
 }
 
 function forEachAssignedGuest(callback) {
@@ -244,102 +172,12 @@ function getGuestsUsingTagInSeating(tag) {
     return collectAllGuestsInSeating().filter(g => getGuestTags(g).includes(tag));
 }
 
-function populateDeleteTagSelect(columnKey) {
-    const select = document.getElementById('delete-tag-select');
-    const pool = (categoriesByColumn[columnKey] || []).filter(t => t && t !== '未分類');
-    select.innerHTML = pool.length
-        ? pool.map(t => `<option value="${t.replace(/"/g, '&quot;')}">${t}</option>`).join('')
-        : '<option value="">（無可刪除標籤）</option>';
-}
-
-function updateDeleteTagUsageHint() {
-    const select = document.getElementById('delete-tag-select');
-    const hint = document.getElementById('delete-tag-usage-hint');
-    const btn = document.getElementById('btn-confirm-delete-tag');
-    const tag = select.value;
-    if (!tag) {
-        hint.textContent = '目前標籤清單為空。';
-        btn.disabled = true;
-        return;
-    }
-    const users = getGuestsUsingTagInSeating(tag);
-    if (users.length > 0) {
-        const names = users.map(g => g.name).join('、');
-        hint.innerHTML = `<span class="text-red-600 font-bold">尚有 ${users.length} 位賓客使用中：</span>${names}`;
-        btn.disabled = true;
-    } else {
-        hint.innerHTML = '<span class="text-green-700 font-bold">無人使用此標籤，可安全刪除。</span>';
-        btn.disabled = false;
-    }
-}
-
-function openDeleteTagDialog(columnKey, selectEl) {
-    activeSelectElement = selectEl;
-    activeColumnKey = columnKey;
-    populateDeleteTagSelect(columnKey);
-    updateDeleteTagUsageHint();
-    showModal(document.getElementById('delete-tag-dialog-overlay'));
-}
-
-function closeDeleteTagDialog(isConfirm) {
-    hideModal(document.getElementById('delete-tag-dialog-overlay'));
-    if (isConfirm && activeColumnKey) {
-        const tag = document.getElementById('delete-tag-select').value;
-        if (tag && getGuestsUsingTagInSeating(tag).length === 0) {
-            const pool = categoriesByColumn[activeColumnKey];
-            const idx = pool.indexOf(tag);
-            if (idx !== -1) {
-                pool.splice(idx, 1);
-                persistMetaLabelColumns();
-                refreshModalTagAddSelect(activeColumnKey);
-                alert(`✅ 已刪除標籤「${tag}」`);
-            }
-        }
-    }
-    if (activeSelectElement) activeSelectElement.value = '';
-    activeSelectElement = null;
-    activeColumnKey = null;
-}
-
-function removeModalTag(btn, columnKey) {
-    btn.closest('.tag-chip').remove();
-    refreshModalTagAddSelect(columnKey);
-}
-
-function closeCustomCategoryDialog(isConfirm) {
-    const overlay = document.getElementById('custom-dialog-overlay');
-    const inputEl = document.getElementById('custom-category-input');
-    hideModal(overlay);
-
-    if (isConfirm && activeColumnKey) {
-        const newCat = inputEl.value.trim();
-        if (newCat && !categoriesByColumn[activeColumnKey].includes(newCat)) {
-            categoriesByColumn[activeColumnKey].push(newCat);
-            persistMetaLabelColumns();
-            insertModalTagChip(activeColumnKey, newCat);
-            refreshModalTagAddSelect(activeColumnKey);
-        }
-    }
-    activeSelectElement = null;
-    activeColumnKey = null;
-}
-
 function persistMetaLabelColumns() {
     return tenantRef('meta_label_columns').update({
         keys: [PRIMARY_TAG_KEY],
         names: ['標籤 (可多選)'],
         categories: categoriesByColumn
     });
-}
-
-function showModal(el) {
-    el.classList.remove('hidden');
-    el.style.display = 'flex';
-}
-
-function hideModal(el) {
-    el.classList.add('hidden');
-    el.style.display = '';
 }
 
 const IS_TOUCH_DEVICE = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -806,21 +644,15 @@ function flyToTable(tableNum) {
     }
 }
 
+function getFindTableMenuItems() {
+    return getTableSettingKeys().map((num) => ({
+        num: String(num),
+        label: (tableSettings[num]?.label || '').trim(),
+    }));
+}
+
 function refreshFindTableMenu() {
-    const list = document.getElementById('find-table-list');
-    if (!list) return;
-    const nums = getTableSettingKeys();
-    if (!nums.length) {
-        list.innerHTML = '<p class="px-3 py-2 text-slate-400 font-bold text-[11px]">未有圓枱</p>';
-        return;
-    }
-    list.innerHTML = nums.map(num => {
-        const label = (tableSettings[num]?.label || '').trim();
-        const sub = label ? `<span class="block text-[10px] font-semibold text-slate-400 truncate max-w-[140px]">${escapeHtml(label)}</span>` : '';
-        return `<button type="button" onclick="flyToTable('${num}')" class="find-table-item w-full text-left px-3 py-2 hover:bg-indigo-50 active:bg-indigo-100 text-slate-700 border-t border-slate-100 first:border-t-0">
-            <span class="font-black">Table ${num}</span>${sub}
-        </button>`;
-    }).join('');
+    uiHooks.onFindTableItemsChange?.(getFindTableMenuItems());
 }
 
 function closeFindTableMenu() {
@@ -1240,10 +1072,7 @@ function toggleSidebar() {
 let isTablePositionLocked = false;
 
 function getTableLockStorageKey() {
-    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
-        ? tenantSlug
-        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
-    return `seating_tables_locked_${slug}`;
+    return `seating_tables_locked_${tenantSlug || 'default'}`;
 }
 
 function loadTablePositionLockState() {
@@ -1251,19 +1080,8 @@ function loadTablePositionLockState() {
 }
 
 function updateTableLockUI() {
-    const btn = document.getElementById('btn-lock-tables');
-    if (!btn) return;
-    if (isTablePositionLocked) {
-        btn.innerHTML = '🔒<span class="hide-mobile"> 已鎖</span>';
-        btn.classList.add('is-active');
-        btn.title = '枱位已鎖定，點擊解鎖';
-        document.body.classList.add('tables-position-locked');
-    } else {
-        btn.innerHTML = '🔓<span class="hide-mobile"> 鎖枱</span>';
-        btn.classList.remove('is-active');
-        btn.title = '鎖定枱位（防止拖動）';
-        document.body.classList.remove('tables-position-locked');
-    }
+    document.body.classList.toggle('tables-position-locked', isTablePositionLocked);
+    uiHooks.onTableLockChange?.(isTablePositionLocked);
 }
 
 function toggleTablePositionLock() {
@@ -1273,67 +1091,15 @@ function toggleTablePositionLock() {
     updateTableLockUI();
 }
 
-function closePrintMenu() {
-    const menu = document.getElementById('print-menu');
-    if (menu) {
-        menu.classList.add('hidden');
-        menu.classList.remove('is-fixed');
-        menu.style.top = '';
-        menu.style.right = '';
-        menu.style.left = '';
-    }
-}
-
-let printMenuIgnoreCloseUntil = 0;
-
-function positionPrintMenuFixed() {
-    const btn = document.getElementById('btn-print-menu');
-    const menu = document.getElementById('print-menu');
-    if (!btn || !menu) return;
-    const rect = btn.getBoundingClientRect();
-    menu.classList.add('is-fixed');
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-    menu.style.left = 'auto';
-}
-
-function togglePrintMenu(e) {
-    if (e) e.stopPropagation();
-    const menu = document.getElementById('print-menu');
-    if (!menu) return;
-    const willOpen = menu.classList.contains('hidden');
-    menu.classList.toggle('hidden');
-    if (willOpen) {
-        printMenuIgnoreCloseUntil = Date.now() + 400;
-        if (isMobileViewport()) positionPrintMenuFixed();
-    } else {
-        closePrintMenu();
-    }
-}
-
-function handlePrintMenuAction(action, event) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
-    printMenuIgnoreCloseUntil = Date.now() + 600;
-    closePrintMenu();
-    if (action === 'canvas') printCanvasView();
-    else if (action === 'guest-list') printGuestListView();
-}
-
 function bindDocumentClickHandlers() {
-    onEvent(document, 'click', (e) => {
-        if (Date.now() < printMenuIgnoreCloseUntil) return;
-        if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
-    });
     onEvent(document, 'click', (e) => {
         if (Date.now() < findTableMenuIgnoreCloseUntil) return;
         if (!e.target.closest('#find-table-wrap')) closeFindTableMenu();
     });
 }
 
-let printPreviewCleanup = null;
+let printPreviewOpen = false;
+let printPreviewHtml = '';
 let printPreviewZoom = 1;
 let printPreviewOrientation = 'portrait';
 let printLayoutZoom = 1;
@@ -1378,11 +1144,33 @@ function requireTablesBounds() {
     return bounds;
 }
 
+function getPrintPreviewState() {
+    const page = getPrintPageInnerSize();
+    return {
+        open: printPreviewOpen,
+        html: printPreviewHtml,
+        zoom: printPreviewZoom,
+        zoomPercent: Math.round(printPreviewZoom * 100),
+        orientation: printPreviewOrientation,
+        pageWidth: page.w,
+        pageHeight: page.h,
+    };
+}
+
+function notifyPrintPreviewChange(override = {}) {
+    uiHooks.onPrintPreviewChange?.({ ...getPrintPreviewState(), ...override });
+}
+
 function openPrintPreview(buildHTML) {
-    closePrintMenu();
     if (!requireTablesBounds()) return;
     printPreviewBuilder = buildHTML;
-    showPrintPreview(buildHTML());
+    printPreviewOpen = true;
+    printPreviewHtml = buildHTML();
+    printPreviewZoom = 1;
+    document.body.dataset.printOrientation = printPreviewOrientation;
+    document.body.classList.add('print-preview-open');
+    applyPrintPageStyle();
+    notifyPrintPreviewChange();
 }
 
 function cloneTablePlateForPrint(plate) {
@@ -1428,40 +1216,27 @@ function buildCanvasPrintHTML() {
     </div>`;
 }
 
-function applyPrintPreviewTransform() {
-    const viewport = document.getElementById('print-preview-viewport');
-    const sheet = document.getElementById('print-preview-sheet');
-    const pct = document.getElementById('print-zoom-percent');
-    const page = getPrintPageInnerSize();
-    if (!viewport || !sheet) return;
-
-    sheet.style.transform = `scale(${printPreviewZoom})`;
-    sheet.style.transformOrigin = 'top left';
-    viewport.style.width = `${Math.ceil(page.w * printPreviewZoom)}px`;
-    viewport.style.height = `${Math.ceil(page.h * printPreviewZoom)}px`;
-
-    if (pct) pct.textContent = `${Math.round(printPreviewZoom * 100)}%`;
-}
-
 function stepPrintPreviewZoom(delta) {
+    if (!printPreviewOpen) return;
     printPreviewZoom = snapPrintPreviewZoom(printPreviewZoom + delta);
-    applyPrintPreviewTransform();
+    notifyPrintPreviewChange();
 }
 
-function fitPrintPreviewZoom() {
-    const scroll = document.getElementById('print-preview-scroll');
-    if (!scroll) return;
+function fitPrintPreviewZoom(scrollSize) {
+    if (!printPreviewOpen) return;
     const page = getPrintPageInnerSize();
     const padding = isMobileViewport() ? 24 : 48;
-    const zoomX = (scroll.clientWidth - padding) / page.w;
-    const zoomY = (scroll.clientHeight - padding) / page.h;
+    const w = scrollSize?.width ?? window.innerWidth;
+    const h = scrollSize?.height ?? window.innerHeight;
+    const zoomX = (w - padding) / page.w;
+    const zoomY = (h - padding) / page.h;
     printPreviewZoom = snapPrintPreviewZoom(Math.min(zoomX, zoomY));
-    applyPrintPreviewTransform();
+    notifyPrintPreviewChange();
 }
 
-function updatePrintOrientationUI() {
-    document.getElementById('btn-print-portrait')?.classList.toggle('is-active', printPreviewOrientation === 'portrait');
-    document.getElementById('btn-print-landscape')?.classList.toggle('is-active', printPreviewOrientation === 'landscape');
+function autoFitPrintPreviewOnOpen(scrollSize) {
+    if (!printPreviewOpen || !isMobileViewport()) return;
+    fitPrintPreviewZoom(scrollSize);
 }
 
 function applyPrintPageStyle() {
@@ -1479,77 +1254,24 @@ function setPrintOrientation(orientation) {
     if (orientation !== 'portrait' && orientation !== 'landscape') return;
     printPreviewOrientation = orientation;
     document.body.dataset.printOrientation = orientation;
-    updatePrintOrientationUI();
     applyPrintPageStyle();
-    rebuildPrintPreviewContent();
-}
-
-function rebuildPrintPreviewContent() {
-    const sheet = document.getElementById('print-preview-sheet');
-    if (!sheet || !document.body.classList.contains('print-preview-open') || !printPreviewBuilder) return;
-    const savedZoom = printPreviewZoom;
-    sheet.innerHTML = printPreviewBuilder();
-    printPreviewZoom = savedZoom;
-    requestAnimationFrame(() => {
-        applyPrintPreviewTransform();
-        if (isMobileViewport()) fitPrintPreviewZoom();
-    });
-}
-
-function showPrintPreview(contentHTML, cleanup) {
-    const sheet = document.getElementById('print-preview-sheet');
-    const overlay = document.getElementById('print-preview-overlay');
-    if (!sheet || !overlay) return;
-
-    if (printPreviewCleanup) printPreviewCleanup();
-    printPreviewCleanup = cleanup || null;
-
-    printPreviewZoom = 1;
-    document.body.dataset.printOrientation = printPreviewOrientation;
-    applyPrintPageStyle();
-    updatePrintOrientationUI();
-
-    sheet.innerHTML = contentHTML;
-    const viewport = document.getElementById('print-preview-viewport');
-    const sheetEl = document.getElementById('print-preview-sheet');
-    if (viewport) {
-        viewport.style.width = '';
-        viewport.style.height = '';
+    if (printPreviewOpen && printPreviewBuilder) {
+        const savedZoom = printPreviewZoom;
+        printPreviewHtml = printPreviewBuilder();
+        printPreviewZoom = savedZoom;
     }
-    if (sheetEl) {
-        sheetEl.style.transform = '';
-    }
-    document.body.classList.add('print-preview-open');
-    overlay.classList.remove('hidden');
-    document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
-    requestAnimationFrame(() => {
-        if (isMobileViewport()) fitPrintPreviewZoom();
-        else applyPrintPreviewTransform();
-    });
+    notifyPrintPreviewChange();
 }
 
 function closePrintPreview() {
-    const overlay = document.getElementById('print-preview-overlay');
-    if (printPreviewCleanup) {
-        printPreviewCleanup();
-        printPreviewCleanup = null;
-    }
+    if (!printPreviewOpen) return;
+    printPreviewOpen = false;
     printPreviewBuilder = null;
+    printPreviewHtml = '';
+    printPreviewZoom = 1;
     document.body.classList.remove('print-preview-open');
     delete document.body.dataset.printOrientation;
-    overlay?.classList.add('hidden');
-    const sheet = document.getElementById('print-preview-sheet');
-    if (sheet) sheet.innerHTML = '';
-    const viewport = document.getElementById('print-preview-viewport');
-    const sheetEl = document.getElementById('print-preview-sheet');
-    if (viewport) {
-        viewport.style.width = '';
-        viewport.style.height = '';
-    }
-    if (sheetEl) {
-        sheetEl.style.transform = '';
-    }
-    printPreviewZoom = 1;
+    notifyPrintPreviewChange();
 }
 
 function executePrintPreview() {
@@ -1667,10 +1389,7 @@ let suppressGuestRemoteRenderCount = 0;
 let suppressTableSettingsRemoteRenderCount = 0;
 
 function getGridSnapStorageKey() {
-    const slug = (typeof tenantSlug !== 'undefined' && tenantSlug)
-        ? tenantSlug
-        : (typeof resolveTenantSlug === 'function' ? resolveTenantSlug() : 'default');
-    return `seating_grid_snap_v1_${slug}`;
+    return `seating_grid_snap_v1_${tenantSlug || 'default'}`;
 }
 const guestPersistPendingTables = new Set();
 let guestPersistPoolDirty = false;
@@ -1732,12 +1451,28 @@ function sanitizeGuestStateBeforePersist() {
     unassignedPool = dedupedPool;
 }
 
+function serializeGuestRowForPersist(guest) {
+    if (!guest?.name) return null;
+    const sort = parseInt(guest.sort, 10);
+    const group = typeof guest.group === 'string'
+        ? (guest.group.trim() || '未分類')
+        : serializeGroupForFirebase(guest.group);
+    return {
+        name: String(guest.name).trim(),
+        side: guest.side === '女方' ? '女方' : '男方',
+        group,
+        sort: !Number.isNaN(sort) && sort >= 1 ? sort : 99,
+    };
+}
+
 function persistGuestState(affectedTableNums, poolDirty = false) {
     sanitizeGuestStateBeforePersist();
     sortGuestArraysBySeat();
     const updates = {};
     if (poolDirty) {
-        updates.unassigned_guests = unassignedPool;
+        updates.unassigned_guests = unassignedPool
+            .map(serializeGuestRowForPersist)
+            .filter(Boolean);
     }
     const nums = affectedTableNums?.length
         ? [...new Set(affectedTableNums.map(String))]
@@ -1746,7 +1481,9 @@ function persistGuestState(affectedTableNums, poolDirty = false) {
         const idx = parseInt(num, 10);
         if (!idx) return;
         const list = allGuests[idx];
-        updates[`wedding_guests/${idx}`] = list && list.length ? list : null;
+        updates[`wedding_guests/${idx}`] = list && list.length
+            ? list.map(serializeGuestRowForPersist).filter(Boolean)
+            : null;
     });
 
     suppressGuestRemoteRenderCount = poolDirty ? 2 : 1;
@@ -1756,6 +1493,7 @@ function persistGuestState(affectedTableNums, poolDirty = false) {
         suppressGuestRemoteRenderCount = 0;
         lastPersistedGuestRevision = localGuestRevision;
         console.warn('賓客狀態同步失敗:', err);
+        alert('❌ 排位儲存失敗，請確認已登入並具備名單寫入權限。');
         throw err;
     });
 }
@@ -1777,10 +1515,6 @@ function schedulePersistGuestState(affectedTableNums, poolDirty) {
         });
     });
     return guestPersistQueue;
-}
-
-function flushGuestPersist() {
-    return schedulePersistGuestState([], false);
 }
 
 function fitGuestNameFontsInTable(tableNum) {
@@ -1848,8 +1582,8 @@ function appendTablePlateGuestUI(tablePlate, tableNum, settings) {
             seatSlot.innerHTML = '<span>+</span>';
         }
 
-        seatSlot.setAttribute('ondragover', 'allowDrop(event)');
-        seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
+        seatSlot.addEventListener('dragover', allowDrop);
+        seatSlot.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, i));
 
         tablePlate.appendChild(seatSlot);
     }
@@ -2167,8 +1901,7 @@ function runRender() {
         refreshFindTableMenu();
     } catch (err) {
         console.error('排位畫布渲染失敗:', err);
-        const stats = document.getElementById('global-stats');
-        if (stats) stats.innerText = '載入失敗，請重新整理';
+        setGlobalStatsMessage('載入失敗，請重新整理');
     }
 }
 
@@ -2185,8 +1918,7 @@ function bootstrapSeatingView() {
 }
 
 function setGlobalStatsMessage(message) {
-    const stats = document.getElementById('global-stats');
-    if (stats) stats.innerText = message;
+    uiHooks.onGlobalStatsChange?.(message);
 }
 
 function handleSeatingDataRoot(root) {
@@ -2195,15 +1927,6 @@ function handleSeatingDataRoot(root) {
     unassignedPool = normalizeUnassignedPool(root.unassigned_guests);
     tableSettings = loadTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
-
-    if (ensureDefaultTablesIfEmpty()) {
-        persistTableSettings().catch(err => {
-            console.warn('table_settings 初始化失敗:', err);
-        });
-        bootstrapSeatingView();
-        scheduleFloorLayoutSync();
-        return;
-    }
 
     if (!localStorage.getItem(getGridSnapStorageKey())) {
         snapAllTablesToGrid()
@@ -2351,7 +2074,7 @@ function updateGlobalStats() {
         }
     });
     normalizeUnassignedPool(unassignedPool).forEach(g => { if (g && g.name) { total++; } });
-    document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
+    uiHooks.onGlobalStatsChange?.(`已排位: ${assigned} / 總人數: ${total}`);
 }
 
 function collectPoolBySide(side) {
@@ -2507,6 +2230,8 @@ function finishTableDrag() {
         const moved = Math.abs(bx - startX) > 2 || Math.abs(by - startY) > 2;
         if (moved) {
             const tableNum = draggedTableElement.getAttribute('data-table');
+            const startX = parseInt(draggedTableElement.dataset.dragStartX, 10);
+            const startY = parseInt(draggedTableElement.dataset.dragStartY, 10);
             tableSettings[tableNum].x = bx;
             tableSettings[tableNum].y = by;
             suppressTableSettingsRemoteRenderCount = 2;
@@ -2516,6 +2241,10 @@ function finishTableDrag() {
                     suppressTableSettingsRemoteRenderCount = 0;
                     console.error('枱位同步失敗:', err);
                     alert('❌ 枱位儲存失敗，請確認已登入並具備畫布寫入權限（需開啟「畫布」功能開關）。');
+                    if (tableSettings[tableNum]) {
+                        tableSettings[tableNum].x = startX;
+                        tableSettings[tableNum].y = startY;
+                    }
                     cancelTableDrag();
                 });
         } else {
@@ -2551,57 +2280,68 @@ function allowDrop(e) { e.preventDefault(); }
 function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
     const fromPool = poolIndex != null;
     selectedGuestContext = { guest, tableNum, seatIdx, poolIndex, fromPool };
-    document.getElementById('edit-guest-name').value = guest.name;
-    document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
-    renderModalTags(guest.group);
-    document.getElementById('md-guest-seat').innerText = fromPool
-        ? '未安排'
-        : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
-    document.getElementById('btn-remove-from-seat').classList.toggle('hidden', fromPool);
-    showModal(document.getElementById('guest-detail-modal'));
+    uiHooks.onGuestModalChange?.({
+        open: true,
+        name: guest.name || '',
+        side: guest.side === '女方' ? '女方' : '男方',
+        group: normalizeGuestTags(guest.group),
+        seatLabel: fromPool ? '未安排' : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`,
+        fromPool,
+    });
 }
 
 function closeGuestModal() {
-    hideModal(document.getElementById('guest-detail-modal'));
-    document.getElementById('btn-remove-from-seat').classList.remove('hidden');
     selectedGuestContext = null;
+    uiHooks.onGuestModalChange?.({ open: false });
 }
 
-function saveGuestChangesAction() {
-    if (!selectedGuestContext) return;
+function saveGuestChangesAction(payload) {
+    if (!selectedGuestContext) return Promise.resolve();
     const { tableNum, seatIdx, poolIndex, fromPool } = selectedGuestContext;
 
-    const newName = document.getElementById('edit-guest-name').value.trim();
-    const newGroup = readModalTags();
-    const newSide = document.getElementById('edit-guest-side').value;
+    const newName = String(payload?.name ?? '').trim();
+    const newGroup = normalizeGuestTags(payload?.group);
+    const newSide = payload?.side === '女方' ? '女方' : '男方';
 
-    if (!newName) { alert("❌ 姓名不能為空！"); return; }
+    if (!newName) {
+        alert('❌ 姓名不能為空！');
+        return Promise.reject(new Error('empty name'));
+    }
 
     if (fromPool) {
-        if (unassignedPool[poolIndex]) {
-            unassignedPool[poolIndex].name = newName;
-            unassignedPool[poolIndex].group = newGroup;
-            unassignedPool[poolIndex].side = newSide;
-            Promise.all([
-                tenantRef('unassigned_guests').set(unassignedPool),
-                persistMetaLabelColumns()
-            ]).then(() => closeGuestModal());
-        }
-        return;
+        if (!unassignedPool[poolIndex]) return Promise.resolve();
+        unassignedPool[poolIndex].name = newName;
+        unassignedPool[poolIndex].group = newGroup;
+        unassignedPool[poolIndex].side = newSide;
+        return Promise.all([
+            tenantRef('unassigned_guests').set(
+                unassignedPool.map(serializeGuestRowForPersist).filter(Boolean),
+            ),
+            persistMetaLabelColumns(),
+        ]).then(() => closeGuestModal()).catch((err) => {
+            console.error('賓客儲存失敗:', err);
+            alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
+            throw err;
+        });
     }
 
-    const tableIdx = parseInt(tableNum);
+    const tableIdx = parseInt(tableNum, 10);
     const foundIdx = findGuestBySeat(tableIdx, seatIdx);
-    if (foundIdx !== -1) {
-        allGuests[tableIdx][foundIdx].name = newName;
-        allGuests[tableIdx][foundIdx].group = newGroup;
-        allGuests[tableIdx][foundIdx].side = newSide;
+    if (foundIdx === -1) return Promise.resolve();
+    allGuests[tableIdx][foundIdx].name = newName;
+    allGuests[tableIdx][foundIdx].group = newGroup;
+    allGuests[tableIdx][foundIdx].side = newSide;
 
-        Promise.all([
-            tenantRef(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]),
-            persistMetaLabelColumns()
-        ]).then(() => closeGuestModal());
-    }
+    return Promise.all([
+        tenantRef(`wedding_guests/${tableIdx}`).set(
+            allGuests[tableIdx].map(serializeGuestRowForPersist).filter(Boolean),
+        ),
+        persistMetaLabelColumns(),
+    ]).then(() => closeGuestModal()).catch((err) => {
+        console.error('賓客儲存失敗:', err);
+        alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
+        throw err;
+    });
 }
 
 function removeGuestFromSeatAction() {
@@ -2705,81 +2445,69 @@ function getMinAllowedMaxSeats(tableNum) {
     return Math.max(guests.length, maxSort, 1);
 }
 
-function fillTableSettingsForm(tableNum, currentMax) {
-    const settings = tableSettings[tableNum] || {};
-    const numEl = document.getElementById('modal-table-num');
-    const labelEl = document.getElementById('modal-table-label');
-    const maxEl = document.getElementById('modal-max-seats');
-    const numStr = String(tableNum);
-    const minMax = getMinAllowedMaxSeats(tableNum);
-
-    numEl.value = '';
-    numEl.defaultValue = numStr;
-    numEl.setAttribute('value', numStr);
-    numEl.value = numStr;
-
-    labelEl.value = settings.label || '';
-    maxEl.min = String(minMax);
-    maxEl.value = String(Math.max(currentMax, minMax));
-}
-
 function openSettingsModal(tableNum, currentMax) {
     activeSettingTableNum = String(tableNum);
-    document.getElementById('modal-table-title').innerText = `⚙️ Table ${tableNum} 設定`;
-    fillTableSettingsForm(tableNum, currentMax);
-    showModal(document.getElementById('table-settings-modal'));
+    const settings = tableSettings[activeSettingTableNum] || {};
+    const minMax = getMinAllowedMaxSeats(tableNum);
+    uiHooks.onTableSettingsModalChange?.({
+        open: true,
+        originalTableNum: activeSettingTableNum,
+        tableNum: activeSettingTableNum,
+        label: settings.label || '',
+        maxSeats: Math.max(parseInt(currentMax, 10) || settings.max_seats || 12, minMax),
+        minMaxSeats: minMax,
+    });
 }
 
 function closeSettingsModal() {
-    hideModal(document.getElementById('table-settings-modal'));
-    document.getElementById('modal-table-num').value = '';
-    document.getElementById('modal-table-label').value = '';
-    document.getElementById('modal-max-seats').value = '';
     activeSettingTableNum = null;
+    uiHooks.onTableSettingsModalChange?.({ open: false });
 }
 
-function saveTableSettingsAction() {
-    if (!activeSettingTableNum) return;
+function saveTableSettingsAction(payload) {
+    if (!activeSettingTableNum) return Promise.resolve();
 
     const oldNum = String(activeSettingTableNum);
-    const newNumRaw = document.getElementById('modal-table-num').value.trim();
-    const newLabel = document.getElementById('modal-table-label').value.trim();
-    const newMax = parseInt(document.getElementById('modal-max-seats').value) || 12;
+    const newNumRaw = String(payload?.tableNum ?? '').trim();
+    const newLabel = String(payload?.label ?? '').trim();
+    const newMax = parseInt(payload?.maxSeats, 10) || 12;
 
-    if (!newNumRaw) { alert('❌ 枱號不能為空！'); return; }
+    if (!newNumRaw) {
+        alert('❌ 枱號不能為空！');
+        return Promise.reject(new Error('empty table num'));
+    }
     const newNum = String(parseInt(newNumRaw, 10));
     if (!newNum || newNum === 'NaN' || parseInt(newNum, 10) < 1) {
         alert('❌ 請輸入有效枱號（1–99）！');
-        return;
+        return Promise.reject(new Error('invalid table num'));
     }
     if (newNum !== oldNum && tableSettings[newNum]) {
         alert(`❌ Table ${newNum} 已存在！`);
-        return;
+        return Promise.reject(new Error('duplicate table num'));
     }
 
     const minMax = getMinAllowedMaxSeats(oldNum);
     if (newMax < minMax) {
         alert(`❌ 此桌已有 ${minMax} 位賓客，座位上限不能少於 ${minMax}！`);
-        return;
+        return Promise.reject(new Error('max seats too low'));
     }
 
     const oldSettings = tableSettings[oldNum] || {};
     const newSettings = {
         ...oldSettings,
         max_seats: newMax,
-        label: newLabel
+        label: newLabel,
     };
 
     if (newNum === oldNum) {
         tableSettings[oldNum] = { ...tableSettings[oldNum], max_seats: newMax, label: newLabel };
-        tenantRef(`table_settings/${oldNum}`).update({
+        return tenantRef(`table_settings/${oldNum}`).update({
             max_seats: newMax,
-            label: newLabel
+            label: newLabel,
         }).then(() => {
             scheduleFloorLayoutSync();
             closeSettingsModal();
         });
-        return;
     }
 
     const oldIdx = parseInt(oldNum, 10);
@@ -2802,20 +2530,22 @@ function saveTableSettingsAction() {
     updates[`wedding_guests/${newIdx}`] = guests;
     updates[`wedding_guests/${oldIdx}`] = null;
 
-    tenantRef().update(updates).then(() => persistTableSettings())
+    return tenantRef().update(updates).then(() => persistTableSettings())
         .then(() => forceFloorLayoutSync())
         .then(() => {
             runRender();
             closeSettingsModal();
         })
-        .catch(err => alert(`❌ 儲存失敗：${err.message || err}`));
+        .catch(err => {
+            alert(`❌ 儲存失敗：${err.message || err}`);
+            throw err;
+        });
 }
 
 function deleteTableAction() {
-    if (!activeSettingTableNum) return;
-    const tableNum = String(activeSettingTableNum);
-    if (!confirm(`⚠️ 確定要刪除第 ${tableNum} 桌嗎？所有人會退回左側。`)) return;
+    if (!activeSettingTableNum) return Promise.resolve();
 
+    const tableNum = String(activeSettingTableNum);
     const idx = parseInt(tableNum, 10);
     const guestsInTable = Array.isArray(allGuests[idx]) ? allGuests[idx] : [];
     if (!Array.isArray(unassignedPool)) unassignedPool = normalizeUnassignedPool(unassignedPool);
@@ -2830,31 +2560,53 @@ function deleteTableAction() {
 
     delete tableSettings[tableNum];
 
-    Promise.all([
+    return Promise.all([
         persistTableSettings(),
         tenantRef(`wedding_guests/${idx}`).set(null),
-        tenantRef('unassigned_guests').set(unassignedPool)
+        tenantRef('unassigned_guests').set(unassignedPool),
     ]).then(() => forceFloorLayoutSync())
         .then(() => {
             runRender();
             closeSettingsModal();
         })
-        .catch(err => alert(`❌ 刪除失敗：${err.message || err}`));
+        .catch(err => {
+            alert(`❌ 刪除失敗：${err.message || err}`);
+            throw err;
+        });
 }
 
+function getSeatingGuestsUsingTag(tag) {
+    return getGuestsUsingTagInSeating(tag).map((g) => g.name);
+}
 
-function exposeWindowActions(onLogout) {
-    Object.assign(globalThis, {
-        zoomCanvas, centerViewOnTables, toggleFindTableMenu, createNewTableAction,
-        toggleTablePositionLock, togglePrintMenu, handlePrintMenuAction,
-        toggleSidebar, closeGuestModal, saveGuestChangesAction, removeGuestFromSeatAction,
-        closeCustomCategoryDialog, closeDeleteTagDialog, closeSettingsModal,
-        saveTableSettingsAction, deleteTableAction, closePrintPreview,
-        stepPrintPreviewZoom, fitPrintPreviewZoom, setPrintOrientation, executePrintPreview,
-        removeModalTag, refreshModalTagColors, allowDrop, handleDropTrash,
-        flyToTable, handleModalTagAdd, updateDeleteTagUsageHint,
-        adminSignOut: onLogout,
-    });
+function addSeatingCategory(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return Promise.resolve(false);
+    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
+    if (pool.includes(trimmed)) return Promise.resolve(false);
+    pool.push(trimmed);
+    categoriesByColumn[PRIMARY_TAG_KEY] = pool;
+    return persistMetaLabelColumns()
+        .then(() => {
+            notifyCategoryPoolChange();
+            return true;
+        });
+}
+
+function removeSeatingCategory(tag) {
+    const trimmed = String(tag || '').trim();
+    if (!trimmed || getGuestsUsingTagInSeating(trimmed).length > 0) {
+        return Promise.resolve(false);
+    }
+    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
+    const idx = pool.indexOf(trimmed);
+    if (idx === -1) return Promise.resolve(false);
+    pool.splice(idx, 1);
+    return persistMetaLabelColumns()
+        .then(() => {
+            notifyCategoryPoolChange();
+            return true;
+        });
 }
 
 function resetEngineState() {
@@ -2868,18 +2620,39 @@ function resetEngineState() {
     zoom = 1.0;
     panX = -900;
     panY = -600;
+    uiHooks = {
+        onFindTableItemsChange: null,
+        onTableLockChange: null,
+        onGuestModalChange: null,
+        onCategoryPoolChange: null,
+        onTableSettingsModalChange: null,
+        onGlobalStatsChange: null,
+        onPrintPreviewChange: null,
+    };
+    printPreviewOpen = false;
+    printPreviewHtml = '';
+    printPreviewZoom = 1;
+    printPreviewBuilder = null;
 }
 
-export function initSeatingEngine({ tenantRef, slug, onLogout }) {
+export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
     if (engineInitialized) destroySeatingEngine();
     rawTenantRef = tenantRef;
     tenantRefFn = createCompatTenantRef(tenantRef);
     tenantSlug = slug || 'default';
+    uiHooks = {
+        onFindTableItemsChange: hooks.onFindTableItemsChange || null,
+        onTableLockChange: hooks.onTableLockChange || null,
+        onGuestModalChange: hooks.onGuestModalChange || null,
+        onCategoryPoolChange: hooks.onCategoryPoolChange || null,
+        onTableSettingsModalChange: hooks.onTableSettingsModalChange || null,
+        onGlobalStatsChange: hooks.onGlobalStatsChange || null,
+        onPrintPreviewChange: hooks.onPrintPreviewChange || null,
+    };
     viewport = document.getElementById('canvas-viewport');
     canvas = document.getElementById('main-canvas');
     if (!viewport || !canvas) throw new Error('Seating canvas DOM not found');
 
-    exposeWindowActions(onLogout);
     bindViewportEvents();
     bindDocumentClickHandlers();
     bindTableDragHandlers();
@@ -2905,6 +2678,7 @@ export function destroySeatingEngine() {
     document.body.classList.remove('seating-touch', 'tables-position-locked', 'print-preview-open');
     engineInitialized = false;
     rawTenantRef = null;
+    tenantRefFn = null;
     resetEngineState();
 }
 
@@ -2912,26 +2686,27 @@ export {
     zoomCanvas,
     centerViewOnTables,
     toggleFindTableMenu,
+    flyToTable,
     createNewTableAction,
     toggleTablePositionLock,
-    togglePrintMenu,
-    handlePrintMenuAction,
+    printCanvasView,
+    printGuestListView,
     toggleSidebar,
     closeGuestModal,
     saveGuestChangesAction,
     removeGuestFromSeatAction,
-    closeCustomCategoryDialog,
-    closeDeleteTagDialog,
+    getSeatingGuestsUsingTag,
+    addSeatingCategory,
+    removeSeatingCategory,
     closeSettingsModal,
     saveTableSettingsAction,
     deleteTableAction,
     closePrintPreview,
     stepPrintPreviewZoom,
     fitPrintPreviewZoom,
+    autoFitPrintPreviewOnOpen,
     setPrintOrientation,
     executePrintPreview,
     allowDrop,
     handleDropTrash,
-    refreshModalTagColors,
-    updateDeleteTagUsageHint,
 };

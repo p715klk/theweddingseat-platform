@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { get, set, onValue } from 'firebase/database';
+import { get, set, onValue } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import {
@@ -143,6 +143,7 @@ export function useAdminGuests() {
 
   function markDirty() {
     dirty.value = true;
+    stopSync();
   }
 
   function addGuest() {
@@ -232,6 +233,7 @@ export function useAdminGuests() {
   }
 
   async function save(options = {}) {
+    if (!dirty.value) return;
     const { toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。' } = options;
     saving.value = true;
     try {
@@ -258,6 +260,7 @@ export function useAdminGuests() {
 
       dirty.value = false;
       showToast(toastMessage, 2500);
+      startSync();
       try {
         await load(true);
       } catch (reloadErr) {

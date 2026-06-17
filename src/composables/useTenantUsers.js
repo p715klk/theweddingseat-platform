@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { get, set, remove, update, ref as dbRef } from 'firebase/database';
+import { get, set, remove, update, ref as dbRef } from '@/rtdb';
 import { database } from '@/firebase';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';

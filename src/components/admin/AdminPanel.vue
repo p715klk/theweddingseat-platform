@@ -22,7 +22,9 @@
           <button
             type="button"
             class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow transition disabled:opacity-60"
-            :disabled="saving || !dirty"
+            :class="dirty && !saving ? 'ring-2 ring-yellow-400 ring-offset-1' : ''"
+            :disabled="saving"
+            :title="dirty ? '有未儲存的改動，請按此儲存' : ''"
             @click="handleSave"
           >
             {{ saving ? '儲存中…' : '💾 儲存變更' }}

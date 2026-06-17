@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getDatabase } from 'firebase/database';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/database';
 
 /**
  * Firebase Web 設定（apiKey 係公開資料，可放 frontend）
@@ -20,12 +21,16 @@ export const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-// 未有 apiKey 時只用 databaseURL（點名頁仍可運作）
 const initConfig = firebaseConfig.apiKey
   ? firebaseConfig
   : { databaseURL: firebaseConfig.databaseURL };
 
-const app = getApps().length ? getApps()[0] : initializeApp(initConfig);
+// Modular app（Auth、Functions）
+export const firebaseApp = getApps().length ? getApps()[0] : initializeApp(initConfig);
 
-export const database = getDatabase(app);
-export const firebaseApp = app;
+// Compat RTDB：WebSocket 長連線，同舊版 HTML admin 一致
+if (!firebase.apps.length) {
+  firebase.initializeApp(initConfig);
+}
+
+export const database = firebase.database();

@@ -21,7 +21,7 @@
         <h1 class="text-base font-black tracking-wider text-slate-900 flex items-center gap-1.5">
           <span class="text-xl">🦢</span> 可視化圓枱排位畫布
         </h1>
-        <div class="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold" id="global-stats">載入中...</div>
+        <div class="global-stats text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold">{{ globalStatsText }}</div>
       </div>
       <div class="header-actions flex items-center">
         <div class="header-action-group">
@@ -49,7 +49,17 @@
               🔍<span class="hide-mobile"> 搵枱</span>
             </button>
             <div id="find-table-menu" class="hidden absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden min-w-[9rem]">
-              <div id="find-table-list" class="no-scrollbar" />
+              <p v-if="!findTableItems.length" class="px-3 py-2 text-slate-400 font-bold text-[11px]">未有圓枱</p>
+              <button
+                v-for="item in findTableItems"
+                :key="item.num"
+                type="button"
+                class="find-table-item w-full text-left px-3 py-2 hover:bg-indigo-50 active:bg-indigo-100 text-slate-700 border-t border-slate-100 first:border-t-0"
+                @click="onFindTablePick(item.num)"
+              >
+                <span class="font-black">Table {{ item.num }}</span>
+                <span v-if="item.label" class="block text-[10px] font-semibold text-slate-400 truncate max-w-[140px]">{{ item.label }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -65,15 +75,17 @@
             type="button"
             id="btn-lock-tables"
             class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
-            title="鎖定枱位（防止拖動）"
+            :class="{ 'is-active': tablesLocked }"
+            :title="tablesLocked ? '枱位已鎖定，點擊解鎖' : '鎖定枱位（防止拖動）'"
             @click="toggleTablePositionLock()"
           >
-            🔓<span class="hide-mobile"> 鎖枱</span>
+            {{ tablesLocked ? '🔒' : '🔓' }}<span class="hide-mobile">{{ tablesLocked ? ' 已鎖' : ' 鎖枱' }}</span>
           </button>
         </div>
         <div class="header-action-group">
           <div class="relative" id="print-menu-wrap">
             <button
+              ref="printMenuBtnRef"
               type="button"
               id="btn-print-menu"
               class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
@@ -81,9 +93,14 @@
             >
               🖨️<span class="hide-mobile"> 打印</span>
             </button>
-            <div id="print-menu" class="hidden absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden">
-              <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700" @click="handlePrintMenuAction('canvas', $event)">🖼️ 打印畫面（全部枱位）</button>
-              <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-t border-slate-100" @click="handlePrintMenuAction('guest-list', $event)">📋 打印圓枱名單（文字版）</button>
+            <div
+              v-show="printMenuOpen"
+              class="print-menu absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden"
+              :class="{ 'is-fixed': printMenuFixed }"
+              :style="printMenuStyle"
+            >
+              <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700" @click="onPrintMenuSelect('canvas')">🖼️ 打印畫面（全部枱位）</button>
+              <button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-t border-slate-100" @click="onPrintMenuSelect('guest-list')">📋 打印圓枱名單（文字版）</button>
             </div>
           </div>
           <RouterLink
@@ -150,155 +167,90 @@
       </aside>
     </div>
 
-    <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden items-center justify-center p-4">
-      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
-        <div class="flex justify-between items-start mb-3">
-          <h3 class="modal-heading text-base font-black text-slate-900">✏️ 編輯賓客資料</h3>
-          <button type="button" class="text-slate-400 hover:text-slate-600 text-xl font-bold" @click="closeGuestModal()">&times;</button>
-        </div>
-        <div class="modal-form-text space-y-3 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
-          <div>
-            <label class="modal-form-label block text-xs font-bold text-slate-400 mb-1">姓名：</label>
-            <input type="text" id="edit-guest-name" class="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-          </div>
-          <div>
-            <label class="modal-form-label block text-xs font-bold text-slate-400 mb-1">標籤（可多選）：</label>
-            <div id="edit-guest-tags" class="row-multi-tags flex flex-wrap items-center gap-1 min-h-[36px] bg-white border border-slate-200 rounded-lg p-2" data-column-key="group" />
-          </div>
-          <div>
-            <label class="modal-form-label block text-xs font-bold text-slate-400 mb-1">來源：</label>
-            <select id="edit-guest-side" class="w-full border border-slate-200 rounded-lg p-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" @change="refreshModalTagColors()">
-              <option value="男方">男方</option>
-              <option value="女方">女方</option>
-            </select>
-          </div>
-          <div class="flex justify-between items-center pt-1">
-            <span class="text-slate-400 font-bold">目前席位：</span>
-            <span id="md-guest-seat" class="font-mono bg-amber-100 px-2 py-0.5 rounded text-amber-800 font-bold" />
-          </div>
-        </div>
-        <div class="space-y-2 mt-4">
-          <button type="button" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-sm transition" @click="saveGuestChangesAction()">
-            💾 儲存並更新資料
-          </button>
-          <button id="btn-remove-from-seat" type="button" class="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-sm font-bold transition" @click="removeGuestFromSeatAction()">
-            ↩️ 移出席位 (退回未安排)
-          </button>
-        </div>
-      </div>
-    </div>
+    <SeatingGuestEditModal
+      :open="guestModal.open"
+      :name="guestModal.name"
+      :side="guestModal.side"
+      :group="guestModal.group"
+      :seat-label="guestModal.seatLabel"
+      :from-pool="guestModal.fromPool"
+      :categories="seatingCategories"
+      :saving="guestModalSaving"
+      :get-tag-usage="getSeatingGuestsUsingTag"
+      @close="closeGuestModal()"
+      @save="onGuestModalSave"
+      @remove-from-seat="onGuestModalRemove"
+      @add-category="onGuestAddCategory"
+      @remove-category="onGuestRemoveCategory"
+    />
 
-    <div id="custom-dialog-overlay" class="fixed inset-0 bg-black/50 z-[60] hidden items-center justify-center p-4">
-      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
-        <h3 class="text-base font-bold text-gray-900 mb-2">➕ 新增自訂選項</h3>
-        <p class="text-xs text-gray-500 mb-4">請輸入你想加入標籤清單的新選項名稱：</p>
-        <input type="text" id="custom-category-input" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 mb-4">
-        <div class="flex justify-end gap-2">
-          <button type="button" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold" @click="closeCustomCategoryDialog(false)">取消</button>
-          <button type="button" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow" @click="closeCustomCategoryDialog(true)">確認新增</button>
-        </div>
-      </div>
-    </div>
+    <SeatingTableSettingsModal
+      :open="tableSettingsModal.open"
+      :original-table-num="tableSettingsModal.originalTableNum"
+      :table-num="tableSettingsModal.tableNum"
+      :label="tableSettingsModal.label"
+      :max-seats="tableSettingsModal.maxSeats"
+      :min-max-seats="tableSettingsModal.minMaxSeats"
+      :saving="tableSettingsSaving"
+      :deleting="tableSettingsDeleting"
+      @close="closeSettingsModal()"
+      @save="onTableSettingsSave"
+      @delete="onTableSettingsDelete"
+    />
 
-    <div id="delete-tag-dialog-overlay" class="fixed inset-0 bg-black/50 z-[60] hidden items-center justify-center p-4">
-      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
-        <h3 class="text-base font-bold text-gray-900 mb-2">🗑️ 刪除標籤</h3>
-        <p class="text-xs text-gray-500 mb-3">從標籤清單移除；若有賓客仍使用該標籤，將無法刪除。</p>
-        <label class="block text-xs font-bold text-gray-500 mb-1">選擇要刪除的標籤：</label>
-        <select id="delete-tag-select" class="w-full border border-gray-300 rounded-lg p-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-red-500" @change="updateDeleteTagUsageHint()" />
-        <p id="delete-tag-usage-hint" class="text-xs mb-4 text-gray-600" />
-        <div class="flex justify-end gap-2">
-          <button type="button" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold" @click="closeDeleteTagDialog(false)">取消</button>
-          <button id="btn-confirm-delete-tag" type="button" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow disabled:opacity-40 disabled:cursor-not-allowed" disabled @click="closeDeleteTagDialog(true)">確認刪除</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="table-settings-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden items-center justify-center p-4">
-      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
-        <h3 class="text-sm font-black text-slate-900 mb-3" id="modal-table-title">⚙️ 圓枱設定</h3>
-        <div class="space-y-3">
-          <div>
-            <label class="block text-[11px] font-bold text-slate-500 mb-1">枱號 (可跳過 4、14 等)：</label>
-            <input type="number" id="modal-table-num" min="1" max="99" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-          <div>
-            <label class="block text-[11px] font-bold text-slate-500 mb-1">枱標籤（顯示於枱中央）：</label>
-            <input type="text" id="modal-table-label" placeholder="例如：主家席、父親朋友、母親朋友" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-          <div>
-            <label class="block text-[11px] font-bold text-slate-500 mb-1">此桌座位數量 (人數上限)：</label>
-            <input type="number" id="modal-max-seats" min="1" max="99" class="w-full border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-        </div>
-        <div class="flex justify-between items-center mt-5 pt-3 border-t border-slate-100">
-          <button type="button" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md text-xs font-bold transition" @click="deleteTableAction()">🗑️ 刪除此桌</button>
-          <div class="flex gap-2">
-            <button type="button" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-bold" @click="closeSettingsModal()">取消</button>
-            <button type="button" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold" @click="saveTableSettingsAction()">儲存</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="print-preview-overlay" class="hidden">
-      <div class="print-preview-toolbar min-h-14 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 px-4 py-2 shrink-0">
-        <button type="button" class="text-sm font-bold text-slate-600 hover:text-slate-900 shrink-0" @click="closePrintPreview()">← 返回畫布</button>
-        <div class="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-          <span class="text-sm font-black text-slate-800">列印預覽</span>
-          <div class="flex items-center bg-slate-100 rounded-lg border border-slate-200 text-xs font-bold">
-            <button type="button" class="px-2.5 py-1.5 hover:bg-slate-200 text-slate-500" @click="stepPrintPreviewZoom(-0.2)">－</button>
-            <span id="print-zoom-percent" class="px-2 font-mono text-slate-700 min-w-[42px] text-center">100%</span>
-            <button type="button" class="px-2.5 py-1.5 hover:bg-slate-200 text-slate-500" @click="stepPrintPreviewZoom(0.2)">＋</button>
-            <button type="button" class="px-2 py-1.5 hover:bg-slate-200 text-slate-500 border-l border-slate-200" title="縮細預覽以睇晒成張 A4" @click="fitPrintPreviewZoom()">⊡</button>
-          </div>
-          <div class="flex items-center bg-slate-100 rounded-lg border border-slate-200 text-xs font-bold overflow-hidden">
-            <button type="button" id="btn-print-portrait" class="print-orient-btn px-2.5 py-1.5 hover:bg-slate-200 text-slate-600" @click="setPrintOrientation('portrait')">直向</button>
-            <button type="button" id="btn-print-landscape" class="print-orient-btn px-2.5 py-1.5 hover:bg-slate-200 text-slate-600 border-l border-slate-200" @click="setPrintOrientation('landscape')">橫向</button>
-          </div>
-        </div>
-        <button type="button" class="bg-amber-800 hover:bg-amber-900 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm shrink-0" @click="executePrintPreview()">列印</button>
-      </div>
-      <div id="print-preview-scroll" class="flex-1 overflow-auto p-6 flex justify-center items-start min-h-0">
-        <div id="print-preview-viewport">
-          <div id="print-preview-sheet" />
-        </div>
-      </div>
-    </div>
+    <SeatingPrintPreview
+      :open="printPreview.open"
+      :html="printPreview.html"
+      :zoom="printPreview.zoom"
+      :zoom-percent="printPreview.zoomPercent"
+      :orientation="printPreview.orientation"
+      :page-width="printPreview.pageWidth"
+      :page-height="printPreview.pageHeight"
+      @close="closePrintPreview()"
+      @step-zoom="stepPrintPreviewZoom"
+      @fit-zoom="fitPrintPreviewZoom"
+      @set-orientation="setPrintOrientation"
+      @print="executePrintPreview()"
+      @opened="autoFitPrintPreviewOnOpen"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
+import SeatingGuestEditModal from '@/components/seating/SeatingGuestEditModal.vue';
+import SeatingTableSettingsModal from '@/components/seating/SeatingTableSettingsModal.vue';
+import SeatingPrintPreview from '@/components/seating/SeatingPrintPreview.vue';
 import {
   initSeatingEngine,
   destroySeatingEngine,
   zoomCanvas,
   centerViewOnTables,
   toggleFindTableMenu,
+  flyToTable,
   createNewTableAction,
   toggleTablePositionLock,
-  togglePrintMenu,
-  handlePrintMenuAction,
+  printCanvasView,
+  printGuestListView,
   toggleSidebar,
   closeGuestModal,
   saveGuestChangesAction,
   removeGuestFromSeatAction,
-  closeCustomCategoryDialog,
-  closeDeleteTagDialog,
+  getSeatingGuestsUsingTag,
+  addSeatingCategory,
+  removeSeatingCategory,
   closeSettingsModal,
   saveTableSettingsAction,
   deleteTableAction,
   closePrintPreview,
   stepPrintPreviewZoom,
   fitPrintPreviewZoom,
+  autoFitPrintPreviewOnOpen,
   setPrintOrientation,
   executePrintPreview,
   allowDrop,
   handleDropTrash,
-  refreshModalTagColors,
-  updateDeleteTagUsageHint,
 } from '@/seating/seatingEngine';
 import '@/assets/seating-canvas.css';
 
@@ -310,8 +262,139 @@ const emit = defineEmits(['logout']);
 
 const { tenantRef, tenantId } = useTenant();
 const initError = ref('');
+const globalStatsText = ref('載入中...');
+const findTableItems = ref([]);
+const tablesLocked = ref(false);
+const seatingCategories = ref([]);
+const guestModalSaving = ref(false);
+const tableSettingsSaving = ref(false);
+const tableSettingsDeleting = ref(false);
+const guestModal = ref({
+  open: false,
+  name: '',
+  side: '男方',
+  group: [],
+  seatLabel: '',
+  fromPool: false,
+});
+const tableSettingsModal = ref({
+  open: false,
+  originalTableNum: '',
+  tableNum: '',
+  label: '',
+  maxSeats: 12,
+  minMaxSeats: 1,
+});
+const printPreview = ref({
+  open: false,
+  html: '',
+  zoom: 1,
+  zoomPercent: 100,
+  orientation: 'portrait',
+  pageWidth: 756,
+  pageHeight: 1085,
+});
+const printMenuOpen = ref(false);
+const printMenuFixed = ref(false);
+const printMenuStyle = ref({});
+const printMenuBtnRef = ref(null);
+let printMenuIgnoreCloseUntil = 0;
 
 const adminRoute = computed(() => `/p/${props.slug}/admin`);
+
+function togglePrintMenu(e) {
+  e?.stopPropagation();
+  const willOpen = !printMenuOpen.value;
+  printMenuOpen.value = willOpen;
+  if (willOpen) {
+    printMenuIgnoreCloseUntil = Date.now() + 400;
+    if (window.innerWidth <= 768) {
+      printMenuFixed.value = true;
+      nextTick(() => {
+        const rect = printMenuBtnRef.value?.getBoundingClientRect();
+        if (rect) {
+          printMenuStyle.value = {
+            top: `${rect.bottom + 4}px`,
+            right: `${Math.max(8, window.innerWidth - rect.right)}px`,
+          };
+        }
+      });
+    } else {
+      printMenuFixed.value = false;
+      printMenuStyle.value = {};
+    }
+  } else {
+    closePrintMenu();
+  }
+}
+
+function closePrintMenu() {
+  printMenuOpen.value = false;
+  printMenuFixed.value = false;
+  printMenuStyle.value = {};
+}
+
+function onPrintMenuSelect(action) {
+  printMenuIgnoreCloseUntil = Date.now() + 600;
+  closePrintMenu();
+  if (action === 'canvas') printCanvasView();
+  else if (action === 'guest-list') printGuestListView();
+}
+
+function onDocumentClick(e) {
+  if (Date.now() < printMenuIgnoreCloseUntil) return;
+  if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
+}
+
+function onFindTablePick(tableNum) {
+  flyToTable(String(tableNum));
+}
+
+async function onGuestModalSave(payload) {
+  guestModalSaving.value = true;
+  try {
+    await saveGuestChangesAction(payload);
+  } finally {
+    guestModalSaving.value = false;
+  }
+}
+
+function onGuestModalRemove() {
+  removeGuestFromSeatAction();
+}
+
+async function onGuestAddCategory(name) {
+  await addSeatingCategory(name);
+}
+
+async function onGuestRemoveCategory(tag) {
+  const ok = await removeSeatingCategory(tag);
+  if (ok) {
+    window.alert(`✅ 已刪除標籤「${tag}」`);
+  }
+}
+
+async function onTableSettingsSave(payload) {
+  tableSettingsSaving.value = true;
+  try {
+    await saveTableSettingsAction(payload);
+  } finally {
+    tableSettingsSaving.value = false;
+  }
+}
+
+async function onTableSettingsDelete() {
+  const num = tableSettingsModal.value.originalTableNum;
+  if (!num) return;
+  const ok = window.confirm(`⚠️ 確定要刪除第 ${num} 桌嗎？所有人會退回左側。`);
+  if (!ok) return;
+  tableSettingsDeleting.value = true;
+  try {
+    await deleteTableAction();
+  } finally {
+    tableSettingsDeleting.value = false;
+  }
+}
 
 function prefetchAdminRoute() {
   void import('@/views/AdminView.vue');
@@ -324,7 +407,63 @@ function mountEngine() {
     initSeatingEngine({
       tenantRef,
       slug: props.slug,
-      onLogout: () => emit('logout'),
+      hooks: {
+        onFindTableItemsChange(items) {
+          findTableItems.value = items;
+        },
+        onTableLockChange(locked) {
+          tablesLocked.value = locked;
+        },
+        onGuestModalChange(state) {
+          if (!state?.open) {
+            guestModal.value = { ...guestModal.value, open: false };
+            return;
+          }
+          guestModal.value = {
+            open: true,
+            name: state.name || '',
+            side: state.side || '男方',
+            group: state.group || [],
+            seatLabel: state.seatLabel || '',
+            fromPool: !!state.fromPool,
+          };
+        },
+        onCategoryPoolChange(categories) {
+          seatingCategories.value = categories;
+        },
+        onTableSettingsModalChange(state) {
+          if (!state?.open) {
+            tableSettingsModal.value = { ...tableSettingsModal.value, open: false };
+            return;
+          }
+          tableSettingsModal.value = {
+            open: true,
+            originalTableNum: String(state.originalTableNum || state.tableNum || ''),
+            tableNum: String(state.tableNum || ''),
+            label: state.label || '',
+            maxSeats: state.maxSeats || 12,
+            minMaxSeats: state.minMaxSeats || 1,
+          };
+        },
+        onGlobalStatsChange(text) {
+          globalStatsText.value = text;
+        },
+        onPrintPreviewChange(state) {
+          if (!state?.open) {
+            printPreview.value = { ...printPreview.value, open: false, html: '' };
+            return;
+          }
+          printPreview.value = {
+            open: true,
+            html: state.html || '',
+            zoom: state.zoom ?? 1,
+            zoomPercent: state.zoomPercent ?? 100,
+            orientation: state.orientation || 'portrait',
+            pageWidth: state.pageWidth ?? 756,
+            pageHeight: state.pageHeight ?? 1085,
+          };
+        },
+      },
     });
   } catch (err) {
     console.error('畫布引擎初始化失敗:', err);
@@ -340,6 +479,7 @@ async function mountEngineWhenReady() {
 
 onMounted(() => {
   prefetchAdminRoute();
+  document.addEventListener('click', onDocumentClick);
   void mountEngineWhenReady();
 });
 
@@ -349,6 +489,7 @@ watch(tenantId, (id) => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick);
   destroySeatingEngine();
 });
 </script>

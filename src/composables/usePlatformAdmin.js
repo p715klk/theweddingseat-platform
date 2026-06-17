@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue';
-import { get, ref as dbRef } from 'firebase/database';
+import { get, ref as dbRef } from '@/rtdb';
 import { database } from '@/firebase';
 import { useAuth } from '@/composables/useAuth';
 

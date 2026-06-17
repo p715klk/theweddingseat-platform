@@ -1,4 +1,4 @@
-import { get, onValue, remove, set, update } from 'firebase/database';
+import { get, onValue, remove, set, update } from '@/rtdb';
 
 /** 將 Vue composable 的 tenantRef 包成 legacy seating.js 相容的 .on / .set API */
 export function createCompatTenantRef(tenantRefFn) {

@@ -1,4 +1,4 @@
-import { ref as dbRef, get, set, update } from 'firebase/database';
+import { ref as dbRef, get, set, update } from '@/rtdb';
 import { database } from '@/firebase';
 import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
 import {

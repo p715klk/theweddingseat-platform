@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { onValue, set } from 'firebase/database';
+import { onValue, set } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { getMaxSeatsForTable } from '@/lib/adminGuestModel';
 import {

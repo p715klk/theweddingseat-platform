@@ -1,4 +1,4 @@
-import { ref as dbRef, get, update } from 'firebase/database';
+import { ref as dbRef, get, update } from '@/rtdb';
 import { database } from '@/firebase';
 import {
   assertPlatformAdmin,

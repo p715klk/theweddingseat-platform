@@ -80,7 +80,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { ref as dbRef, get } from 'firebase/database';
+import { ref as dbRef, get } from '@/rtdb';
 import { database } from '@/firebase';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';

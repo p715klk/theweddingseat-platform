@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { ref as dbRef, get, child } from 'firebase/database';
+import { ref as dbRef, get, child } from '@/rtdb';
 import { database } from '@/firebase';
 import { resolveTenantFeatures } from '@/lib/tenantFeatures';
 
