@@ -128,13 +128,14 @@
     </header>
 
     <div class="flex-1 relative overflow-hidden w-full bg-slate-100 min-h-0">
-      <main class="absolute inset-0 overflow-hidden" id="canvas-viewport">
+      <main ref="viewportRef" class="absolute inset-0 overflow-hidden" id="canvas-viewport">
         <SeatingCanvasTables
           :tables="canvasTables"
           :pan-x="canvasPan.x"
           :pan-y="canvasPan.y"
           :zoom="canvasZoom"
           :dragging-table-num="draggingTableNum"
+          :flashing-table-num="flashingTableNum"
         />
       </main>
 
@@ -228,6 +229,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
+import { useSeatingViewportGestures } from '@/composables/useSeatingViewportGestures';
 import SeatingGuestEditModal from '@/components/seating/SeatingGuestEditModal.vue';
 import SeatingTableSettingsModal from '@/components/seating/SeatingTableSettingsModal.vue';
 import SeatingPrintPreview from '@/components/seating/SeatingPrintPreview.vue';
@@ -272,10 +274,14 @@ const props = defineProps({
 const emit = defineEmits(['logout']);
 
 const { tenantRef, tenantId } = useTenant();
+const viewportRef = ref(null);
+let detachViewportGestures = null;
 const initError = ref('');
 const globalStatsText = ref('載入中...');
 const canvasZoomPercent = ref(100);
 const canvasPan = ref({ x: -900, y: -600 });
+const flashingTableNum = ref('');
+let flashingTableTimer = null;
 const findTableItems = ref([]);
 const tablesLocked = ref(false);
 const lockButtonFlash = ref(false);
@@ -411,6 +417,21 @@ function flashLockButton() {
     lockButtonFlash.value = false;
     lockButtonFlashTimer = null;
   }, 800);
+}
+
+function flashTable(tableNum) {
+  const num = String(tableNum || '');
+  if (!num) return;
+  if (flashingTableTimer) clearTimeout(flashingTableTimer);
+  // restart animation even if same table
+  flashingTableNum.value = '';
+  requestAnimationFrame(() => {
+    flashingTableNum.value = num;
+    flashingTableTimer = setTimeout(() => {
+      flashingTableNum.value = '';
+      flashingTableTimer = null;
+    }, 1200);
+  });
 }
 
 function applySidebarState({ open, instant }) {
@@ -561,6 +582,9 @@ function mountEngine() {
         onCanvasTableDragChange({ tableNum, dragging }) {
           draggingTableNum.value = dragging ? String(tableNum) : '';
         },
+        onCanvasTableFlashChange({ tableNum }) {
+          flashTable(tableNum);
+        },
         onPrintPreviewChange(state) {
           if (!state?.open) {
             printPreview.value = { ...printPreview.value, open: false, html: '' };
@@ -578,6 +602,8 @@ function mountEngine() {
         },
       },
     });
+    if (detachViewportGestures) detachViewportGestures();
+    detachViewportGestures = useSeatingViewportGestures(viewportRef).attach();
   } catch (err) {
     console.error('畫布引擎初始化失敗:', err);
     initError.value = err?.message || '畫布初始化失敗';
@@ -604,6 +630,9 @@ watch(tenantId, (id) => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
   if (lockButtonFlashTimer) clearTimeout(lockButtonFlashTimer);
+  if (flashingTableTimer) clearTimeout(flashingTableTimer);
+  if (detachViewportGestures) detachViewportGestures();
+  detachViewportGestures = null;
   destroySeatingEngine();
 });
 </script>

@@ -23,6 +23,7 @@ let uiHooks = {
     onGlobalStatsChange: null,
     onPrintPreviewChange: null,
     onCanvasTransformChange: null,
+    onCanvasTableFlashChange: null,
     onLockButtonFlash: null,
     onSidebarChange: null,
     onPoolChange: null,
@@ -44,6 +45,22 @@ let allGuests = {};
 let unassignedPool = [];
 let tableSettings = {};
 let activeSettingTableNum = null;
+
+function generateGuestId() {
+    try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+    } catch (_) { /* ignore */ }
+    return `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function ensureGuestHasId(guest) {
+    if (!guest || typeof guest !== 'object') return guest;
+    if (guest.id && String(guest.id).trim()) return guest;
+    guest.id = generateGuestId();
+    return guest;
+}
 
 function normalizeTableSettings(raw) {
     const normalized = {};
@@ -267,30 +284,41 @@ const GRID_SIZE = 20;
 let zoom = 1.0;
 let panX = -900;
 let panY = -600;
-let isPanning = false;
-let panPointerId = null;
-let startX, startY;
-let lastPinchDist = 0;
-let touchPanOrigin = null;
-let touchPanActive = false;
-let touchGestureActive = false;
+// 手勢狀態已搬去 Vue composable（`useSeatingViewportGestures`）
 
 let viewport = null;
 let canvas = null;
 
-function getTouchDistance(touches) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.hypot(dx, dy);
+export function getCanvasTransform() {
+    return { panX, panY, zoom, zoomPercent: Math.round(zoom * 100) };
 }
 
-function getTouchCenter(touches) {
-    const rect = viewport.getBoundingClientRect();
-    return {
-        x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
-        y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top
-    };
+export function setCanvasTransform(next) {
+    if (!next) return;
+    if (next.panX != null) panX = Number(next.panX);
+    if (next.panY != null) panY = Number(next.panY);
+    if (next.zoom != null) zoom = Number(next.zoom);
+    if (!Number.isFinite(panX)) panX = -900;
+    if (!Number.isFinite(panY)) panY = -600;
+    if (!Number.isFinite(zoom) || zoom <= 0) zoom = 1;
+    applyTransform();
 }
+
+export function zoomAtViewportClientPoint(nextZoom, clientX, clientY) {
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(
+        nextZoom,
+        clientX - rect.left,
+        clientY - rect.top
+    );
+}
+
+export function canStartCanvasPanFromTarget(target) {
+    return canStartCanvasPan(target);
+}
+
+// （已移除）getTouchDistance / getTouchCenter
 
 function zoomAtPoint(nextZoom, pointX, pointY) {
     const canvasX = (pointX - panX) / zoom;
@@ -333,124 +361,9 @@ function canStartCanvasPan(target) {
     );
 }
 
-function resetTouchGestures() {
-    touchPanActive = false;
-    touchPanOrigin = null;
-    lastPinchDist = 0;
-    touchGestureActive = false;
-    isPanning = false;
-    panPointerId = null;
-}
+// （已移除）resetTouchGestures
 
-function bindViewportEvents() {
-    if (!viewport) return;
-    onEvent(viewport, 'wheel', (e) => {
-        e.preventDefault();
-        const zoomFactor = 1.08;
-        const nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
-        const rect = viewport.getBoundingClientRect();
-        zoomAtPoint(
-            Math.min(2.5, Math.max(0.35, nextZoom)),
-            e.clientX - rect.left,
-            e.clientY - rect.top
-        );
-    }, { passive: false });
-
-    if (!IS_TOUCH_DEVICE) {
-        onEvent(viewport, 'pointerdown', (e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        if (!canStartCanvasPan(e.target)) return;
-
-        isPanning = true;
-        panPointerId = e.pointerId;
-        viewport.style.cursor = 'grabbing';
-        startX = e.clientX - panX;
-        startY = e.clientY - panY;
-        try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    });
-
-    onEvent(viewport, 'pointermove', (e) => {
-        if (!isPanning || e.pointerId !== panPointerId) return;
-        panX = e.clientX - startX;
-        panY = e.clientY - startY;
-        applyTransform();
-    });
-
-    function endCanvasPan(e) {
-        if (panPointerId !== null && e && e.pointerId !== panPointerId) return;
-        isPanning = false;
-        panPointerId = null;
-        viewport.style.cursor = 'grab';
-    }
-
-        onEvent(viewport, 'pointerup', endCanvasPan);
-        onEvent(viewport, 'pointercancel', endCanvasPan);
-    }
-
-    onEvent(viewport, 'touchstart', (e) => {
-    if (e.touches.length === 2) {
-        e.preventDefault();
-        touchGestureActive = true;
-        touchPanActive = false;
-        touchPanOrigin = null;
-        isPanning = false;
-        lastPinchDist = getTouchDistance(e.touches);
-        return;
-    }
-
-    if (e.touches.length === 1 && canStartCanvasPan(e.target)) {
-        touchGestureActive = true;
-        touchPanActive = true;
-        touchPanOrigin = {
-            x: e.touches[0].clientX,
-            y: e.touches[0].clientY,
-            panX,
-            panY
-        };
-    }
-    }, { passive: false, capture: true });
-
-    onEvent(viewport, 'touchmove', (e) => {
-    if (e.touches.length === 2 && lastPinchDist > 0) {
-        e.preventDefault();
-        const dist = getTouchDistance(e.touches);
-        const scale = dist / lastPinchDist;
-        const center = getTouchCenter(e.touches);
-        zoomAtPoint(Math.min(2.5, Math.max(0.15, zoom * scale)), center.x, center.y);
-        lastPinchDist = dist;
-        return;
-    }
-
-    if (e.touches.length === 1 && touchPanActive && touchPanOrigin) {
-        e.preventDefault();
-        panX = touchPanOrigin.panX + (e.touches[0].clientX - touchPanOrigin.x);
-        panY = touchPanOrigin.panY + (e.touches[0].clientY - touchPanOrigin.y);
-        applyTransform();
-    }
-    }, { passive: false, capture: true });
-
-    onEvent(viewport, 'touchend', (e) => {
-    if (e.touches.length === 0) {
-        resetTouchGestures();
-        return;
-    }
-    if (e.touches.length === 1) {
-        lastPinchDist = 0;
-        if (canStartCanvasPan(e.target)) {
-            touchPanActive = true;
-            touchPanOrigin = {
-                x: e.touches[0].clientX,
-                y: e.touches[0].clientY,
-                panX,
-                panY
-            };
-        }
-    }
-    }, { capture: true });
-
-    onEvent(viewport, 'touchcancel', resetTouchGestures, { capture: true });
-    onEvent(viewport, 'contextmenu', e => e.preventDefault());
-}
+// （已移除）bindViewportEvents：改由 Vue composable 綁定
 function getVisibleViewportCenter() {
     const rect = viewport.getBoundingClientRect();
     const sidebarWidth = isSidebarOpen ? getSidebarWidth() : 0;
@@ -638,13 +551,7 @@ function flyToTable(tableNum) {
     const center = getTableCanvasCenter(tableNum);
     if (!center) return;
     panViewToCanvasPoint(center.x, center.y);
-    const el = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
-    if (el) {
-        el.classList.remove('find-table-flash');
-        void el.offsetWidth;
-        el.classList.add('find-table-flash');
-        setTimeout(() => el.classList.remove('find-table-flash'), 1200);
-    }
+    uiHooks.onCanvasTableFlashChange?.({ tableNum: String(tableNum) });
 }
 
 function getFindTableMenuItems() {
@@ -1417,7 +1324,8 @@ function createDragGhost(name, x, y) {
 function findGuestBySeat(tableIdx, seatIndex) {
     const guests = allGuests[tableIdx];
     if (!guests) return -1;
-    return guests.findIndex(g => g && g.sort === seatIndex + 1);
+    const target = seatIndex + 1;
+    return guests.findIndex(g => g && Number(g.sort) === target);
 }
 
 function sortGuestArraysBySeat() {
@@ -1440,6 +1348,33 @@ const guestPersistPendingTables = new Set();
 let guestPersistPoolDirty = false;
 let localGuestRevision = 0;
 let lastPersistedGuestRevision = 0;
+let guestIdMigrationDone = false;
+
+function ensureIdsInGuestState() {
+    let changed = false;
+    // tables
+    if (Array.isArray(allGuests)) {
+        allGuests.forEach((list) => {
+            if (!Array.isArray(list)) return;
+            list.forEach((g) => {
+                if (g && g.name && !g.id) { ensureGuestHasId(g); changed = true; }
+            });
+        });
+    } else if (allGuests && typeof allGuests === 'object') {
+        Object.values(allGuests).forEach((list) => {
+            if (!Array.isArray(list)) return;
+            list.forEach((g) => {
+                if (g && g.name && !g.id) { ensureGuestHasId(g); changed = true; }
+            });
+        });
+    }
+    // pool
+    const beforeLen = normalizeUnassignedPool(unassignedPool).length;
+    unassignedPool = normalizeUnassignedPool(unassignedPool);
+    const afterLen = unassignedPool.length;
+    if (beforeLen !== afterLen) changed = true;
+    return changed;
+}
 
 function shouldApplyRemoteGuestState() {
     return localGuestRevision <= lastPersistedGuestRevision;
@@ -1447,12 +1382,13 @@ function shouldApplyRemoteGuestState() {
 
 function normalizeUnassignedPool(raw) {
     if (!raw) return [];
-    if (Array.isArray(raw)) return raw.filter(g => g != null);
+    if (Array.isArray(raw)) return raw.filter(g => g != null).map(ensureGuestHasId);
     if (typeof raw === 'object') {
         return Object.keys(raw)
             .sort((a, b) => Number(a) - Number(b))
             .map(k => raw[k])
-            .filter(g => g != null);
+            .filter(g => g != null)
+            .map(ensureGuestHasId);
     }
     return [];
 }
@@ -1460,17 +1396,18 @@ function normalizeUnassignedPool(raw) {
 function sanitizeGuestStateBeforePersist() {
     unassignedPool = normalizeUnassignedPool(unassignedPool);
 
-    const tableAssignedNames = new Set();
+    const tableAssignedIds = new Set();
     const dedupeTableList = (list) => {
         if (!Array.isArray(list)) return [];
         const seen = new Set();
         return list.filter(g => {
             if (!g?.name) return false;
-            if (seen.has(g.name)) return false;
-            seen.add(g.name);
+            ensureGuestHasId(g);
+            if (seen.has(g.id)) return false;
+            seen.add(g.id);
             const sort = parseInt(g.sort, 10);
             if (!isNaN(sort) && sort >= 1 && sort !== 99) {
-                tableAssignedNames.add(g.name);
+                tableAssignedIds.add(g.id);
             }
             return true;
         });
@@ -1484,12 +1421,14 @@ function sanitizeGuestStateBeforePersist() {
         });
     }
 
-    const poolNames = new Set();
+    const poolIds = new Set();
     const dedupedPool = [];
     unassignedPool.forEach(g => {
-        if (!g?.name || poolNames.has(g.name)) return;
-        if (tableAssignedNames.has(g.name)) return;
-        poolNames.add(g.name);
+        if (!g?.name) return;
+        ensureGuestHasId(g);
+        if (poolIds.has(g.id)) return;
+        if (tableAssignedIds.has(g.id)) return;
+        poolIds.add(g.id);
         g.sort = 99;
         dedupedPool.push(g);
     });
@@ -1498,11 +1437,13 @@ function sanitizeGuestStateBeforePersist() {
 
 function serializeGuestRowForPersist(guest) {
     if (!guest?.name) return null;
+    ensureGuestHasId(guest);
     const sort = parseInt(guest.sort, 10);
     const group = typeof guest.group === 'string'
         ? (guest.group.trim() || '未分類')
         : serializeGroupForFirebase(guest.group);
     return {
+        id: String(guest.id),
         name: String(guest.name).trim(),
         side: guest.side === '女方' ? '女方' : '男方',
         group,
@@ -1568,6 +1509,7 @@ function getTableSeatSlotsArray(tableNum, maxSeats) {
     const seatSlotsArray = new Array(maxSeats).fill(null);
     guestsInTable.forEach(g => {
         if (g && g.name && g.sort >= 1 && g.sort <= maxSeats) {
+            ensureGuestHasId(g);
             seatSlotsArray[g.sort - 1] = g;
         }
     });
@@ -1662,7 +1604,9 @@ function bindSeatSlot(el, tableNum, seatIndex, guest) {
     el.addEventListener('dragover', allowDrop);
     el.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, seatIndex));
     if (!guest) return;
+    ensureGuestHasId(guest);
     const getDragData = () => ({
+        id: guest.id,
         fromTable: String(tableNum),
         seatIndex,
         name: guest.name,
@@ -1715,6 +1659,8 @@ function commitGuestStateChange(affectedTableNums, { poolChanged = false, poolSi
     return schedulePersistGuestState(affectedTableNums, poolChanged);
 }
 
+// （已移除）restoreGuestToPoolAction：UUID 根治後不再需要救援入口
+
 function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     const { fromTable, index, seatIndex } = data;
     const toTableIdx = parseInt(toTableNum, 10);
@@ -1727,7 +1673,12 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         unassignedPool = normalizeUnassignedPool(unassignedPool);
         let poolIndex = typeof index === 'number' ? index : -1;
         if (poolIndex < 0 || poolIndex >= unassignedPool.length || !unassignedPool[poolIndex]?.name) {
-            poolIndex = unassignedPool.findIndex(g => g?.name && data.name && g.name === data.name);
+            if (data?.id) {
+                poolIndex = unassignedPool.findIndex(g => g?.id && String(g.id) === String(data.id));
+            }
+            if (poolIndex === -1) {
+                poolIndex = unassignedPool.findIndex(g => g?.name && data.name && String(g.name).trim() === String(data.name).trim());
+            }
         }
         if (poolIndex >= 0) {
             movingGuestObj = unassignedPool[poolIndex];
@@ -1735,7 +1686,19 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         }
     } else {
         const fromTableIdx = parseInt(fromTable, 10);
-        const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
+        let foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
+        if (foundIdx === -1 && data?.id) {
+            const list = allGuests[fromTableIdx];
+            if (Array.isArray(list)) {
+                foundIdx = list.findIndex(g => g && g.id && String(g.id) === String(data.id));
+            }
+        }
+        if (foundIdx === -1 && data?.name) {
+            const list = allGuests[fromTableIdx];
+            if (Array.isArray(list)) {
+                foundIdx = list.findIndex(g => g && g.name && String(g.name).trim() === String(data.name).trim());
+            }
+        }
         if (foundIdx !== -1) {
             movingGuestObj = allGuests[fromTableIdx][foundIdx];
             allGuests[fromTableIdx].splice(foundIdx, 1);
@@ -1743,6 +1706,24 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     }
 
     if (!movingGuestObj) return;
+    if (!movingGuestObj?.name) {
+        // 防呆：避免拖拽資料異常導致「人消失」
+        console.warn('moveGuestToSeat: moving guest has no name, aborting', { data, toTableNum, targetSeatIdx, movingGuestObj });
+        if (fromTable !== 'POOL') {
+            const fromTableIdx = parseInt(fromTable, 10);
+            if (Number.isFinite(fromTableIdx) && fromTableIdx > 0) {
+                allGuests[fromTableIdx] = Array.isArray(allGuests[fromTableIdx]) ? allGuests[fromTableIdx] : [];
+                movingGuestObj.sort = (parseInt(seatIndex, 10) || 0) + 1;
+                allGuests[fromTableIdx].push(movingGuestObj);
+                applyGuestMoveUI([String(fromTableIdx)], { poolChanged: false });
+            }
+        } else {
+            unassignedPool = normalizeUnassignedPool(unassignedPool);
+            unassignedPool.push(movingGuestObj);
+            notifyPoolChange(['男方', '女方']);
+        }
+        return;
+    }
 
     let bumpedToPool = null;
     const occupiedIdx = allGuests[toTableIdx].findIndex(g => g && g.sort === targetSortNum);
@@ -1751,7 +1732,8 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         if (fromTable === 'POOL') {
             bumpedGuest.sort = 99;
             unassignedPool = normalizeUnassignedPool(unassignedPool);
-            if (!unassignedPool.some(g => g?.name === bumpedGuest.name)) {
+            ensureGuestHasId(bumpedGuest);
+            if (!unassignedPool.some(g => g?.id && bumpedGuest.id && String(g.id) === String(bumpedGuest.id))) {
                 unassignedPool.push(bumpedGuest);
             }
             bumpedToPool = bumpedGuest;
@@ -1764,6 +1746,7 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     }
 
     movingGuestObj.sort = targetSortNum;
+    ensureGuestHasId(movingGuestObj);
     allGuests[toTableIdx].push(movingGuestObj);
 
     const affected = new Set([String(toTableNum)]);
@@ -1787,14 +1770,35 @@ function moveGuestToPool(data) {
     if (!Number.isFinite(seatIndex)) return;
 
     const fromTableIdx = parseInt(fromTable, 10);
-    const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
+    let foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
+    if (foundIdx === -1 && data?.id) {
+        const list = allGuests[fromTableIdx];
+        if (Array.isArray(list)) {
+            foundIdx = list.findIndex(g => g && g.id && String(g.id) === String(data.id));
+        }
+    }
+    if (foundIdx === -1 && data?.name) {
+        const list = allGuests[fromTableIdx];
+        if (Array.isArray(list)) {
+            foundIdx = list.findIndex(g => g && g.name && String(g.name).trim() === String(data.name).trim());
+        }
+    }
     if (foundIdx === -1) return;
 
     const movingGuestObj = allGuests[fromTableIdx][foundIdx];
     allGuests[fromTableIdx].splice(foundIdx, 1);
+    if (!movingGuestObj?.name) {
+        console.warn('moveGuestToPool: moving guest has no name, restoring', { data, fromTableIdx, seatIndex, movingGuestObj });
+        allGuests[fromTableIdx] = Array.isArray(allGuests[fromTableIdx]) ? allGuests[fromTableIdx] : [];
+        movingGuestObj.sort = seatIndex + 1;
+        allGuests[fromTableIdx].push(movingGuestObj);
+        applyGuestMoveUI([String(fromTableIdx)], { poolChanged: false });
+        return;
+    }
     movingGuestObj.sort = 99;
     unassignedPool = normalizeUnassignedPool(unassignedPool);
-    if (!unassignedPool.some(g => g?.name === movingGuestObj.name)) {
+    ensureGuestHasId(movingGuestObj);
+    if (!unassignedPool.some(g => g?.id && movingGuestObj.id && String(g.id) === String(movingGuestObj.id))) {
         unassignedPool.push(movingGuestObj);
     }
 
@@ -1875,7 +1879,6 @@ function setupTouchDrag(el, getDragData, options) {
     el.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
         e.stopPropagation();
-        resetTouchGestures();
         cancelTableDrag();
 
         const touchId = e.touches[0].identifier;
@@ -2022,6 +2025,17 @@ function handleSeatingDataRoot(root) {
     tableSettings = loadTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
 
+    // 一次性補齊 guest.id（UUID），避免同名互相覆蓋/消失
+    if (!guestIdMigrationDone && ensureIdsInGuestState()) {
+        guestIdMigrationDone = true;
+        localGuestRevision++;
+        // 寫回 pool + 所有桌（一次性）
+        schedulePersistGuestState(getTableSettingKeys(), true).catch((e) => {
+            console.warn('guest id migration persist failed:', e);
+            guestIdMigrationDone = false;
+        });
+    }
+
     if (!localStorage.getItem(getGridSnapStorageKey())) {
         snapAllTablesToGrid()
             .catch(err => console.warn('枱位對齊格線失敗:', err))
@@ -2056,6 +2070,14 @@ function startSeatingRealtimeSync() {
     firebaseUnsubs.push(tenantRef('wedding_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
             allGuests = snapshot.val() || {};
+            if (!guestIdMigrationDone && ensureIdsInGuestState()) {
+                guestIdMigrationDone = true;
+                localGuestRevision++;
+                schedulePersistGuestState(getTableSettingKeys(), true).catch((e) => {
+                    console.warn('guest id migration persist failed:', e);
+                    guestIdMigrationDone = false;
+                });
+            }
         }
         markSeatingPartialReady('guests');
         if (suppressGuestRemoteRenderCount > 0) {
@@ -2072,6 +2094,14 @@ function startSeatingRealtimeSync() {
     firebaseUnsubs.push(tenantRef('unassigned_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
             unassignedPool = normalizeUnassignedPool(snapshot.val());
+            if (!guestIdMigrationDone && ensureIdsInGuestState()) {
+                guestIdMigrationDone = true;
+                localGuestRevision++;
+                schedulePersistGuestState(getTableSettingKeys(), true).catch((e) => {
+                    console.warn('guest id migration persist failed:', e);
+                    guestIdMigrationDone = false;
+                });
+            }
         }
         markSeatingPartialReady('pool');
         if (suppressGuestRemoteRenderCount > 0) {
@@ -2177,11 +2207,13 @@ function collectPoolBySide(side) {
     const pool = normalizeUnassignedPool(unassignedPool);
     pool.forEach((guest, index) => {
         if (!guest || !guest.name) return;
-        const isMatch = side === '男方' ? guest.side === '男方' : guest.side !== '男方';
+        // legacy data 可能無 side；統一當非「女方」= 男方，避免 pool 層刷新只更新一邊時「人消失」
+        const isMatch = side === '男方' ? guest.side !== '女方' : guest.side === '女方';
         if (!isMatch) return;
         count++;
         const gName = getPrimaryGroup(guest);
         if (!groups[gName]) groups[gName] = [];
+        ensureGuestHasId(guest);
         groups[gName].push({ data: guest, originalIndex: index });
     });
     return { groups, count };
@@ -2193,6 +2225,7 @@ function getPoolSideViewModel(side) {
     const groups = Object.keys(data.groups).map((groupName) => ({
         name: groupName,
         items: data.groups[groupName].map((item) => ({
+            id: item.data.id,
             name: item.data.name,
             originalIndex: item.originalIndex,
             chipClass: tagChipSideClasses(item.data.side === '女方' ? '女方' : '男方').pool,
@@ -2213,12 +2246,14 @@ function notifyPoolChange(sides = ['男方', '女方']) {
     if (Object.keys(patch).length) uiHooks.onPoolChange?.(patch);
 }
 
-function bindPoolGuestChip(el, poolIndex, name) {
+function bindPoolGuestChip(el, poolIndex, guestId, name) {
     if (!el || el.dataset.poolBound === '1') return;
     el.dataset.poolBound = '1';
     el.dataset.poolIndex = String(poolIndex);
+    el.dataset.poolId = guestId ? String(guestId) : '';
     el.dataset.poolName = name;
     const getDragData = () => ({
+        id: guestId,
         fromTable: 'POOL',
         index: poolIndex,
         name,
@@ -2674,6 +2709,7 @@ function resetEngineState() {
         onGlobalStatsChange: null,
         onPrintPreviewChange: null,
         onCanvasTransformChange: null,
+        onCanvasTableFlashChange: null,
         onLockButtonFlash: null,
         onSidebarChange: null,
         onPoolChange: null,
@@ -2704,6 +2740,7 @@ export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
         onGlobalStatsChange: hooks.onGlobalStatsChange || null,
         onPrintPreviewChange: hooks.onPrintPreviewChange || null,
         onCanvasTransformChange: hooks.onCanvasTransformChange || null,
+        onCanvasTableFlashChange: hooks.onCanvasTableFlashChange || null,
         onLockButtonFlash: hooks.onLockButtonFlash || null,
         onSidebarChange: hooks.onSidebarChange || null,
         onPoolChange: hooks.onPoolChange || null,
@@ -2715,7 +2752,7 @@ export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
     canvas = document.getElementById('main-canvas');
     if (!viewport || !canvas) throw new Error('Seating canvas DOM not found');
 
-    bindViewportEvents();
+    // 手勢（pan/zoom）已搬去 Vue composable 綁定
     bindTableDragHandlers();
     bindDragSidebarHandlers();
 

@@ -32,7 +32,10 @@ export function normalizeGuestForList(guest) {
   const hasTable = tableRaw !== '' && tableRaw != null && !Number.isNaN(tableNum) && tableNum >= 1;
   const sortNum = parseInt(guest?.sort, 10);
   return {
-    _key: guest._key || `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    id: String(guest?.id || '').trim() || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`),
+    _key: guest._key || guest.id || `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     name: String(guest?.name || '').trim(),
     side: guest?.side === '女方' ? '女方' : '男方',
     table: hasTable ? tableNum : '',
@@ -96,6 +99,7 @@ export function processFirebaseGuests(weddingGuests, unassignedGuests, guestStat
         const canceled = isGuestCanceled(tableNumInt, guest.name, guestStatus);
         const preservedSort = !Number.isNaN(rawSort) && rawSort >= 1 ? rawSort : null;
         list.push(normalizeGuestForList({
+          id: guest.id,
           name: guest.name,
           side: guest.side || '男方',
           table: tableNumInt,
@@ -117,6 +121,7 @@ export function processFirebaseGuests(weddingGuests, unassignedGuests, guestStat
     if (!guest?.name) return;
     list.push(normalizeGuestForList({
       name: guest.name,
+      id: guest.id,
       side: guest.side || '男方',
       table: '',
       sort: 99,
@@ -200,6 +205,7 @@ export function serializeGuestsForSave(guests) {
   guests.forEach((g) => {
     if (!g.name?.trim()) return;
     const row = {
+      id: g.id,
       name: g.name.trim(),
       side: g.side,
       [PRIMARY_TAG_KEY]: serializeGroupForFirebase(g.group),

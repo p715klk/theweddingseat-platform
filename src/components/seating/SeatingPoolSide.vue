@@ -17,7 +17,7 @@
       <div class="grid grid-cols-2 gap-2">
         <div
           v-for="item in group.items"
-          :key="`${item.originalIndex}-${item.name}`"
+          :key="item.id || `${item.originalIndex}-${item.name}`"
           :ref="(el) => bindChip(el, item)"
           class="pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing"
           :class="item.chipClass"
@@ -41,6 +41,6 @@ defineProps({
 
 function bindChip(el, item) {
   if (!el || !item?.name) return;
-  bindPoolGuestChip(el, item.originalIndex, item.name);
+  bindPoolGuestChip(el, item.originalIndex, item.id, item.name);
 }
 </script>

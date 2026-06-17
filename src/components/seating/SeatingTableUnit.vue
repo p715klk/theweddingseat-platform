@@ -1,7 +1,7 @@
 <template>
   <div
     class="draggable-table"
-    :class="{ 'is-dragging': dragging }"
+    :class="{ 'is-dragging': dragging, 'find-table-flash': flashing }"
     :data-table="table.num"
     :style="{
       left: `${table.baseX * zoom}px`,
@@ -52,6 +52,7 @@ const props = defineProps({
   table: { type: Object, required: true },
   zoom: { type: Number, default: 1 },
   dragging: { type: Boolean, default: false },
+  flashing: { type: Boolean, default: false },
 });
 
 const hubTitleRef = ref(null);

@@ -11,6 +11,7 @@
       :table="table"
       :zoom="zoom"
       :dragging="draggingTableNum === table.num"
+      :flashing="flashingTableNum === table.num"
     />
   </div>
 </template>
@@ -26,6 +27,7 @@ const props = defineProps({
   panY: { type: Number, default: -600 },
   zoom: { type: Number, default: 1 },
   draggingTableNum: { type: String, default: '' },
+  flashingTableNum: { type: String, default: '' },
 });
 
 const canvasStyle = computed(() => ({
