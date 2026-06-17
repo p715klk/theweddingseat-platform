@@ -20,8 +20,8 @@ body.seating-touch {
 #seating-app > header a,
 #print-menu-wrap .print-menu,
 #print-menu-wrap .print-menu button,
-#find-table-menu,
-#find-table-menu button {
+#find-table-wrap .find-table-menu,
+#find-table-wrap .find-table-menu button {
     touch-action: manipulation;
 }
 .workspace-canvas {
@@ -229,32 +229,32 @@ body.seating-touch {
 }
 
 /* Side panel 覆蓋式收合 — 滑入滑出 + 內容淡入淡出 */
-#sidebar-panel {
+.sidebar-panel {
     width: 320px;
     pointer-events: none;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     will-change: transform;
 }
-#sidebar-content {
+.sidebar-content {
     pointer-events: auto;
     opacity: 1;
     visibility: visible;
     transition: opacity 0.28s ease 0.06s, visibility 0.28s ease 0.06s;
 }
-#sidebar-panel.collapsed {
+.sidebar-panel.collapsed {
     transform: translateX(-100%);
 }
-#sidebar-panel.collapsed #sidebar-content {
+.sidebar-panel.collapsed .sidebar-content {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
     transition: opacity 0.2s ease, visibility 0.2s ease;
 }
-#sidebar-panel.sidebar-no-transition,
-#sidebar-panel.sidebar-no-transition #sidebar-content {
+.sidebar-panel.sidebar-no-transition,
+.sidebar-panel.sidebar-no-transition .sidebar-content {
     transition: none !important;
 }
-#sidebar-toggle-btn {
+.sidebar-toggle-btn {
     pointer-events: auto;
     transition: background-color 0.2s ease, color 0.2s ease;
 }
@@ -312,19 +312,15 @@ body.tables-position-locked .table-plate:active {
     z-index: 110;
 }
 #print-menu-wrap .print-menu,
-#find-table-menu {
+#find-table-wrap .find-table-menu {
     min-width: 11rem;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
 }
 #print-menu-wrap .print-menu.is-fixed,
-#find-table-menu.is-fixed {
+#find-table-wrap .find-table-menu.is-fixed {
     position: fixed;
     z-index: 120;
-}
-#find-table-list {
-    max-height: 14rem;
-    overflow-y: auto;
 }
 .find-table-item {
     touch-action: manipulation;
@@ -491,8 +487,8 @@ body.print-preview-open .print-preview-scroll {
 }
 
 @media (max-width: 768px) {
-    #sidebar-panel { width: min(88vw, 300px); }
-    #sidebar-content { width: min(88vw, 300px) !important; }
+    .sidebar-panel { width: min(88vw, 300px); }
+    .sidebar-content { width: min(88vw, 300px) !important; }
     .header-actions .hide-mobile { display: none; }
     .global-stats { display: none; }
     header h1 span:last-child { font-size: 0.85rem; }

@@ -22,6 +22,13 @@ let uiHooks = {
     onTableSettingsModalChange: null,
     onGlobalStatsChange: null,
     onPrintPreviewChange: null,
+    onZoomChange: null,
+    onLockButtonFlash: null,
+    onSidebarChange: null,
+    onPoolChange: null,
+    onCanvasTablesChange: null,
+    onCanvasTablePositionChange: null,
+    onCanvasTableDragChange: null,
 };
 
 function trackCleanup(fn) {
@@ -309,23 +316,13 @@ function screenToCanvas(screenX, screenY) {
 function applyTransform() {
     canvas.style.transform = `translate(${panX}px, ${panY}px)`;
     canvas.style.setProperty('--zoom', zoom);
-    document.getElementById('zoom-percent').innerText = `${Math.round(zoom * 100)}%`;
-    updateAllTablePositions();
+    uiHooks.onZoomChange?.(Math.round(zoom * 100));
     guestNameFontRatioCache.clear();
-}
-
-function updateAllTablePositions() {
-    document.querySelectorAll('.draggable-table').forEach(el => {
-        const bx = parseFloat(el.dataset.baseX || 0);
-        const by = parseFloat(el.dataset.baseY || 0);
-        el.style.left = `${bx * zoom}px`;
-        el.style.top = `${by * zoom}px`;
-    });
 }
 
 function canStartCanvasPan(target) {
     return !target.closest(
-        '.seat-slot, .guest-seat-circle, .pool-guest-chip, .hub-center, .hub-title, button, input, select, a, #sidebar-content, #sidebar-panel, #sidebar-toggle-btn, .guest-drag-ghost'
+        '.seat-slot, .guest-seat-circle, .pool-guest-chip, .hub-center, .hub-title, button, input, select, a, .sidebar-content, .sidebar-panel, .sidebar-toggle-btn, .guest-drag-ghost'
     );
 }
 
@@ -634,7 +631,6 @@ function flyToTable(tableNum) {
     const center = getTableCanvasCenter(tableNum);
     if (!center) return;
     panViewToCanvasPoint(center.x, center.y);
-    closeFindTableMenu();
     const el = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
     if (el) {
         el.classList.remove('find-table-flash');
@@ -653,45 +649,6 @@ function getFindTableMenuItems() {
 
 function refreshFindTableMenu() {
     uiHooks.onFindTableItemsChange?.(getFindTableMenuItems());
-}
-
-function closeFindTableMenu() {
-    const menu = document.getElementById('find-table-menu');
-    if (menu) {
-        menu.classList.add('hidden');
-        menu.classList.remove('is-fixed');
-        menu.style.top = '';
-        menu.style.right = '';
-        menu.style.left = '';
-    }
-}
-
-let findTableMenuIgnoreCloseUntil = 0;
-
-function positionFindTableMenuFixed() {
-    const btn = document.getElementById('btn-find-table');
-    const menu = document.getElementById('find-table-menu');
-    if (!btn || !menu) return;
-    const rect = btn.getBoundingClientRect();
-    menu.classList.add('is-fixed');
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-    menu.style.left = 'auto';
-}
-
-function toggleFindTableMenu(e) {
-    if (e) e.stopPropagation();
-    const menu = document.getElementById('find-table-menu');
-    if (!menu) return;
-    const willOpen = menu.classList.contains('hidden');
-    if (willOpen) refreshFindTableMenu();
-    menu.classList.toggle('hidden');
-    if (willOpen) {
-        findTableMenuIgnoreCloseUntil = Date.now() + 400;
-        if (isMobileViewport()) positionFindTableMenuFixed();
-    } else {
-        closeFindTableMenu();
-    }
 }
 
 function snapAllTablesToGrid() {
@@ -1004,41 +961,28 @@ function getSeatLayout(maxSeats) {
     return { radius, guestSize };
 }
 
-// 側邊欄開合
+// 側邊欄開合（狀態由 engine 持有，UI 經 hook 同步至 Vue）
 let isSidebarOpen = true;
 
+function notifySidebarChange(instant = false) {
+    uiHooks.onSidebarChange?.({ open: isSidebarOpen, instant });
+}
+
 function getSidebarRightEdge() {
-    const content = document.getElementById('sidebar-content');
-    if (content && isSidebarOpen) {
-        return content.getBoundingClientRect().right;
-    }
-    return getSidebarWidth();
+    if (!isSidebarOpen) return 0;
+    return getSidebarPanelWidth();
 }
 
 function openSidebar({ instant = false } = {}) {
     if (isSidebarOpen) return;
-    const sidebar = document.getElementById('sidebar-panel');
-    const icon = document.getElementById('sidebar-toggle-icon');
-    if (instant) sidebar.classList.add('sidebar-no-transition');
-    sidebar.classList.remove('collapsed');
-    icon.innerText = '◀';
     isSidebarOpen = true;
-    if (instant) {
-        requestAnimationFrame(() => sidebar.classList.remove('sidebar-no-transition'));
-    }
+    notifySidebarChange(instant);
 }
 
 function closeSidebar({ instant = false } = {}) {
     if (!isSidebarOpen) return;
-    const sidebar = document.getElementById('sidebar-panel');
-    const icon = document.getElementById('sidebar-toggle-icon');
-    if (instant) sidebar.classList.add('sidebar-no-transition');
-    sidebar.classList.add('collapsed');
-    icon.innerText = '▶';
     isSidebarOpen = false;
-    if (instant) {
-        requestAnimationFrame(() => sidebar.classList.remove('sidebar-no-transition'));
-    }
+    notifySidebarChange(instant);
 }
 
 function openSidebarIfDragEntersSidebar(clientX) {
@@ -1089,13 +1033,6 @@ function toggleTablePositionLock() {
     localStorage.setItem(getTableLockStorageKey(), isTablePositionLocked ? '1' : '0');
     if (isTablePositionLocked) cancelTableDrag();
     updateTableLockUI();
-}
-
-function bindDocumentClickHandlers() {
-    onEvent(document, 'click', (e) => {
-        if (Date.now() < findTableMenuIgnoreCloseUntil) return;
-        if (!e.target.closest('#find-table-wrap')) closeFindTableMenu();
-    });
 }
 
 let printPreviewOpen = false;
@@ -1201,11 +1138,15 @@ function buildCanvasPrintHTML() {
     const offsetX = (page.w - scaledW) / 2;
     const offsetY = (page.h - scaledH) / 2;
 
-    const tablesHTML = Array.from(canvas.querySelectorAll('.draggable-table')).map(el => {
-        const bx = parseFloat(el.dataset.baseX);
-        const by = parseFloat(el.dataset.baseY);
-        const plate = el.querySelector('.table-plate');
+    const tablesHTML = getTableSettingKeys().map((tableNum) => {
+        const settings = tableSettings[tableNum];
+        if (!settings) return '';
+        const el = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
+        const plate = el?.querySelector('.table-plate');
         if (!plate) return '';
+        const bx = Number(settings.x);
+        const by = Number(settings.y);
+        if (!Number.isFinite(bx) || !Number.isFinite(by)) return '';
         const left = bx - bounds.minX + pad;
         const top = by - bounds.minY + pad;
         return `<div class="draggable-table" style="left:${left}px;top:${top}px;--zoom:1">${cloneTablePlateForPrint(plate)}</div>`;
@@ -1354,7 +1295,10 @@ function printGuestListView() {
 }
 
 let isDraggingTable = false;
-let draggedTableElement = null;
+let draggedTableNum = null;
+let tableDragStartX = 0;
+let tableDragStartY = 0;
+let tableDragPointerId = null;
 let tableOffsetX = 0;
 let tableOffsetY = 0;
 let isGuestDragging = false;
@@ -1517,15 +1461,6 @@ function schedulePersistGuestState(affectedTableNums, poolDirty) {
     return guestPersistQueue;
 }
 
-function fitGuestNameFontsInTable(tableNum) {
-    const table = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
-    if (!table) return;
-    table.querySelectorAll('.guest-seat-circle').forEach(circle => {
-        const ratio = measureGuestNameFontRatio(circle);
-        circle.style.setProperty('--name-font-ratio', ratio.toFixed(4));
-    });
-}
-
 function getTableSeatSlotsArray(tableNum, maxSeats) {
     const idx = parseInt(tableNum, 10);
     const guestsInTable = allGuests[idx] || [];
@@ -1539,87 +1474,120 @@ function getTableSeatSlotsArray(tableNum, maxSeats) {
     return { seatSlotsArray, filled };
 }
 
-function appendTablePlateGuestUI(tablePlate, tableNum, settings) {
+function getTableViewModel(tableNum) {
+    const settings = tableSettings[tableNum];
+    if (!settings) return null;
     const maxSeats = settings.max_seats || 12;
     const { seatSlotsArray, filled } = getTableSeatSlotsArray(tableNum, maxSeats);
     const seatLayout = getSeatLayout(maxSeats);
-    tablePlate.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
-
+    const seats = [];
     for (let i = 0; i < maxSeats; i++) {
-        const seatSlot = document.createElement('div');
         const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
         const x = PLATE_CENTER + seatLayout.radius * Math.cos(angle);
         const y = PLATE_CENTER + seatLayout.radius * Math.sin(angle);
-
-        seatSlot.style.left = `calc(${x}px * var(--zoom))`;
-        seatSlot.style.top = `calc(${y}px * var(--zoom))`;
-        seatSlot.dataset.tableNum = tableNum;
-        seatSlot.dataset.seatIndex = i;
-
         const guest = seatSlotsArray[i];
-
-        if (guest) {
-            const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
-            seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-            seatSlot.innerHTML = `<span class="${getGuestNameTextClass(guest.name)}" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
-
-            bindGuestTap(seatSlot, () => {
-                openGuestModal(guest, tableNum, i);
-            });
-
-            const seatDragData = () => ({
-                fromTable: tableNum,
-                seatIndex: i,
-                name: guest.name
-            });
-            if (IS_TOUCH_DEVICE) {
-                setupTouchDrag(seatSlot, seatDragData);
-            } else {
-                setupDesktopGuestDrag(seatSlot, seatDragData, { pointerDown: true });
-            }
-        } else {
-            seatSlot.className = 'seat-slot seat-empty';
-            seatSlot.innerHTML = '<span>+</span>';
-        }
-
-        seatSlot.addEventListener('dragover', allowDrop);
-        seatSlot.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, i));
-
-        tablePlate.appendChild(seatSlot);
+        seats.push({
+            index: i,
+            x,
+            y,
+            guest: guest ? {
+                name: guest.name,
+                displayHtml: formatGuestDisplayName(guest.name),
+                nameClass: getGuestNameTextClass(guest.name),
+                sideClass: guest.side === '女方' ? 'side-female' : 'side-male',
+            } : null,
+        });
     }
+    return {
+        num: String(tableNum),
+        baseX: settings.x,
+        baseY: settings.y,
+        maxSeats,
+        filled,
+        guestSize: seatLayout.guestSize,
+        label: (settings.label || '').trim(),
+        hubRingHtml: buildHubRingSVG(filled, maxSeats),
+        seats,
+    };
+}
 
-    tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
+function notifyCanvasTablesChange(tableNums = null) {
+    const nums = tableNums?.length
+        ? [...new Set(tableNums.map(String))]
+        : getTableSettingKeys();
+    const tables = nums.map((num) => getTableViewModel(num)).filter(Boolean);
+    uiHooks.onCanvasTablesChange?.({
+        tables,
+        full: !tableNums?.length,
+    });
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => fitAllGuestNameFonts());
+    });
+}
 
-    const tableLabel = (settings.label || '').trim();
-    const hubCenter = document.createElement('div');
-    hubCenter.className = 'hub-center';
-    hubCenter.innerHTML = [
-        `<span class="hub-title">Table ${tableNum}</span>`,
-        tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
-        `<span class="hub-num">${filled} ppl</span>`
-    ].join('');
+function bindTablePlateDrag(el, tableNum) {
+    if (!el || el.dataset.tableBound === '1') return;
+    el.dataset.tableBound = '1';
+    if (IS_TOUCH_DEVICE) return;
+    el.addEventListener('pointerdown', (e) => {
+        if (isTablePositionLocked) {
+            uiHooks.onLockButtonFlash?.();
+            return;
+        }
+        if (e.button !== 0 || isGuestDragging) return;
+        if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
+        e.stopPropagation();
+        isDraggingTable = true;
+        draggedTableNum = String(tableNum);
+        tableDragStartX = tableSettings[tableNum].x;
+        tableDragStartY = tableSettings[tableNum].y;
+        const pos = screenToCanvas(e.clientX, e.clientY);
+        tableOffsetX = pos.x - tableDragStartX;
+        tableOffsetY = pos.y - tableDragStartY;
+        tableDragPointerId = e.pointerId;
+        uiHooks.onCanvasTableDragChange?.({ tableNum: draggedTableNum, dragging: true });
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    });
+    el.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        cancelTableDrag();
+        openSettingsModal(tableNum, tableSettings[tableNum]?.max_seats || 12);
+    });
+}
+
+function bindSeatSlot(el, tableNum, seatIndex, guest) {
+    if (!el || el.dataset.seatBound === '1') return;
+    el.dataset.seatBound = '1';
+    el.addEventListener('dragover', allowDrop);
+    el.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, seatIndex));
+    if (!guest) return;
+    const getDragData = () => ({
+        fromTable: String(tableNum),
+        seatIndex,
+        name: guest.name,
+    });
     if (IS_TOUCH_DEVICE) {
-        bindGuestTap(hubCenter, () => openSettingsModal(tableNum, maxSeats));
+        setupTouchDrag(el, getDragData, { documentTouchDrag: true });
     } else {
-        const hubTitle = hubCenter.querySelector('.hub-title');
-        if (hubTitle) {
-            bindGuestTap(hubTitle, () => openSettingsModal(tableNum, maxSeats));
-        }
+        setupDesktopGuestDrag(el, getDragData, { pointerDown: true, seatDrag: true });
     }
-    tablePlate.appendChild(hubCenter);
+    bindGuestTap(el, () => openGuestModal(guest, tableNum, seatIndex));
+}
+
+function bindTableHub(el, tableNum, maxSeats, titleEl = null) {
+    if (!el || el.dataset.hubBound === '1') return;
+    el.dataset.hubBound = '1';
+    const open = () => openSettingsModal(tableNum, maxSeats);
+    if (IS_TOUCH_DEVICE || !titleEl) {
+        bindGuestTap(el, open);
+    } else {
+        bindGuestTap(titleEl, open);
+    }
 }
 
 function updateTableGuestDisplay(tableNum) {
-    const tableWrapper = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
-    if (!tableWrapper) return false;
-    const settings = tableSettings[tableNum];
-    if (!settings) return false;
-    const tablePlate = tableWrapper.querySelector('.table-plate');
-    if (!tablePlate) return false;
-
-    tablePlate.querySelectorAll('.seat-slot, .hub-ring, .hub-center').forEach(el => el.remove());
-    appendTablePlateGuestUI(tablePlate, tableNum, settings);
-    requestAnimationFrame(() => fitGuestNameFontsInTable(tableNum));
+    if (!tableSettings[tableNum]) return false;
+    notifyCanvasTablesChange([String(tableNum)]);
     return true;
 }
 
@@ -1629,18 +1597,15 @@ function getGuestSideLabel(guest) {
 
 function applyGuestMoveUI(tableNums, { poolChanged = false, poolSides = null } = {}) {
     if (poolChanged) {
-        if (poolSides && poolSides.length) {
-            [...new Set(poolSides)].forEach(side => renderSidebarSide(side));
-        } else {
-            renderSidebar();
-        }
+        const sides = poolSides?.length ? [...new Set(poolSides)] : ['男方', '女方'];
+        notifyPoolChange(sides);
     }
     updateGlobalStats();
     let needsFullRender = false;
     [...new Set(tableNums.map(String))].forEach(num => {
         if (!updateTableGuestDisplay(num)) needsFullRender = true;
     });
-    if (needsFullRender) renderCanvasTables();
+    if (needsFullRender) notifyCanvasTablesChange();
 }
 
 function commitGuestStateChange(affectedTableNums, { poolChanged = false, poolSides = null } = {}) {
@@ -1715,8 +1680,10 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
 }
 
 function moveGuestToPool(data) {
-    const { fromTable, seatIndex } = data;
+    const { fromTable } = data;
+    const seatIndex = parseInt(data.seatIndex, 10);
     if (!fromTable || fromTable === 'POOL') return;
+    if (!Number.isFinite(seatIndex)) return;
 
     const fromTableIdx = parseInt(fromTable, 10);
     const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
@@ -1736,14 +1703,27 @@ function moveGuestToPool(data) {
     });
 }
 
-function resolvePointerDrop(clientX, clientY, data) {
-    const dropEl = document.elementFromPoint(clientX, clientY);
-    if (!dropEl) return;
+function isPointOverSidebarDropZone(clientX, clientY) {
+    if (document.elementFromPoint(clientX, clientY)?.closest(
+        '.sidebar-content, #single-scroll-pool, .pool-group, .pool-guest-chip'
+    )) {
+        return true;
+    }
+    const panel = document.querySelector('.sidebar-panel:not(.collapsed) .sidebar-content');
+    if (!panel) return false;
+    const rect = panel.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right
+        && clientY >= rect.top && clientY <= rect.bottom;
+}
 
-    if (dropEl.closest('#sidebar-content, #single-scroll-pool, .pool-group, .pool-guest-chip')) {
+function resolvePointerDrop(clientX, clientY, data) {
+    if (isPointOverSidebarDropZone(clientX, clientY)) {
         moveGuestToPool(data);
         return;
     }
+
+    const dropEl = document.elementFromPoint(clientX, clientY);
+    if (!dropEl) return;
 
     const seatSlot = dropEl.closest('.seat-slot');
     if (seatSlot && seatSlot.dataset.tableNum != null) {
@@ -1788,7 +1768,7 @@ function handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev) 
 
 function setupTouchDrag(el, getDragData, options) {
     const opts = typeof options === 'function' ? { onDragStart: options } : (options || {});
-    const useDocListeners = !!opts.closeSidebarOnLeave;
+    const useDocListeners = !!opts.closeSidebarOnLeave || !!opts.documentTouchDrag;
     opts.getDragData = getDragData;
 
     el.addEventListener('touchstart', (e) => {
@@ -1867,7 +1847,16 @@ function setupDesktopGuestDrag(el, getDragData, options = {}) {
         openSidebarIfDragEntersSidebar(e.clientX);
         if (options.trackSidebarLeave) closeSidebarIfDragLeavesSidebar(e.clientX);
     });
-    el.addEventListener('dragend', () => {
+    el.addEventListener('dragend', (e) => {
+        const data = getDragData();
+        if (options.seatDrag && data?.fromTable && data.fromTable !== 'POOL') {
+            const seatIdx = parseInt(data.seatIndex, 10);
+            const tableIdx = parseInt(data.fromTable, 10);
+            if (Number.isFinite(seatIdx) && findGuestBySeat(tableIdx, seatIdx) !== -1
+                && isPointOverSidebarDropZone(e.clientX, e.clientY)) {
+                moveGuestToPool(data);
+            }
+        }
         isGuestDragging = false;
         cancelTableDrag();
         if (options.trackSidebarLeave && !isMobileViewport()) {
@@ -1877,25 +1866,29 @@ function setupDesktopGuestDrag(el, getDragData, options = {}) {
 }
 
 function cancelTableDrag() {
-    if (!draggedTableElement) return;
-    const el = draggedTableElement;
-    const startX = parseFloat(el.dataset.dragStartX ?? el.dataset.baseX ?? 0);
-    const startY = parseFloat(el.dataset.dragStartY ?? el.dataset.baseY ?? 0);
-    el.dataset.baseX = startX;
-    el.dataset.baseY = startY;
-    el.style.left = `${startX * zoom}px`;
-    el.style.top = `${startY * zoom}px`;
-    el.classList.remove('is-dragging');
+    if (!draggedTableNum) return;
+    const num = draggedTableNum;
+    if (tableSettings[num]) {
+        tableSettings[num].x = tableDragStartX;
+        tableSettings[num].y = tableDragStartY;
+    }
+    uiHooks.onCanvasTablePositionChange?.({
+        tableNum: num,
+        baseX: tableDragStartX,
+        baseY: tableDragStartY,
+    });
+    uiHooks.onCanvasTableDragChange?.({ tableNum: num, dragging: false });
     isDraggingTable = false;
-    draggedTableElement = null;
+    draggedTableNum = null;
+    tableDragPointerId = null;
 }
 
 let seatingViewBootstrapped = false;
 
 function runRender() {
     try {
-        renderSidebar();
-        renderCanvasTables();
+        notifyPoolChange(['男方', '女方']);
+        notifyCanvasTablesChange();
         updateGlobalStats();
         applyTransform();
         refreshFindTableMenu();
@@ -2093,128 +2086,54 @@ function collectPoolBySide(side) {
     return { groups, count };
 }
 
-function renderSidePool(container, groups, count, emptyMessage) {
-    container.innerHTML = '';
-    if (count === 0) {
-        container.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">${emptyMessage}</div>`;
-    } else {
-        renderGroupData(groups, container);
-    }
-}
-
-// 🎯 核心渲染更新：緊貼式上下結構
-function renderSidebarSide(side) {
+function getPoolSideViewModel(side) {
     const isMale = side === '男方';
-    const container = document.getElementById(isMale ? 'pool-male' : 'pool-female');
-    if (!container) return;
     const data = collectPoolBySide(side);
-    renderSidePool(
-        container,
-        data.groups,
-        data.count,
-        isMale ? '🎉 男方已全數安排' : '🎉 女方已全數安排'
-    );
+    const groups = Object.keys(data.groups).map((groupName) => ({
+        name: groupName,
+        items: data.groups[groupName].map((item) => ({
+            name: item.data.name,
+            originalIndex: item.originalIndex,
+            chipClass: tagChipSideClasses(item.data.side === '女方' ? '女方' : '男方').pool,
+        })),
+    }));
+    return {
+        groups,
+        count: data.count,
+        emptyMessage: isMale ? '🎉 男方已全數安排' : '🎉 女方已全數安排',
+    };
 }
 
-function renderSidebar() {
-    renderSidebarSide('男方');
-    renderSidebarSide('女方');
+function notifyPoolChange(sides = ['男方', '女方']) {
+    const unique = [...new Set(sides)];
+    const patch = {};
+    if (unique.includes('男方')) patch.male = getPoolSideViewModel('男方');
+    if (unique.includes('女方')) patch.female = getPoolSideViewModel('女方');
+    if (Object.keys(patch).length) uiHooks.onPoolChange?.(patch);
 }
 
-function renderGroupData(groups, container) {
-    Object.keys(groups).forEach(groupName => {
-        const groupWrap = document.createElement('div');
-        groupWrap.className = "pool-group bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full";
-        groupWrap.innerHTML = `<h4 class="pool-group-title text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
-
-        const chipsContainer = document.createElement('div');
-        chipsContainer.className = "grid grid-cols-2 gap-2";
-
-        groups[groupName].forEach(item => {
-            const chip = document.createElement('div');
-            const poolSide = tagChipSideClasses(item.data.side === '女方' ? '女方' : '男方').pool;
-            chip.className = `pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${poolSide}`;
-            chip.innerText = item.data.name;
-            const poolDragData = () => ({
-                fromTable: 'POOL',
-                index: item.originalIndex,
-                name: item.data.name
-            });
-            if (IS_TOUCH_DEVICE) {
-                setupTouchDrag(chip, poolDragData, { closeSidebarOnLeave: true });
-            } else {
-                setupDesktopGuestDrag(chip, poolDragData, { trackSidebarLeave: true });
-            }
-
-            bindGuestTap(chip, () => {
-                openGuestModal(item.data, null, null, item.originalIndex);
-            });
-
-            chipsContainer.appendChild(chip);
-        });
-        groupWrap.appendChild(chipsContainer);
-        container.appendChild(groupWrap);
+function bindPoolGuestChip(el, poolIndex, name) {
+    if (!el || el.dataset.poolBound === '1') return;
+    el.dataset.poolBound = '1';
+    el.dataset.poolIndex = String(poolIndex);
+    el.dataset.poolName = name;
+    const getDragData = () => ({
+        fromTable: 'POOL',
+        index: poolIndex,
+        name,
     });
+    if (IS_TOUCH_DEVICE) {
+        setupTouchDrag(el, getDragData, { closeSidebarOnLeave: true });
+    } else {
+        setupDesktopGuestDrag(el, getDragData, { trackSidebarLeave: true });
+    }
+    bindGuestTap(el, () => openPoolGuestAtIndex(poolIndex));
 }
 
-function renderCanvasTables() {
-    const sortedTableNums = getTableSettingKeys();
-    document.querySelectorAll('.draggable-table').forEach(el => el.remove());
-
-    sortedTableNums.forEach(tableNum => {
-        const settings = tableSettings[tableNum];
-        if (!settings) return;
-
-        const tableWrapper = document.createElement('div');
-        tableWrapper.className = "draggable-table";
-        tableWrapper.dataset.baseX = settings.x;
-        tableWrapper.dataset.baseY = settings.y;
-        tableWrapper.style.left = `${settings.x * zoom}px`;
-        tableWrapper.style.top = `${settings.y * zoom}px`;
-        tableWrapper.setAttribute('data-table', tableNum);
-
-        const startTableDrag = (e) => {
-            if (isTablePositionLocked) {
-                const btn = document.getElementById('btn-lock-tables');
-                if (btn) {
-                    btn.classList.add('ring-2', 'ring-amber-400');
-                    setTimeout(() => btn.classList.remove('ring-2', 'ring-amber-400'), 800);
-                }
-                return;
-            }
-            if ((e.pointerType === 'mouse' && e.button !== 0) || isGuestDragging) return;
-            if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
-            e.stopPropagation();
-            isDraggingTable = true;
-            draggedTableElement = tableWrapper;
-            tableWrapper.dataset.dragStartX = tableWrapper.dataset.baseX;
-            tableWrapper.dataset.dragStartY = tableWrapper.dataset.baseY;
-            const pos = screenToCanvas(e.clientX, e.clientY);
-            tableOffsetX = pos.x - parseFloat(tableWrapper.dataset.baseX);
-            tableOffsetY = pos.y - parseFloat(tableWrapper.dataset.baseY);
-            tableWrapper.classList.add('is-dragging');
-            tableWrapper.dataset.dragPointerId = e.pointerId;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        };
-
-        const tablePlate = document.createElement('div');
-        tablePlate.className = 'table-plate';
-        if (!IS_TOUCH_DEVICE) {
-            tablePlate.addEventListener('pointerdown', startTableDrag);
-            tablePlate.ondblclick = (e) => {
-                e.stopPropagation();
-                cancelTableDrag();
-                openSettingsModal(tableNum, settings.max_seats || 12);
-            };
-        }
-
-        appendTablePlateGuestUI(tablePlate, tableNum, settings);
-
-        tableWrapper.appendChild(tablePlate);
-        canvas.appendChild(tableWrapper);
-    });
-
-    requestAnimationFrame(() => fitAllGuestNameFonts());
+function openPoolGuestAtIndex(poolIndex) {
+    unassignedPool = normalizeUnassignedPool(unassignedPool);
+    const guest = unassignedPool[poolIndex];
+    if (guest?.name) openGuestModal(guest, null, null, poolIndex);
 }
 
 function finishTableDrag() {
@@ -2222,18 +2141,12 @@ function finishTableDrag() {
         cancelTableDrag();
         return;
     }
-    if (isDraggingTable && draggedTableElement) {
-        const bx = parseInt(draggedTableElement.dataset.baseX, 10);
-        const by = parseInt(draggedTableElement.dataset.baseY, 10);
-        const startX = parseInt(draggedTableElement.dataset.dragStartX, 10);
-        const startY = parseInt(draggedTableElement.dataset.dragStartY, 10);
-        const moved = Math.abs(bx - startX) > 2 || Math.abs(by - startY) > 2;
+    if (isDraggingTable && draggedTableNum) {
+        const tableNum = draggedTableNum;
+        const bx = tableSettings[tableNum]?.x ?? tableDragStartX;
+        const by = tableSettings[tableNum]?.y ?? tableDragStartY;
+        const moved = Math.abs(bx - tableDragStartX) > 2 || Math.abs(by - tableDragStartY) > 2;
         if (moved) {
-            const tableNum = draggedTableElement.getAttribute('data-table');
-            const startX = parseInt(draggedTableElement.dataset.dragStartX, 10);
-            const startY = parseInt(draggedTableElement.dataset.dragStartY, 10);
-            tableSettings[tableNum].x = bx;
-            tableSettings[tableNum].y = by;
             suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
                 .then(() => syncFloorLayoutBestEffort())
@@ -2242,40 +2155,61 @@ function finishTableDrag() {
                     console.error('枱位同步失敗:', err);
                     alert('❌ 枱位儲存失敗，請確認已登入並具備畫布寫入權限（需開啟「畫布」功能開關）。');
                     if (tableSettings[tableNum]) {
-                        tableSettings[tableNum].x = startX;
-                        tableSettings[tableNum].y = startY;
+                        tableSettings[tableNum].x = tableDragStartX;
+                        tableSettings[tableNum].y = tableDragStartY;
                     }
-                    cancelTableDrag();
+                    uiHooks.onCanvasTablePositionChange?.({
+                        tableNum,
+                        baseX: tableDragStartX,
+                        baseY: tableDragStartY,
+                    });
+                    uiHooks.onCanvasTableDragChange?.({ tableNum, dragging: false });
+                    isDraggingTable = false;
+                    draggedTableNum = null;
+                    tableDragPointerId = null;
                 });
         } else {
             cancelTableDrag();
             return;
         }
-        draggedTableElement.classList.remove('is-dragging');
+        uiHooks.onCanvasTableDragChange?.({ tableNum, dragging: false });
     }
     isDraggingTable = false;
-    draggedTableElement = null;
+    draggedTableNum = null;
+    tableDragPointerId = null;
 }
 
 function bindTableDragHandlers() {
     onEvent(document, 'pointermove', (e) => {
-        if (isGuestDragging || !isDraggingTable || !draggedTableElement) return;
-        if (draggedTableElement.dataset.dragPointerId && e.pointerId !== parseInt(draggedTableElement.dataset.dragPointerId, 10)) return;
+        if (isGuestDragging || !isDraggingTable || !draggedTableNum) return;
+        if (tableDragPointerId != null && e.pointerId !== tableDragPointerId) return;
         const pos = screenToCanvas(e.clientX, e.clientY);
         let bx = snapToGrid(pos.x - tableOffsetX);
         let by = snapToGrid(pos.y - tableOffsetY);
         if (bx < 0) bx = 0;
         if (by < 0) by = 0;
-        draggedTableElement.dataset.baseX = bx;
-        draggedTableElement.dataset.baseY = by;
-        draggedTableElement.style.left = `${bx * zoom}px`;
-        draggedTableElement.style.top = `${by * zoom}px`;
+        if (tableSettings[draggedTableNum]) {
+            tableSettings[draggedTableNum].x = bx;
+            tableSettings[draggedTableNum].y = by;
+        }
+        uiHooks.onCanvasTablePositionChange?.({
+            tableNum: draggedTableNum,
+            baseX: bx,
+            baseY: by,
+        });
     });
     onEvent(document, 'pointerup', finishTableDrag);
     onEvent(document, 'pointercancel', finishTableDrag);
 }
 
 function allowDrop(e) { e.preventDefault(); }
+
+function allowCanvasDrop(e) {
+    if (e.target.closest('.seat-slot')) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    }
+}
 
 function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
     const fromPool = poolIndex != null;
@@ -2378,9 +2312,19 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
 
 function bindDragSidebarHandlers() {
     onEvent(document, 'dragover', (e) => {
-        if (!isGuestDragging) return;
-        openSidebarIfDragEntersSidebar(e.clientX);
-    }, { passive: true });
+        if (e.target.closest('.sidebar-content, #single-scroll-pool, .pool-group, .pool-guest-chip')) {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+            return;
+        }
+        if (isGuestDragging) {
+            openSidebarIfDragEntersSidebar(e.clientX);
+        }
+    });
+    onEvent(document, 'drop', (e) => {
+        if (!isPointOverSidebarDropZone(e.clientX, e.clientY)) return;
+        handleDropTrash(e);
+    }, { capture: true });
     onEvent(document, 'dragend', () => {
         isGuestDragging = false;
         cancelTableDrag();
@@ -2628,7 +2572,16 @@ function resetEngineState() {
         onTableSettingsModalChange: null,
         onGlobalStatsChange: null,
         onPrintPreviewChange: null,
+        onZoomChange: null,
+        onLockButtonFlash: null,
+        onSidebarChange: null,
+        onPoolChange: null,
+        onCanvasTablesChange: null,
+        onCanvasTablePositionChange: null,
+        onCanvasTableDragChange: null,
     };
+    isSidebarOpen = true;
+    draggedTableNum = null;
     printPreviewOpen = false;
     printPreviewHtml = '';
     printPreviewZoom = 1;
@@ -2648,13 +2601,19 @@ export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
         onTableSettingsModalChange: hooks.onTableSettingsModalChange || null,
         onGlobalStatsChange: hooks.onGlobalStatsChange || null,
         onPrintPreviewChange: hooks.onPrintPreviewChange || null,
+        onZoomChange: hooks.onZoomChange || null,
+        onLockButtonFlash: hooks.onLockButtonFlash || null,
+        onSidebarChange: hooks.onSidebarChange || null,
+        onPoolChange: hooks.onPoolChange || null,
+        onCanvasTablesChange: hooks.onCanvasTablesChange || null,
+        onCanvasTablePositionChange: hooks.onCanvasTablePositionChange || null,
+        onCanvasTableDragChange: hooks.onCanvasTableDragChange || null,
     };
     viewport = document.getElementById('canvas-viewport');
     canvas = document.getElementById('main-canvas');
     if (!viewport || !canvas) throw new Error('Seating canvas DOM not found');
 
     bindViewportEvents();
-    bindDocumentClickHandlers();
     bindTableDragHandlers();
     bindDragSidebarHandlers();
 
@@ -2685,13 +2644,17 @@ export function destroySeatingEngine() {
 export {
     zoomCanvas,
     centerViewOnTables,
-    toggleFindTableMenu,
+    refreshFindTableMenu,
     flyToTable,
     createNewTableAction,
     toggleTablePositionLock,
     printCanvasView,
     printGuestListView,
     toggleSidebar,
+    bindPoolGuestChip,
+    bindTablePlateDrag,
+    bindSeatSlot,
+    bindTableHub,
     closeGuestModal,
     saveGuestChangesAction,
     removeGuestFromSeatAction,
@@ -2708,5 +2671,6 @@ export {
     setPrintOrientation,
     executePrintPreview,
     allowDrop,
+    allowCanvasDrop,
     handleDropTrash,
 };

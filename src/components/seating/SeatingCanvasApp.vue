@@ -27,7 +27,7 @@
         <div class="header-action-group">
           <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg overflow-hidden h-8 text-xs">
             <button type="button" class="px-2.5 hover:bg-slate-200 font-bold text-slate-500" @click="zoomCanvas(0.9)">－</button>
-            <span id="zoom-percent" class="px-2 font-mono text-slate-700 font-bold min-w-[45px] text-center">100%</span>
+            <span class="px-2 font-mono text-slate-700 font-bold min-w-[45px] text-center">{{ canvasZoomPercent }}%</span>
             <button type="button" class="px-2.5 hover:bg-slate-200 font-bold text-slate-500" @click="zoomCanvas(1.1)">＋</button>
           </div>
           <button
@@ -40,6 +40,7 @@
           </button>
           <div class="relative" id="find-table-wrap">
             <button
+              ref="findTableMenuBtnRef"
               type="button"
               id="btn-find-table"
               class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
@@ -48,7 +49,12 @@
             >
               🔍<span class="hide-mobile"> 搵枱</span>
             </button>
-            <div id="find-table-menu" class="hidden absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden min-w-[9rem]">
+            <div
+              v-show="findTableMenuOpen"
+              class="find-table-menu absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden min-w-[9rem] max-h-56 overflow-y-auto"
+              :class="{ 'is-fixed': findTableMenuFixed }"
+              :style="findTableMenuStyle"
+            >
               <p v-if="!findTableItems.length" class="px-3 py-2 text-slate-400 font-bold text-[11px]">未有圓枱</p>
               <button
                 v-for="item in findTableItems"
@@ -75,7 +81,7 @@
             type="button"
             id="btn-lock-tables"
             class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition"
-            :class="{ 'is-active': tablesLocked }"
+            :class="{ 'is-active': tablesLocked, 'ring-2 ring-amber-400': lockButtonFlash }"
             :title="tablesLocked ? '枱位已鎖定，點擊解鎖' : '鎖定枱位（防止拖動）'"
             @click="toggleTablePositionLock()"
           >
@@ -123,18 +129,20 @@
 
     <div class="flex-1 relative overflow-hidden w-full bg-slate-100 min-h-0">
       <main class="absolute inset-0 overflow-hidden" id="canvas-viewport">
-        <div
-          class="workspace-canvas"
-          id="main-canvas"
-          @dragover="allowDrop($event)"
+        <SeatingCanvasTables
+          :tables="canvasTables"
+          :zoom="canvasZoom"
+          :dragging-table-num="draggingTableNum"
         />
       </main>
 
-      <aside id="sidebar-panel" class="absolute left-0 top-0 bottom-0 z-20">
+      <aside
+        class="sidebar-panel absolute left-0 top-0 bottom-0 z-20"
+        :class="{ collapsed: !sidebarOpen, 'sidebar-no-transition': sidebarNoTransition }"
+      >
         <div
-          id="sidebar-content"
-          class="bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden w-[320px]"
-          @dragover="allowDrop($event)"
+          class="sidebar-content bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden w-[320px]"
+          @dragover.prevent
           @drop="handleDropTrash($event)"
         >
           <div class="p-4 bg-white shrink-0 border-b border-slate-100">
@@ -143,26 +151,25 @@
           <div
             class="flex-1 overflow-y-auto bg-slate-50/40 no-scrollbar pb-12"
             id="single-scroll-pool"
-            @dragover="allowDrop($event)"
+            @dragover.prevent
             @drop="handleDropTrash($event)"
           >
             <div class="px-4 py-2 bg-blue-50/60 flex items-center sticky top-0 border-b border-blue-100 z-10 shadow-sm">
               <span class="pool-section-label text-sm font-black text-blue-700 tracking-wider">♂️ 男方名單</span>
             </div>
-            <div id="pool-male" class="p-4 space-y-4 min-h-[60px]" />
+            <SeatingPoolSide :section="poolSections.male" />
             <div class="px-4 py-2 bg-rose-50/60 flex items-center sticky top-0 border-b border-rose-100 border-t border-slate-100 z-10 shadow-sm">
               <span class="pool-section-label text-sm font-black text-rose-700 tracking-wider">♀️ 女方名單</span>
             </div>
-            <div id="pool-female" class="p-4 space-y-4 min-h-[60px]" />
+            <SeatingPoolSide :section="poolSections.female" />
           </div>
         </div>
         <button
-          id="sidebar-toggle-btn"
           type="button"
-          class="absolute -right-5 top-1/2 -translate-y-1/2 w-5 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-md flex items-center justify-center font-black text-[10px] hover:bg-indigo-700 z-30"
+          class="sidebar-toggle-btn absolute -right-5 top-1/2 -translate-y-1/2 w-5 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-md flex items-center justify-center font-black text-[10px] hover:bg-indigo-700 z-30"
           @click="toggleSidebar()"
         >
-          <span id="sidebar-toggle-icon">◀</span>
+          {{ sidebarOpen ? '◀' : '▶' }}
         </button>
       </aside>
     </div>
@@ -222,12 +229,14 @@ import { useTenant } from '@/composables/useTenant';
 import SeatingGuestEditModal from '@/components/seating/SeatingGuestEditModal.vue';
 import SeatingTableSettingsModal from '@/components/seating/SeatingTableSettingsModal.vue';
 import SeatingPrintPreview from '@/components/seating/SeatingPrintPreview.vue';
+import SeatingPoolSide from '@/components/seating/SeatingPoolSide.vue';
+import SeatingCanvasTables from '@/components/seating/SeatingCanvasTables.vue';
 import {
   initSeatingEngine,
   destroySeatingEngine,
   zoomCanvas,
   centerViewOnTables,
-  toggleFindTableMenu,
+  refreshFindTableMenu,
   flyToTable,
   createNewTableAction,
   toggleTablePositionLock,
@@ -249,7 +258,6 @@ import {
   autoFitPrintPreviewOnOpen,
   setPrintOrientation,
   executePrintPreview,
-  allowDrop,
   handleDropTrash,
 } from '@/seating/seatingEngine';
 import '@/assets/seating-canvas.css';
@@ -263,8 +271,18 @@ const emit = defineEmits(['logout']);
 const { tenantRef, tenantId } = useTenant();
 const initError = ref('');
 const globalStatsText = ref('載入中...');
+const canvasZoomPercent = ref(100);
 const findTableItems = ref([]);
 const tablesLocked = ref(false);
+const lockButtonFlash = ref(false);
+const sidebarOpen = ref(true);
+const sidebarNoTransition = ref(false);
+const poolSections = ref({
+  male: { groups: [], count: 0, emptyMessage: '🎉 男方已全數安排' },
+  female: { groups: [], count: 0, emptyMessage: '🎉 女方已全數安排' },
+});
+const canvasTables = ref([]);
+const draggingTableNum = ref('');
 const seatingCategories = ref([]);
 const guestModalSaving = ref(false);
 const tableSettingsSaving = ref(false);
@@ -298,9 +316,53 @@ const printMenuOpen = ref(false);
 const printMenuFixed = ref(false);
 const printMenuStyle = ref({});
 const printMenuBtnRef = ref(null);
+const findTableMenuOpen = ref(false);
+const findTableMenuFixed = ref(false);
+const findTableMenuStyle = ref({});
+const findTableMenuBtnRef = ref(null);
 let printMenuIgnoreCloseUntil = 0;
+let findTableMenuIgnoreCloseUntil = 0;
+let lockButtonFlashTimer = null;
 
 const adminRoute = computed(() => `/p/${props.slug}/admin`);
+const canvasZoom = computed(() => canvasZoomPercent.value / 100);
+
+function positionHeaderDropdown(btnRef, setFixed, setStyle) {
+  if (window.innerWidth <= 768) {
+    setFixed(true);
+    nextTick(() => {
+      const rect = btnRef.value?.getBoundingClientRect();
+      if (rect) {
+        setStyle({
+          top: `${rect.bottom + 4}px`,
+          right: `${Math.max(8, window.innerWidth - rect.right)}px`,
+        });
+      }
+    });
+  } else {
+    setFixed(false);
+    setStyle({});
+  }
+}
+
+function toggleFindTableMenu(e) {
+  e?.stopPropagation();
+  const willOpen = !findTableMenuOpen.value;
+  if (willOpen) refreshFindTableMenu();
+  findTableMenuOpen.value = willOpen;
+  if (willOpen) {
+    findTableMenuIgnoreCloseUntil = Date.now() + 400;
+    positionHeaderDropdown(findTableMenuBtnRef, (v) => { findTableMenuFixed.value = v; }, (s) => { findTableMenuStyle.value = s; });
+  } else {
+    closeFindTableMenu();
+  }
+}
+
+function closeFindTableMenu() {
+  findTableMenuOpen.value = false;
+  findTableMenuFixed.value = false;
+  findTableMenuStyle.value = {};
+}
 
 function togglePrintMenu(e) {
   e?.stopPropagation();
@@ -308,21 +370,7 @@ function togglePrintMenu(e) {
   printMenuOpen.value = willOpen;
   if (willOpen) {
     printMenuIgnoreCloseUntil = Date.now() + 400;
-    if (window.innerWidth <= 768) {
-      printMenuFixed.value = true;
-      nextTick(() => {
-        const rect = printMenuBtnRef.value?.getBoundingClientRect();
-        if (rect) {
-          printMenuStyle.value = {
-            top: `${rect.bottom + 4}px`,
-            right: `${Math.max(8, window.innerWidth - rect.right)}px`,
-          };
-        }
-      });
-    } else {
-      printMenuFixed.value = false;
-      printMenuStyle.value = {};
-    }
+    positionHeaderDropdown(printMenuBtnRef, (v) => { printMenuFixed.value = v; }, (s) => { printMenuStyle.value = s; });
   } else {
     closePrintMenu();
   }
@@ -342,11 +390,35 @@ function onPrintMenuSelect(action) {
 }
 
 function onDocumentClick(e) {
-  if (Date.now() < printMenuIgnoreCloseUntil) return;
-  if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
+  const now = Date.now();
+  if (now >= printMenuIgnoreCloseUntil && !e.target.closest('#print-menu-wrap')) closePrintMenu();
+  if (now >= findTableMenuIgnoreCloseUntil && !e.target.closest('#find-table-wrap')) closeFindTableMenu();
+}
+
+function flashLockButton() {
+  lockButtonFlash.value = true;
+  if (lockButtonFlashTimer) clearTimeout(lockButtonFlashTimer);
+  lockButtonFlashTimer = setTimeout(() => {
+    lockButtonFlash.value = false;
+    lockButtonFlashTimer = null;
+  }, 800);
+}
+
+function applySidebarState({ open, instant }) {
+  if (instant) {
+    sidebarNoTransition.value = true;
+    sidebarOpen.value = open;
+    requestAnimationFrame(() => {
+      sidebarNoTransition.value = false;
+    });
+  } else {
+    sidebarOpen.value = open;
+  }
 }
 
 function onFindTablePick(tableNum) {
+  findTableMenuIgnoreCloseUntil = Date.now() + 600;
+  closeFindTableMenu();
   flyToTable(String(tableNum));
 }
 
@@ -448,6 +520,37 @@ function mountEngine() {
         onGlobalStatsChange(text) {
           globalStatsText.value = text;
         },
+        onZoomChange(percent) {
+          canvasZoomPercent.value = percent;
+        },
+        onLockButtonFlash() {
+          flashLockButton();
+        },
+        onSidebarChange(state) {
+          applySidebarState(state);
+        },
+        onPoolChange(patch) {
+          if (patch.male) poolSections.value.male = patch.male;
+          if (patch.female) poolSections.value.female = patch.female;
+        },
+        onCanvasTablesChange({ tables, full }) {
+          if (full || !canvasTables.value.length) {
+            canvasTables.value = tables;
+            return;
+          }
+          const updates = Object.fromEntries(tables.map((t) => [t.num, t]));
+          canvasTables.value = canvasTables.value.map((t) => updates[t.num] || t);
+        },
+        onCanvasTablePositionChange({ tableNum, baseX, baseY }) {
+          const table = canvasTables.value.find((t) => t.num === String(tableNum));
+          if (table) {
+            table.baseX = baseX;
+            table.baseY = baseY;
+          }
+        },
+        onCanvasTableDragChange({ tableNum, dragging }) {
+          draggingTableNum.value = dragging ? String(tableNum) : '';
+        },
         onPrintPreviewChange(state) {
           if (!state?.open) {
             printPreview.value = { ...printPreview.value, open: false, html: '' };
@@ -490,6 +593,7 @@ watch(tenantId, (id) => {
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
+  if (lockButtonFlashTimer) clearTimeout(lockButtonFlashTimer);
   destroySeatingEngine();
 });
 </script>
