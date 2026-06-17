@@ -34,6 +34,7 @@
         "wedding_guests": {
           ".read": true,
           "$tableNum": {
+            ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || (root.child('tenants').child($tenantId).exists() && root.child('tenants').child($tenantId).child('meta').child('features').child('guestlist').val() !== false && (root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'admin' || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid)))",
             "$idx": {
               ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || (root.child('tenants').child($tenantId).exists() && root.child('tenants').child($tenantId).child('meta').child('features').child('guestlist').val() !== false && ((root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'admin' || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid) || (root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'reception' && !data.exists()))))",
               ".validate": "newData.hasChildren(['name','side','group','sort']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('side').isString() && (newData.child('side').val() == '男方' || newData.child('side').val() == '女方') && newData.child('group').isString() && newData.child('group').val().length > 0 && newData.child('sort').isNumber()"
@@ -46,7 +47,10 @@
         },
         "table_settings": {
           ".read": true,
-          ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || (root.child('tenants').child($tenantId).exists() && (root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'admin' || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid) && root.child('tenants').child($tenantId).child('meta').child('features').child('seating').val() !== false))"
+          ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || (root.child('tenants').child($tenantId).exists() && (root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'admin' || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid) && root.child('tenants').child($tenantId).child('meta').child('features').child('seating').val() !== false))",
+          "$tableNum": {
+            ".write": "auth != null && (root.child('platform_admins').child(auth.uid).val() === true || (root.child('tenants').child($tenantId).exists() && (root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === true || root.child('tenants').child($tenantId).child('members').child(auth.uid).val() === 'admin' || root.child('tenants').child($tenantId).child('meta').child('owner_uid').val() === auth.uid) && root.child('tenants').child($tenantId).child('meta').child('features').child('seating').val() !== false))"
+          }
         },
         "floor_layout": {
           ".read": true,

@@ -1,3 +1,4 @@
+import { get, update } from 'firebase/database';
 import {
   normalizeTags,
   PRIMARY_TAG_KEY,
@@ -223,6 +224,36 @@ export function serializeGuestsForSave(guests) {
   });
 
   return { wedding, unassigned };
+}
+
+function listExistingWeddingTableNums(existing) {
+  if (!existing) return [];
+  if (Array.isArray(existing)) {
+    return existing
+      .map((row, idx) => (row ? String(idx) : null))
+      .filter(Boolean);
+  }
+  return Object.keys(existing);
+}
+
+/** Rules 只准寫 wedding_guests/{枱}/{idx}，唔可以用 set() 寫成個 wedding_guests root */
+export async function syncWeddingGuestsForSave(tenantRef, wedding) {
+  const snap = await get(tenantRef('wedding_guests'));
+  const existing = snap.val();
+  const updates = {};
+
+  Object.entries(wedding).forEach(([tableNum, guests]) => {
+    updates[`wedding_guests/${tableNum}`] = guests;
+  });
+
+  listExistingWeddingTableNums(existing).forEach((tableNum) => {
+    if (!Object.prototype.hasOwnProperty.call(wedding, tableNum)) {
+      updates[`wedding_guests/${tableNum}`] = null;
+    }
+  });
+
+  if (Object.keys(updates).length === 0) return;
+  await update(tenantRef(), updates);
 }
 
 export function exportGuestsToCSV(guests) {

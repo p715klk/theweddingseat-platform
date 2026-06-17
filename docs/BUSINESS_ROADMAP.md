@@ -452,7 +452,6 @@ const devSlug = new URLSearchParams(location.search).get('slug');
 | `super_admin` | 可入 `/super`；可管理所有 tenants（開/停、改 plan/slug、加/移 owner） |
 | `user_admin` | 可入自己 `/p/{slug}/admin`；可管理賓客/排位/匯入 CSV；**可管理自己 tenant 內用戶（新增/修改/移除）** |
 | `user` | 只可用 `/p/{slug}` 前台；可改 `guest_status`；可喺前台新增賓客（受限欄位）；不可入後台 |
-| `viewer` | 只讀（例如俾家長睇進度） |
 
 Firebase Security Rules 範例概念：
 
@@ -553,7 +552,7 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  theweddingseat.com                                       │
+│  theweddingseat.com                                      │
 │  DNS → GitHub Pages / Cloudflare Pages（免費、無 VPS）    │
 │  一個 repo deploy 一次 → serve 全部 /p/* link             │
 └────────────────────────────┬─────────────────────────────┘
@@ -561,9 +560,9 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
                              ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Firebase RTDB（新 project）                              │
-│  tenants/chen-wong_20260915/wedding_guests/...          │
-│  tenants/chen-wong_20260915/meta/...                      │
-│  slugs/chen-wong_20260915 → tenantId                      │
+│  tenants/chen-wong_20260915/wedding_guests/...           │
+│  tenants/chen-wong_20260915/meta/...                     │
+│  slugs/chen-wong_20260915 → tenantId                     │
 │  Firebase Auth（後台 login）                              │
 └──────────────────────────────────────────────────────────┘
 ```

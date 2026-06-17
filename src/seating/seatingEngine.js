@@ -739,6 +739,13 @@ function forceFloorLayoutSync() {
     return tenantRef('floor_layout').set(layout);
 }
 
+/** 枱位已寫入後同步 floor_layout；失敗唔應 undo 枱位拖動 */
+function syncFloorLayoutBestEffort() {
+    return forceFloorLayoutSync().catch((err) => {
+        console.warn('floor_layout 同步失敗（簽到頁排位可能未更新）:', err);
+    });
+}
+
 function getTableVisualBleed(maxSeats) {
     const { radius, guestSize } = getSeatLayout(maxSeats);
     return Math.max(0, radius + guestSize / 2 - PLATE_CENTER);
@@ -2504,11 +2511,11 @@ function finishTableDrag() {
             tableSettings[tableNum].y = by;
             suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
-                .then(() => forceFloorLayoutSync())
+                .then(() => syncFloorLayoutBestEffort())
                 .catch(err => {
                     suppressTableSettingsRemoteRenderCount = 0;
                     console.error('枱位同步失敗:', err);
-                    alert('❌ 枱位儲存失敗，請確認已登入並有寫入權限（members）。');
+                    alert('❌ 枱位儲存失敗，請確認已登入並具備畫布寫入權限（需開啟「畫布」功能開關）。');
                     cancelTableDrag();
                 });
         } else {
@@ -2675,7 +2682,7 @@ function createNewTableAction() {
     refreshFindTableMenu();
     suppressTableSettingsRemoteRenderCount = 1;
     tenantRef(`table_settings/${cleanNum}`).set(newSettings)
-        .then(() => forceFloorLayoutSync())
+        .then(() => syncFloorLayoutBestEffort())
         .catch((err) => {
             suppressTableSettingsRemoteRenderCount = 0;
             delete tableSettings[cleanNum];

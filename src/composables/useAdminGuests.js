@@ -5,6 +5,7 @@ import { useAuth } from '@/composables/useAuth';
 import {
   processFirebaseGuests,
   serializeGuestsForSave,
+  syncWeddingGuestsForSave,
   normalizeGuestForList,
   reassignSeatsForTables,
   onGuestTableChange,
@@ -50,10 +51,14 @@ export function useAdminGuests() {
     const uid = user.value?.uid;
     const ownerUid = meta.value?.owner_uid;
     if (!uid || !ownerUid || ownerUid !== uid) return;
-    const snap = await get(tenantRef(`members/${uid}`));
-    const role = snap.val();
-    if (role === true || role === 'admin') return;
-    await set(tenantRef(`members/${uid}`), 'admin');
+    try {
+      const snap = await get(tenantRef(`members/${uid}`));
+      const role = snap.val();
+      if (role === true || role === 'admin') return;
+      await set(tenantRef(`members/${uid}`), 'admin');
+    } catch (e) {
+      console.warn('無法自動補寫 owner members 記錄（不影響賓客儲存）:', e);
+    }
   }
 
   function formatSaveError(e) {
@@ -232,8 +237,8 @@ export function useAdminGuests() {
     try {
       await ensureOwnerMemberRecord();
       const { wedding, unassigned } = serializeGuestsForSave(guests.value);
-      await Promise.all([
-        set(tenantRef('wedding_guests'), wedding),
+      const results = await Promise.allSettled([
+        syncWeddingGuestsForSave(tenantRef, wedding),
         set(tenantRef('unassigned_guests'), unassigned),
         set(tenantRef('meta_label_columns'), {
           keys: ['group'],
@@ -241,9 +246,23 @@ export function useAdminGuests() {
           categories: { group: categories.value },
         }),
       ]);
+      const labels = ['wedding_guests', 'unassigned_guests', 'meta_label_columns'];
+      const failedIdx = results.findIndex((r) => r.status === 'rejected');
+      if (failedIdx !== -1) {
+        const reason = results[failedIdx].reason;
+        const path = labels[failedIdx];
+        const err = reason instanceof Error ? reason : new Error(String(reason));
+        err.message = `${path}: ${err.message || '寫入失敗'}`;
+        throw err;
+      }
+
       dirty.value = false;
       showToast(toastMessage, 2500);
-      await load(true);
+      try {
+        await load(true);
+      } catch (reloadErr) {
+        console.warn('儲存成功但重新載入失敗（Firebase 資料已寫入）:', reloadErr);
+      }
     } catch (e) {
       throw new Error(formatSaveError(e));
     } finally {
