@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { onValue, set } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
-import { getMaxSeatsForTable } from '@/lib/adminGuestModel';
+import { getMaxSeatsForTable, serializeGroupForFirebase } from '@/lib/adminGuestModel';
 import {
   buildCheckInFloorPlan,
   parseArrivedStatus,
@@ -160,8 +160,8 @@ export function useCheckIn() {
     await set(tenantRef(`wedding_guests/${tableNum}/${nextIndex}`), {
       name: trimmed,
       side: side === '女方' ? '女方' : '男方',
-      group: normalizeTags(group || '現場加座'),
-      sort: nextSeat,
+      group: serializeGroupForFirebase(group || '現場加座'),
+      sort: Number(nextSeat),
     });
   }
 

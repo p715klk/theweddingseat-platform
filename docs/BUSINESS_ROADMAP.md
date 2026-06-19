@@ -196,7 +196,7 @@ Phase 0f（之後）    正式 /p/{slug} URL + 買 domain + Super Admin 頁
 | 寫 `members` / 他人 `user_profiles` | ✅ | ❌ | ❌ | Rules；Owner 可管全部 profile |
 | 改 `meta.owner_uid` | ❌（僅 super admin 或 bootstrap） | ❌ | ❌ | Rules `meta/owner_uid.write` |
 
-**已知缺口（現場加座 PERMISSION_DENIED）：** `database.rules.json` 中 `wedding_guests/$tableNum` 父層 `.write` 原本未包含 `reception`，導致 user 新增現場賓客時 Firebase 拒絕（即使 `$idx` 層已允許 `!data.exists()`）。已於 Rules 補上 `reception` 通過父層；`$idx` 仍限制 user **只可新增、不可改/刪**既有賓客。
+**已知缺口（已修）：** 現場加座 PERMISSION_DENIED 主因係 `useCheckIn.addWalkInGuest` 將 `group` 存成 **array**（`normalizeTags`），但 Rules `.validate` 要求 **string**（同後台 `serializeGroupForFirebase` 一致）。已改為寫入 `"現場加座"` 字串格式。reception 現場加座改跟 `features.checkin`（唔再要求 `guestlist`）。
 
 Security Rules（概念）：
 
