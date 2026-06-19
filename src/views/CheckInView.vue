@@ -42,7 +42,15 @@
           📋 後台管理
         </router-link>
         <button
-          v-if="user"
+          v-if="!user && authReady"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          @click="showLoginModal = true"
+        >
+          登入
+        </button>
+        <button
+          v-else-if="user"
           type="button"
           class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
           @click="handleLogout"
@@ -292,6 +300,17 @@
       </div>
     </div>
     </div>
+
+    <div
+      v-if="showLoginModal"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+      @click.self="showLoginModal = false"
+    >
+      <FrontendLoginForm
+        hint="登入後可使用點名、現場加座等功能（視乎帳號角色）。"
+        @success="onLoginSuccess"
+      />
+    </div>
   </div>
 </template>
 
@@ -339,6 +358,7 @@ const {
 } = useCheckIn();
 
 const showAddGuestForm = ref(false);
+const showLoginModal = ref(false);
 const walkInName = ref('');
 const walkInSide = ref('男方');
 const walkInGroup = ref('現場加座');
@@ -432,8 +452,13 @@ function onLoggedIn() {
   /* auth state updates automatically */
 }
 
+function onLoginSuccess() {
+  showLoginModal.value = false;
+}
+
 async function handleLogout() {
   closeTableModal();
+  showLoginModal.value = false;
   stopSync();
   authGatePassed = false;
   loading.value = false;

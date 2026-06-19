@@ -19,6 +19,16 @@
     >
       <AdminLoginForm @success="onLoggedIn" />
     </div>
+    <div
+      v-else-if="!tenantAccessReady"
+      class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center text-gray-400 font-bold"
+    >
+      ⏳ 驗證權限...
+    </div>
+    <TenantAccessDenied
+      v-else-if="!canAccessAdmin"
+      @logout="handleLogout"
+    />
     <AdminPanel
       v-else
       :slug="slug"
@@ -34,14 +44,17 @@ import { useRoute } from 'vue-router';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
+import { useTenantAccess } from '@/composables/useTenantAccess';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
+import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import AdminPanel from '@/components/admin/AdminPanel.vue';
 
 const route = useRoute();
 const { slug, ready, error, coupleNames, initTenant } = useTenant();
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
+const { canAccessAdmin, tenantAccessReady } = useTenantAccess();
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);

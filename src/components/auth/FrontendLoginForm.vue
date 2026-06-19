@@ -1,7 +1,7 @@
 <template>
   <form class="login-card" @submit.prevent="submit">
     <h2>登入</h2>
-    <p class="hint">此頁面需要登入先可查看。</p>
+    <p class="hint">{{ hint }}</p>
     <label>Email</label>
     <input v-model="email" type="email" required autocomplete="username" />
     <label>密碼</label>
@@ -25,6 +25,12 @@ import { useAuth } from '@/composables/useAuth';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 
 const emit = defineEmits(['success']);
+defineProps({
+  hint: {
+    type: String,
+    default: '此頁面需要登入先可查看。',
+  },
+});
 const { login, authError } = useAuth();
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 

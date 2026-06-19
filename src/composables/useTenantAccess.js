@@ -11,23 +11,34 @@ const memberRole = ref('');
 const tenantAccessReady = ref(false);
 let checkedKey = null;
 
+function accessCacheKey(uid, tenantId, isPlatformAdmin) {
+  return `${uid || ''}:${tenantId || ''}:${isPlatformAdmin ? '1' : '0'}`;
+}
+
 async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
+  const cacheKey = accessCacheKey(uid, tenantId, isPlatformAdmin);
+
+  if (!uid || !tenantId) {
+    canAccessAdmin.value = false;
+    canAddWalkInGuest.value = false;
+    memberRole.value = '';
+    tenantAccessReady.value = true;
+    checkedKey = cacheKey;
+    return;
+  }
+
+  if (cacheKey === checkedKey && tenantAccessReady.value) return;
+
   tenantAccessReady.value = false;
   canAccessAdmin.value = false;
   canAddWalkInGuest.value = false;
   memberRole.value = '';
 
-  if (!uid || !tenantId) {
-    tenantAccessReady.value = true;
-    checkedKey = null;
-    return;
-  }
-
   if (isPlatformAdmin) {
     canAccessAdmin.value = true;
     canAddWalkInGuest.value = true;
     memberRole.value = 'platform_admin';
-    checkedKey = `${uid}:${tenantId}`;
+    checkedKey = cacheKey;
     tenantAccessReady.value = true;
     return;
   }
@@ -48,13 +59,13 @@ async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
     } else {
       memberRole.value = role === true ? 'admin' : String(role || '');
     }
-    checkedKey = `${uid}:${tenantId}`;
+    checkedKey = cacheKey;
   } catch (e) {
     console.warn('members 權限讀取失敗:', e);
     canAccessAdmin.value = false;
     canAddWalkInGuest.value = false;
     memberRole.value = '';
-    checkedKey = `${uid}:${tenantId}`;
+    checkedKey = cacheKey;
   } finally {
     tenantAccessReady.value = true;
   }
@@ -68,11 +79,11 @@ export function useTenantAccess() {
   watch(
     [user, authReady, tenantId, isPlatformAdmin, platformAdminReady],
     ([u, authOk, tid, platformAdmin, platformOk]) => {
-      if (!authOk || !platformOk) return;
+      if (!authOk) return;
       const uid = u?.uid || null;
-      const key = `${uid || ''}:${tid || ''}:${platformAdmin}`;
-      if (key === checkedKey && tenantAccessReady.value) return;
-      refreshTenantAccess(uid, tid, platformAdmin);
+      // platform admin 檢查進行中時先當非 platform admin，避免因 platformAdminReady=false 而 skip refresh 並卡住 UI
+      const effectivePlatformAdmin = platformOk && platformAdmin;
+      refreshTenantAccess(uid, tid, effectivePlatformAdmin);
     },
     { immediate: true },
   );
