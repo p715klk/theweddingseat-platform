@@ -1673,14 +1673,19 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
 
     if (fromTable === 'POOL') {
         unassignedPool = normalizeUnassignedPool(unassignedPool);
-        let poolIndex = typeof index === 'number' ? index : -1;
-        if (poolIndex < 0 || poolIndex >= unassignedPool.length || !unassignedPool[poolIndex]?.name) {
-            if (data?.id) {
-                poolIndex = unassignedPool.findIndex(g => g?.id && String(g.id) === String(data.id));
+        let poolIndex = -1;
+        if (data?.id) {
+            poolIndex = unassignedPool.findIndex(g => g?.id && String(g.id) === String(data.id));
+        }
+        if (poolIndex === -1 && typeof index === 'number' && index >= 0 && index < unassignedPool.length) {
+            const atIdx = unassignedPool[index];
+            const indexMatchesId = !data?.id || (atIdx?.id && String(atIdx.id) === String(data.id));
+            if (atIdx?.name && indexMatchesId) {
+                poolIndex = index;
             }
-            if (poolIndex === -1) {
-                poolIndex = unassignedPool.findIndex(g => g?.name && data.name && String(g.name).trim() === String(data.name).trim());
-            }
+        }
+        if (poolIndex === -1 && data?.name) {
+            poolIndex = unassignedPool.findIndex(g => g?.name && String(g.name).trim() === String(data.name).trim());
         }
         if (poolIndex >= 0) {
             movingGuestObj = unassignedPool[poolIndex];
@@ -2249,28 +2254,39 @@ function notifyPoolChange(sides = ['男方', '女方']) {
 }
 
 function bindPoolGuestChip(el, poolIndex, guestId, name) {
-    if (!el || el.dataset.poolBound === '1') return;
-    el.dataset.poolBound = '1';
+    if (!el) return;
     el.dataset.poolIndex = String(poolIndex);
     el.dataset.poolId = guestId ? String(guestId) : '';
-    el.dataset.poolName = name;
+    el.dataset.poolName = name || '';
+    if (el.dataset.poolBound === '1') return;
+    el.dataset.poolBound = '1';
     const getDragData = () => ({
-        id: guestId,
+        id: el.dataset.poolId || undefined,
         fromTable: 'POOL',
-        index: poolIndex,
-        name,
+        index: Number.parseInt(el.dataset.poolIndex, 10),
+        name: el.dataset.poolName || '',
     });
     if (IS_TOUCH_DEVICE) {
         setupTouchDrag(el, getDragData, { closeSidebarOnLeave: true });
     } else {
         setupDesktopGuestDrag(el, getDragData, { trackSidebarLeave: true });
     }
-    bindGuestTap(el, () => openPoolGuestAtIndex(poolIndex));
+    bindGuestTap(el, () => openPoolGuestAtIndex(el.dataset.poolId, el.dataset.poolIndex));
 }
 
-function openPoolGuestAtIndex(poolIndex) {
+function openPoolGuestAtIndex(guestIdOrIndex, poolIndexFallback) {
     unassignedPool = normalizeUnassignedPool(unassignedPool);
-    const guest = unassignedPool[poolIndex];
+    let poolIndex = -1;
+    if (guestIdOrIndex != null && String(guestIdOrIndex).trim()) {
+        poolIndex = unassignedPool.findIndex(g => g?.id && String(g.id) === String(guestIdOrIndex));
+    }
+    if (poolIndex === -1 && poolIndexFallback != null) {
+        const idx = Number.parseInt(poolIndexFallback, 10);
+        if (Number.isFinite(idx) && idx >= 0 && idx < unassignedPool.length) {
+            poolIndex = idx;
+        }
+    }
+    const guest = poolIndex >= 0 ? unassignedPool[poolIndex] : null;
     if (guest?.name) openGuestModal(guest, null, null, poolIndex);
 }
 
