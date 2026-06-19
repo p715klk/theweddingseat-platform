@@ -5,6 +5,7 @@ import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
+import { assertCanAddMember, getMemberQuota } from '@/lib/tenantMemberLimits';
 
 export function useTenantUsers() {
   const { tenantId, tenantRef, meta } = useTenant();
@@ -68,6 +69,11 @@ export function useTenantUsers() {
     const trimmedEmail = email?.trim();
     if (!trimmedEmail) throw new Error('請輸入 Email');
     if (!password || password.length < 6) throw new Error('密碼至少需要 6 個字元');
+
+    await loadMembers();
+    assertCanAddMember(members.value, meta.value?.owner_uid || '', role, {
+      bypassLimits: isPlatformAdmin.value,
+    });
 
     const { uid } = await createAuthUserViaRest(trimmedEmail, password);
     const editor = editorInfo();
@@ -150,6 +156,10 @@ export function useTenantUsers() {
     await loadMembers();
   }
 
+  function memberQuota() {
+    return getMemberQuota(members.value, meta.value?.owner_uid || '');
+  }
+
   return {
     members,
     loading,
@@ -159,5 +169,6 @@ export function useTenantUsers() {
     removeMember,
     ensureSelfProfile,
     updateSelfDisplayName,
+    memberQuota,
   };
 }

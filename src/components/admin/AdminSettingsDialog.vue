@@ -145,7 +145,7 @@
         <!-- 用戶管理 -->
         <div v-else-if="activeTab === 'users'" class="space-y-4">
           <p class="hint">
-            管理可登入此婚宴後台的帳號。新增用戶會建立 Firebase 登入帳號並授予後台權限。
+            管理可登入此婚宴專案的帳號。新增用戶會建立 Firebase 登入帳號；後台管理員可進入後台，現場接待只可進入點名頁。
           </p>
           <p v-if="!canManageUsers" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
             你而家係一般後台用戶（非 Owner），只能查看用戶清單；如要新增／移除用戶，請用 Owner 帳號登入。
@@ -180,6 +180,16 @@
           </p>
 
           <template v-if="canManageUsers">
+            <div class="quota-summary">
+              <p class="quota-title">帳戶配額</p>
+              <ul class="quota-list">
+                <li>Owner：<strong>{{ quota.counts.owner }}/{{ quota.limits.owner }}</strong></li>
+                <li>後台管理員：<strong>{{ quota.counts.admin }}/{{ quota.limits.admin }}</strong></li>
+                <li>現場接待：<strong>{{ quota.counts.reception }}/{{ quota.limits.reception }}</strong></li>
+                <li>合計：<strong>{{ quota.counts.total }}/{{ quota.limits.total }}</strong></li>
+              </ul>
+            </div>
+
             <form class="add-user-form" @submit.prevent="submitAddUser">
               <h4 class="section-title">➕ 新增用戶</h4>
               <div class="field">
@@ -217,13 +227,33 @@
               </div>
               <div class="field">
                 <label for="new-user-role">角色</label>
-                <select id="new-user-role" v-model="newUserRole" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
-                  <option value="admin">後台管理員 - 可以進入後台 管理賓客、排位、CSV</option>
-                  <option value="reception">現場接待 - 點名、取消賓客座位、現場加座, 不能進入後台</option>
+                <select
+                  id="new-user-role"
+                  v-model="newUserRole"
+                  class="w-full border border-gray-300 rounded-lg p-2 text-sm"
+                >
+                  <option
+                    value="admin"
+                    :disabled="!isPlatformAdmin && (quota.remaining.admin <= 0 || quota.remaining.total <= 0)"
+                  >
+                    後台管理員 — 可進入後台管理賓客、排位、CSV（剩餘 {{ quota.remaining.admin }} 個）
+                  </option>
+                  <option
+                    value="reception"
+                    :disabled="!isPlatformAdmin && (quota.remaining.reception <= 0 || quota.remaining.total <= 0)"
+                  >
+                    現場接待 — 點名、取消賓客、現場加座，不能進入後台（剩餘 {{ quota.remaining.reception }} 個）
+                  </option>
                 </select>
+                <p v-if="!isPlatformAdmin && quota.remaining.total <= 0" class="quota-hint warn">
+                  已達專案帳戶上限（{{ quota.limits.total }} 個），請先移除用戶再新增。
+                </p>
+                <p v-else-if="!isPlatformAdmin && selectedRoleFull" class="quota-hint warn">
+                  所選角色名額已滿，請選擇其他角色或先移除用戶。
+                </p>
               </div>
               <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
-              <button type="submit" class="btn-primary" :disabled="addingUser">
+              <button type="submit" class="btn-primary" :disabled="addingUser || !canSubmitAddUser">
                 {{ addingUser ? '建立中…' : '建立用戶' }}
               </button>
             </form>
@@ -242,6 +272,7 @@ import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
+import { getMemberQuota } from '@/lib/tenantMemberLimits';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -280,6 +311,28 @@ const {
   updateSelfDisplayName,
 } = useTenantUsers();
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
+
+const quota = computed(() => getMemberQuota(members.value, ownerUid.value));
+
+const selectedRoleFull = computed(() => {
+  if (isPlatformAdmin.value) return false;
+  if (quota.value.remaining.total <= 0) return true;
+  if (newUserRole.value === 'admin') return quota.value.remaining.admin <= 0;
+  if (newUserRole.value === 'reception') return quota.value.remaining.reception <= 0;
+  return false;
+});
+
+const canSubmitAddUser = computed(() => isPlatformAdmin.value || !selectedRoleFull.value);
+
+watch(
+  () => [quota.value.remaining.admin, quota.value.remaining.reception, quota.value.remaining.total],
+  () => {
+    if (selectedRoleFull.value) {
+      if (quota.value.remaining.admin > 0) newUserRole.value = 'admin';
+      else if (quota.value.remaining.reception > 0) newUserRole.value = 'reception';
+    }
+  },
+);
 
 const currentPassword = ref('');
 const newPassword = ref('');
@@ -419,20 +472,30 @@ async function submitAddUser() {
     addUserMsg.value = '只有 owner 可以新增用戶';
     return;
   }
+  if (!canSubmitAddUser.value) {
+    addUserMsgOk.value = false;
+    addUserMsg.value = selectedRoleFull.value && quota.value.remaining.total <= 0
+      ? `已達專案帳戶上限（最多 ${quota.value.limits.total} 個）`
+      : '所選角色名額已滿';
+    return;
+  }
   addingUser.value = true;
+  const createdRole = newUserRole.value;
   try {
     await createMember({
       email: newUserEmail.value,
       password: newUserPassword.value,
       displayName: newUserName.value,
-      role: newUserRole.value,
+      role: createdRole,
     });
     newUserEmail.value = '';
     newUserName.value = '';
     newUserPassword.value = '';
     newUserRole.value = 'admin';
     addUserMsgOk.value = true;
-    addUserMsg.value = '用戶已建立並加入後台權限';
+    addUserMsg.value = createdRole === 'reception'
+      ? '用戶已建立，可登入點名頁進行現場接待'
+      : '用戶已建立，可登入後台管理賓客與排位';
   } catch (e) {
     addUserMsgOk.value = false;
     addUserMsg.value = e?.message || '建立用戶失敗';
@@ -706,5 +769,42 @@ async function confirmRemove(member) {
 .btn-remove:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+.quota-summary {
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+.quota-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.quota-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+.quota-list strong {
+  color: #0f172a;
+}
+.quota-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+.quota-hint.warn {
+  color: #b45309;
+  font-weight: 600;
 }
 </style>
