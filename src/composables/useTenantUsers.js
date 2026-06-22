@@ -1,10 +1,11 @@
 import { ref } from 'vue';
-import { get, set, remove, update, ref as dbRef } from '@/rtdb';
+import { get, set, update, ref as dbRef } from '@/rtdb';
 import { database } from '@/firebase';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
+import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, getMemberQuota } from '@/lib/tenantMemberLimits';
 
 export function useTenantUsers() {
@@ -103,18 +104,12 @@ export function useTenantUsers() {
       throw new Error('只有 owner 可以移除用戶');
     }
 
-    const membersSnap = await get(tenantRef('members'));
-    const memberMap = membersSnap.val() || {};
-    const activeCount = Object.values(memberMap).filter((v) => normalizeMemberRole(v) === 'admin').length;
-    if (activeCount <= 1) throw new Error('至少需要保留一位後台用戶');
-
-    await remove(tenantRef(`members/${uid}`));
-    try {
-      await remove(tenantRef(`user_profiles/${uid}`));
-    } catch {
-      /* profile may not exist for legacy members */
-    }
+    const result = await callRemoveTenantMember({
+      tenantId: tenantId.value,
+      uid,
+    });
     await loadMembers();
+    return result;
   }
 
   async function ensureSelfProfile() {

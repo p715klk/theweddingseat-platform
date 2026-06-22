@@ -11,6 +11,7 @@ import {
   assertPassword,
 } from '@/lib/superAdminProvisioning';
 import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
+import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -280,15 +281,11 @@ export async function setTenantMemberProfile(tenantId, uid, patch, editor = null
   }
 }
 
-export async function removeTenantMember(tenantId, uid, { removeProfile = true } = {}) {
+export async function removeTenantMember(tenantId, uid) {
   const id = String(tenantId || '').trim();
   const u = String(uid || '').trim();
   if (!id || !u) throw new Error('缺少 tenantId 或 uid');
-  const updates = {
-    [`tenants/${id}/members/${u}`]: null,
-    ...(removeProfile ? { [`tenants/${id}/user_profiles/${u}`]: null } : {}),
-  };
-  await update(dbRef(database), updates);
+  return callRemoveTenantMember({ tenantId: id, uid: u });
 }
 
 export async function isSlugTaken(slug) {

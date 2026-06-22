@@ -165,7 +165,7 @@
                 <span v-else-if="m.isSelf" class="member-self">（你）</span>
               </div>
               <button
-                v-if="!m.isSelf && m.uid !== ownerUid"
+                v-if="canManageUsers && !m.isSelf && m.uid !== ownerUid"
                 type="button"
                 class="btn-remove"
                 :disabled="removingUid === m.uid"
@@ -511,15 +511,19 @@ async function confirmRemove(member) {
     return;
   }
   const label = member.email || member.uid;
-  const ok = window.confirm(`確定要移除「${label}」的後台權限嗎？\n\n對方將無法再登入此婚宴後台（Firebase 帳號仍會保留）。`);
+  const ok = window.confirm(
+    `確定要移除「${label}」嗎？\n\n對方將無法再登入此婚宴後台。若該帳號沒有加入其他專案，Firebase 登入帳號亦會一併刪除。`,
+  );
   if (!ok) return;
 
   removingUid.value = member.uid;
   addUserMsg.value = '';
   try {
-    await removeMember(member.uid);
+    const result = await removeMember(member.uid);
     addUserMsgOk.value = true;
-    addUserMsg.value = '已移除用戶權限';
+    addUserMsg.value = result?.authDeleted
+      ? '已移除用戶並刪除登入帳號'
+      : '已移除用戶權限（登入帳號仍用於其他專案）';
   } catch (e) {
     addUserMsgOk.value = false;
     addUserMsg.value = e?.message || '移除失敗';

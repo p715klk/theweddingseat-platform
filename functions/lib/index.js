@@ -1,4 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { auth as authTriggers } from "firebase-functions/v1";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { getAuth } from "firebase-admin/auth";
@@ -114,6 +115,80 @@ async function isPlatformAdmin(uid) {
     const db = getDatabase();
     const snap = await db.ref(`platform_admins/${uid}`).get();
     return snap.exists() && snap.val() === true;
+}
+function normalizeMemberRole(val) {
+    if (val === true)
+        return "admin";
+    if (val === "admin" || val === "reception")
+        return val;
+    return "";
+}
+async function isTenantOwner(tenantId, uid) {
+    const db = getDatabase();
+    const snap = await db.ref(`tenants/${tenantId}/meta/owner_uid`).get();
+    return snap.exists() && snap.val() === uid;
+}
+async function countTenantAdmins(tenantId) {
+    const db = getDatabase();
+    const snap = await db.ref(`tenants/${tenantId}/members`).get();
+    const members = snap.val() || {};
+    return Object.values(members).filter((v) => normalizeMemberRole(v) === "admin").length;
+}
+async function uidHasOtherMemberships(uid, excludeTenantId) {
+    const db = getDatabase();
+    const slugsSnap = await db.ref("slugs").get();
+    const slugs = slugsSnap.val() || {};
+    for (const tenantIdRaw of Object.values(slugs)) {
+        const tenantId = String(tenantIdRaw);
+        if (tenantId === excludeTenantId)
+            continue;
+        const memberSnap = await db.ref(`tenants/${tenantId}/members/${uid}`).get();
+        if (memberSnap.exists() && normalizeMemberRole(memberSnap.val()))
+            return true;
+    }
+    return false;
+}
+async function uidIsOwnerOfAnyTenant(uid, excludeTenantId) {
+    const db = getDatabase();
+    const slugsSnap = await db.ref("slugs").get();
+    const slugs = slugsSnap.val() || {};
+    for (const tenantIdRaw of Object.values(slugs)) {
+        const tenantId = String(tenantIdRaw);
+        if (excludeTenantId && tenantId === excludeTenantId)
+            continue;
+        const ownerSnap = await db.ref(`tenants/${tenantId}/meta/owner_uid`).get();
+        if (ownerSnap.exists() && ownerSnap.val() === uid)
+            return true;
+    }
+    return false;
+}
+async function shouldDeleteAuth(uid, excludeTenantId) {
+    if (await isPlatformAdmin(uid))
+        return false;
+    if (await uidIsOwnerOfAnyTenant(uid, excludeTenantId))
+        return false;
+    if (await uidHasOtherMemberships(uid, excludeTenantId))
+        return false;
+    return true;
+}
+async function collectTenantMembershipCleanup(uid) {
+    const db = getDatabase();
+    const updates = {};
+    const slugsSnap = await db.ref("slugs").get();
+    const slugs = slugsSnap.val() || {};
+    for (const tenantIdRaw of Object.values(slugs)) {
+        const tenantId = String(tenantIdRaw);
+        const memberSnap = await db.ref(`tenants/${tenantId}/members/${uid}`).get();
+        if (memberSnap.exists() && normalizeMemberRole(memberSnap.val())) {
+            updates[`tenants/${tenantId}/members/${uid}`] = null;
+            updates[`tenants/${tenantId}/user_profiles/${uid}`] = null;
+        }
+    }
+    if ((await db.ref(`platform_admins/${uid}`).get()).exists()) {
+        updates[`platform_admins/${uid}`] = null;
+        updates[`platform_admin_profiles/${uid}`] = null;
+    }
+    return updates;
 }
 export const createTenant = onCall({ region: "asia-southeast1" }, async (req) => {
     if (!req.auth?.uid) {
@@ -231,7 +306,7 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
         [`${tenantBase}/table_settings`]: tableSettings,
         [`${tenantBase}/floor_layout`]: floorLayout,
         [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
-        [`${tenantBase}/members/${userRecord.uid}`]: true,
+        [`${tenantBase}/members/${userRecord.uid}`]: "admin",
         [`${tenantBase}/user_profiles/${userRecord.uid}`]: profile,
     };
     try {
@@ -264,6 +339,81 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
         ownerEmail,
         ...(authUserWasCreated && !ownerPasswordRaw ? { ownerTempPassword: ownerPassword } : {}),
     };
+});
+export const removeTenantMember = onCall({ region: "asia-southeast1" }, async (req) => {
+    if (!req.auth?.uid) {
+        throw new HttpsError("unauthenticated", "需要登入");
+    }
+    const tenantId = requireString(req.data?.tenantId, "tenantId");
+    const targetUid = requireString(req.data?.uid, "uid");
+    const callerUid = req.auth.uid;
+    if (targetUid === callerUid) {
+        throw new HttpsError("failed-precondition", "不能移除自己的帳號");
+    }
+    const db = getDatabase();
+    const callerIsPlatformAdmin = await isPlatformAdmin(callerUid);
+    const callerIsOwner = await isTenantOwner(tenantId, callerUid);
+    if (!callerIsPlatformAdmin && !callerIsOwner) {
+        throw new HttpsError("permission-denied", "只有 owner 或平台管理員可以移除用戶");
+    }
+    const ownerUidSnap = await db.ref(`tenants/${tenantId}/meta/owner_uid`).get();
+    const ownerUid = ownerUidSnap.exists() ? String(ownerUidSnap.val()) : "";
+    if (ownerUid && targetUid === ownerUid) {
+        throw new HttpsError("failed-precondition", "不能移除專案 Owner");
+    }
+    const memberSnap = await db.ref(`tenants/${tenantId}/members/${targetUid}`).get();
+    if (!memberSnap.exists()) {
+        throw new HttpsError("not-found", "此用戶不在專案成員清單內");
+    }
+    const targetRole = normalizeMemberRole(memberSnap.val());
+    if (!targetRole) {
+        throw new HttpsError("not-found", "此用戶不在專案成員清單內");
+    }
+    if (!callerIsPlatformAdmin) {
+        const profileSnap = await db.ref(`tenants/${tenantId}/user_profiles/${targetUid}`).get();
+        if (!profileSnap.exists()) {
+            throw new HttpsError("permission-denied", "只能移除此專案內建立的帳號；如為舊版帳號請聯絡平台管理員");
+        }
+    }
+    if (targetRole === "admin") {
+        const adminCount = await countTenantAdmins(tenantId);
+        if (adminCount <= 1) {
+            throw new HttpsError("failed-precondition", "至少需要保留一位後台用戶");
+        }
+    }
+    await db.ref().update({
+        [`tenants/${tenantId}/members/${targetUid}`]: null,
+        [`tenants/${tenantId}/user_profiles/${targetUid}`]: null,
+    });
+    let authDeleted = false;
+    if (await shouldDeleteAuth(targetUid, tenantId)) {
+        try {
+            await getAuth().deleteUser(targetUid);
+            authDeleted = true;
+        }
+        catch (e) {
+            const code = String(e?.code || "");
+            if (code !== "auth/user-not-found") {
+                console.error("removeTenantMember: auth.deleteUser failed", {
+                    targetUid,
+                    tenantId,
+                    message: e?.message,
+                });
+                throw new HttpsError("internal", e?.message || "移除 Auth 帳號失敗");
+            }
+        }
+    }
+    return { tenantId, uid: targetUid, authDeleted };
+});
+export const cleanupUserDataOnAuthDelete = authTriggers.user().onDelete(async (user) => {
+    const uid = user.uid;
+    if (!uid)
+        return;
+    const updates = await collectTenantMembershipCleanup(uid);
+    if (!Object.keys(updates).length)
+        return;
+    const db = getDatabase();
+    await db.ref().update(updates);
 });
 export const setUserPassword = onCall({ region: "asia-southeast1" }, async (req) => {
     if (!req.auth?.uid) {

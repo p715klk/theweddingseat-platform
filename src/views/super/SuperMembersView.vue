@@ -3,7 +3,7 @@
     <h2>Members 管理</h2>
     <p class="hint-block">
       顯示所有 Project 嘅 members（以 <code>tenants/*/members</code> + <code>user_profiles</code> 組合）。
-      可修改顯示名稱／初始密碼（只係你系統記錄，唔會改 Auth 密碼），或移除 members 權限。
+      可修改顯示名稱／初始密碼（只係你系統記錄，唔會改 Auth 密碼），或移除 members 權限；若該帳號無其他專案 membership，會一併刪除 Firebase Auth 登入帳號。
     </p>
 
     <div class="toolbar">
@@ -122,8 +122,9 @@ async function loadAll() {
       const members = membersSnap.val() || {};
       const profiles = profilesSnap.val() || {};
 
-      Object.entries(members).forEach(([uid, ok]) => {
-        if (ok !== true) return;
+      Object.entries(members).forEach(([uid, roleVal]) => {
+        const role = roleVal === true ? 'admin' : roleVal;
+        if (role !== 'admin' && role !== 'reception') return;
         const p = profiles?.[uid] || {};
         out.push({
           key: `${tenantId}:${uid}`,
@@ -185,13 +186,19 @@ async function save(row) {
 }
 
 async function remove(row) {
-  const ok = window.confirm(`確定移除 members？\n\nProject: ${row.slug}\nUser: ${row.email || row.uid}`);
+  const ok = window.confirm(
+    `確定移除 members？\n\nProject: ${row.slug}\nUser: ${row.email || row.uid}\n\n若該帳號沒有加入其他專案，Firebase 登入帳號亦會一併刪除。`,
+  );
   if (!ok) return;
   row.msg = '';
   busyKey.value = row.key;
   try {
-    await removeTenantMember(row.tenantId, row.uid, { removeProfile: true });
+    const result = await removeTenantMember(row.tenantId, row.uid);
     rows.value = rows.value.filter((r) => r.key !== row.key);
+    if (result?.authDeleted) {
+      row.msgOk = true;
+      row.msg = '已移除並刪除登入帳號';
+    }
   } catch (e) {
     row.msgOk = false;
     row.msg = e?.message || '移除失敗';
