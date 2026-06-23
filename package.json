@@ -4,14 +4,14 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "sync:legacy-config": "node scripts/sync-legacy-firebase-config.js",
+    "setup:pocketbase": "node scripts/setup-pocketbase.mjs",
     "sync:legacy": "node scripts/sync-legacy-to-public.js",
-    "dev": "node scripts/sync-legacy-firebase-config.js && node scripts/sync-legacy-to-public.js && vite",
-    "build": "node scripts/sync-legacy-firebase-config.js && node scripts/sync-legacy-to-public.js && vite build && node scripts/copy-404.js",
+    "dev": "node scripts/sync-legacy-to-public.js && vite",
+    "build": "node scripts/sync-legacy-to-public.js && vite build && node scripts/copy-404.js",
     "preview": "vite preview"
   },
   "dependencies": {
-    "firebase": "^10.14.1",
+    "pocketbase": "^0.27.0",
     "sortablejs": "^1.15.2",
     "vue": "^3.5.38",
     "vue-router": "^4.5.0"

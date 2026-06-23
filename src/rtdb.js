@@ -1,6 +1,5 @@
 /**
- * RTDB 用 compat SDK（WebSocket），行為同舊版 legacy admin。
- * modular firebase/database 喺部分環境會 long-poll，Network 會不停刷 xhr。
+ * RTDB 相容層 — 底層由 PocketBase collections 支援。
  */
 import { database } from '@/firebase';
 
@@ -46,6 +45,9 @@ export function onValue(reference, callback, onError) {
       exists: () => snapshot.exists(),
     });
   };
-  reference.on('value', handler, onError);
-  return () => reference.off('value', handler);
+  const unsub = reference.on('value', handler, onError);
+  return () => {
+    if (typeof unsub === 'function') unsub();
+    else reference.off('value', handler);
+  };
 }

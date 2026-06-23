@@ -51,7 +51,7 @@
 
     <section class="section">
       <h3>新增 Super Admin</h3>
-      <p class="hint-block">會建立 Firebase Auth 帳號並加入 <code>platform_admins</code>。</p>
+      <p class="hint-block">會建立登入帳號並設為 Super Admin（is_platform_admin）。</p>
       <div v-if="createdInfo" class="created-box">
         <p class="created-title">✅ 已新增 Super Admin</p>
         <ul class="created-list">

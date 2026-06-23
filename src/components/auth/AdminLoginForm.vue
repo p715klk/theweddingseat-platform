@@ -1,7 +1,7 @@
 <template>
   <form class="login-card" @submit.prevent="submit">
     <h2>後台登入</h2>
-    <p class="hint">請使用 Firebase Console 建立嘅帳號</p>
+    <p class="hint">請使用平台管理員建立嘅帳號</p>
     <label>Email</label>
     <input v-model="email" type="email" required autocomplete="username" />
     <label>密碼</label>

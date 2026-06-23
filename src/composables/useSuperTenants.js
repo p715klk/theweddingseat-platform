@@ -388,8 +388,12 @@ export async function createTenant({
   };
 }
 
+import { callSetUserPassword } from '@/lib/twsApi';
+
 export async function setAuthUserPassword({ uid, newPassword }) {
-  throw new Error('此環境未啟用 Cloud Functions，無法直接重設其他用戶密碼。請改用 Firebase Console。');
+  const pw = String(newPassword || '').trim();
+  if (pw.length < 6) throw new Error('密碼至少需要 6 個字元');
+  return callSetUserPassword({ uid, newPassword: pw });
 }
 
 /**

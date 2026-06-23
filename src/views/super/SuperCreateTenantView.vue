@@ -6,7 +6,7 @@
       由 <code>{{ copyFromSlug }}</code> 複製賓客、枱位等資料。修改後儲存為新 Project。
     </p>
     <p v-else class="intro">
-      建立 slug、meta 同預設資料；同時會自動建立客戶 Firebase Auth 帳號並加入 <code>members</code>（Owner）。
+      建立 slug、meta 同預設資料；同時會自動建立客戶登入帳號並加入 <code>members</code>（Owner）。
     </p>
 
     <form class="form" @submit.prevent="submit">

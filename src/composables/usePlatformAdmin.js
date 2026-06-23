@@ -1,4 +1,5 @@
 import { ref, watch } from 'vue';
+import getPocketBase, { isPocketBaseConfigured } from '@/lib/pocketbaseClient';
 import { get, ref as dbRef } from '@/rtdb';
 import { database } from '@/firebase';
 import { useAuth } from '@/composables/useAuth';
@@ -16,14 +17,20 @@ async function refreshPlatformAdmin(uid) {
     return;
   }
   try {
-    const snap = await get(dbRef(database, `platform_admins/${uid}`));
-    isPlatformAdmin.value = snap.val() === true;
+    if (isPocketBaseConfigured()) {
+      const pb = getPocketBase();
+      let record = pb.authStore.record;
+      if (!record || record.id !== uid) {
+        record = await pb.collection('users').getOne(uid);
+      }
+      isPlatformAdmin.value = record?.is_platform_admin === true;
+    } else {
+      const snap = await get(dbRef(database, `platform_admins/${uid}`));
+      isPlatformAdmin.value = snap.val() === true;
+    }
     checkedUid = uid;
   } catch (e) {
-    const code = String(e?.code || '');
-    if (code !== 'PERMISSION_DENIED') {
-      console.error('platform_admins 讀取失敗:', e);
-    }
+    console.error('platform admin 讀取失敗:', e);
     isPlatformAdmin.value = false;
     checkedUid = uid;
   } finally {

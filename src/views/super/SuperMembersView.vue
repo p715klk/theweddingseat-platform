@@ -3,7 +3,7 @@
     <h2>Members 管理</h2>
     <p class="hint-block">
       顯示所有 Project 嘅 members（以 <code>tenants/*/members</code> + <code>user_profiles</code> 組合）。
-      可修改顯示名稱／初始密碼（只係你系統記錄，唔會改 Auth 密碼），或移除 members 權限；若該帳號無其他專案 membership，會一併刪除 Firebase Auth 登入帳號。
+      可修改顯示名稱／初始密碼（只係你系統記錄，唔會改 Auth 密碼），或移除 members 權限；若該帳號無其他專案 membership，會一併刪除登入帳號。
     </p>
 
     <div class="toolbar">
@@ -187,7 +187,7 @@ async function save(row) {
 
 async function remove(row) {
   const ok = window.confirm(
-    `確定移除 members？\n\nProject: ${row.slug}\nUser: ${row.email || row.uid}\n\n若該帳號沒有加入其他專案，Firebase 登入帳號亦會一併刪除。`,
+    `確定移除 members？\n\nProject: ${row.slug}\nUser: ${row.email || row.uid}\n\n若該帳號沒有加入其他專案，登入帳號亦會一併刪除。`,
   );
   if (!ok) return;
   row.msg = '';

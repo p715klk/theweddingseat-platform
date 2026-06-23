@@ -145,7 +145,7 @@
         <!-- 用戶管理 -->
         <div v-else-if="activeTab === 'users'" class="space-y-4">
           <p class="hint">
-            管理可登入此婚宴專案的帳號。新增用戶會建立 Firebase 登入帳號；後台管理員可進入後台，現場接待只可進入點名頁。
+            管理可登入此婚宴專案的帳號。新增用戶會建立登入帳號；後台管理員可進入後台，現場接待只可進入點名頁。
           </p>
           <p v-if="!canManageUsers" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
             你而家係一般後台用戶（非 Owner），只能查看用戶清單；如要新增／移除用戶，請用 Owner 帳號登入。
@@ -512,7 +512,7 @@ async function confirmRemove(member) {
   }
   const label = member.email || member.uid;
   const ok = window.confirm(
-    `確定要移除「${label}」嗎？\n\n對方將無法再登入此婚宴後台。若該帳號沒有加入其他專案，Firebase 登入帳號亦會一併刪除。`,
+    `確定要移除「${label}」嗎？\n\n對方將無法再登入此婚宴後台。若該帳號沒有加入其他專案，登入帳號亦會一併刪除。`,
   );
   if (!ok) return;
 

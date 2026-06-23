@@ -164,7 +164,7 @@
       <section class="section">
         <h3>重設 Owner 密碼</h3>
         <p class="hint-block">
-          平台無法直接幫其他帳號重設密碼。請到 Firebase Console → Authentication 用 email 搵到該用戶再重設。
+          平台管理員可透過 Super Admin 重設密碼功能更新帳號密碼。
         </p>
       </section>
 

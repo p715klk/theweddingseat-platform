@@ -12,7 +12,7 @@
     <div v-else-if="!isPlatformAdmin" class="super-center denied">
       <h2>無權限</h2>
       <p>此帳號未列入 <code>platform_admins</code>。</p>
-      <p class="hint">請喺 Firebase Console → Realtime Database 加入你的 UID。</p>
+      <p class="hint">請確認你的帳號已設為 platform admin（PocketBase users.is_platform_admin）。</p>
       <button type="button" class="btn-denied-logout" @click="handleLogout">登出</button>
     </div>
 
