@@ -36,7 +36,7 @@
         class="row-seat-released inline-flex items-center gap-0.5 font-mono font-bold text-red-500 flex-wrap justify-center"
       >
         第 <span class="row-table-display-num">{{ guest.table }}</span> 桌 -
-        <span title="簽到頁已取消，座位已釋放；原座位資料仍保留於 Firebase">已釋放</span>
+        <span title="簽到頁已取消，座位已釋放；原座位資料仍保留">已釋放</span>
       </span>
       <span
         v-else

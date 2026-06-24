@@ -3,6 +3,16 @@
  * Mimics Firebase compat database API used by @/rtdb composables.
  */
 import getPocketBase from '@/lib/pocketbaseClient';
+import {
+  callListTenantMembers,
+  callRemoveTenantMember,
+  callUpsertTenantMember,
+  callUpdateMemberProfile,
+} from '@/lib/twsApi';
+import {
+  cleanupOrphanedAuthUsers,
+  getUserProfilesByIds,
+} from '@/lib/tenantUserLifecycle';
 
 const TENANT_DATA_KEYS = new Set([
   'wedding_guests',
@@ -26,6 +36,143 @@ const tenantCache = new Map();
 
 /** @type {Map<string, string>} */
 const tenantDataIdCache = new Map();
+
+/** @type {Map<string, Promise<any>>} */
+const tenantDataEnsureLocks = new Map();
+
+/** @type {Map<string, Promise<void>>} */
+const writeLocks = new Map();
+
+function isDuplicateRecordError(err) {
+  const msg = String(err?.response?.message || err?.message || '').toLowerCase();
+  if (msg.includes('unique') || msg.includes('already exists')) return true;
+  try {
+    const raw = JSON.stringify(err?.response?.data || {}).toLowerCase();
+    return raw.includes('unique') || raw.includes('not_unique');
+  } catch {
+    return false;
+  }
+}
+
+function defaultTenantDataPayload(tenantId) {
+  return {
+    tenant_id: tenantId,
+    wedding_guests: {},
+    unassigned_guests: [],
+    guest_status: {},
+    table_settings: {},
+    floor_layout: {},
+    meta_label_columns: DEFAULT_LABEL_COLUMNS,
+  };
+}
+
+async function withWriteLock(key, fn) {
+  const prev = writeLocks.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  writeLocks.set(key, prev.then(() => gate));
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (writeLocks.get(key) === gate) writeLocks.delete(key);
+  }
+}
+
+function pickMemberFields(patch) {
+  if (!patch) return {};
+  const out = {};
+  if (patch.role != null) out.role = patch.role === true ? 'admin' : patch.role;
+  if (patch.created_at != null) out.created_at = patch.created_at;
+  return out;
+}
+
+async function ensureTenantDataRecord(tenantId) {
+  const key = String(tenantId || '').trim();
+  if (!key) throw new Error('missing tenant_id');
+
+  const existing = await findTenantDataRecord(key);
+  if (existing) return existing;
+
+  if (tenantDataEnsureLocks.has(key)) {
+    return tenantDataEnsureLocks.get(key);
+  }
+
+  const work = (async () => {
+    const again = await findTenantDataRecord(key);
+    if (again) return again;
+
+    const pb = getPocketBase();
+    try {
+      const created = await pb.collection('tenant_data').create(defaultTenantDataPayload(key));
+      tenantDataIdCache.set(key, created.id);
+      return created;
+    } catch (err) {
+      if (isDuplicateRecordError(err)) {
+        tenantDataIdCache.delete(key);
+        const found = await findTenantDataRecord(key);
+        if (found) return found;
+      }
+      throw err;
+    }
+  })();
+
+  tenantDataEnsureLocks.set(key, work);
+  try {
+    return await work;
+  } finally {
+    if (tenantDataEnsureLocks.get(key) === work) {
+      tenantDataEnsureLocks.delete(key);
+    }
+  }
+}
+
+async function upsertTenantMember(tenantId, uid, patch) {
+  const tid = String(tenantId || '').trim();
+  const id = String(uid || '').trim();
+  if (!tid || !id) throw new Error('missing tenantId or uid');
+
+  return withWriteLock(`member:${tid}:${id}`, async () => {
+    const pb = getPocketBase();
+    const rows = await listTenantMembers(tid);
+    const existing = rows.find((r) => r.user_id === id);
+
+    if (existing) {
+      const fields = pickMemberFields(patch);
+      if (!Object.keys(fields).length) return existing;
+      await callUpsertTenantMember({
+        tenantId: tid,
+        uid: id,
+        role: fields.role || existing.role || 'admin',
+      });
+      const rows2 = await listTenantMembers(tid);
+      return rows2.find((r) => r.user_id === id) || existing;
+    }
+
+    const fields = pickMemberFields(patch);
+    try {
+      await callUpsertTenantMember({
+        tenantId: tid,
+        uid: id,
+        role: fields.role || 'admin',
+      });
+      const rows2 = await listTenantMembers(tid);
+      const created = rows2.find((r) => r.user_id === id);
+      if (created) return created;
+      throw new Error('新增成員失敗');
+    } catch (err) {
+      if (isDuplicateRecordError(err)) {
+        const rows2 = await listTenantMembers(tid);
+        const found = rows2.find((r) => r.user_id === id);
+        if (found) return found;
+      }
+      throw err;
+    }
+  });
+}
 
 /** path -> Set<callback> */
 const listeners = new Map();
@@ -112,6 +259,25 @@ function notifyPrefix(prefix, val) {
   }
 }
 
+async function getTenantRecordById(recordId, tenantKey) {
+  const pb = getPocketBase();
+  try {
+    const list = await pb.collection('tenants').getList(1, 1, {
+      filter: `id = ${JSON.stringify(recordId)}`,
+    });
+    if (list.items[0]) return list.items[0];
+  } catch {
+    /* listRule */
+  }
+  if (tenantKey) {
+    const list2 = await pb.collection('tenants').getList(1, 1, {
+      filter: `tenant_id = ${JSON.stringify(tenantKey)} || slug = ${JSON.stringify(tenantKey)}`,
+    });
+    return list2.items[0] || null;
+  }
+  return null;
+}
+
 async function findTenantByIdOrSlug(key) {
   const id = String(key || '').trim();
   if (!id) return null;
@@ -136,11 +302,8 @@ async function findTenantBySlug(slug) {
 async function findTenantDataRecord(tenantId) {
   const key = String(tenantId || '').trim();
   if (!key) return null;
-  if (tenantDataIdCache.has(key)) {
-    const pb = getPocketBase();
-    return pb.collection('tenant_data').getOne(tenantDataIdCache.get(key));
-  }
   const pb = getPocketBase();
+  // 用 getList（listRule）；唔用 getOne（viewRule 較嚴或 null 時會 403）
   const list = await pb.collection('tenant_data').getList(1, 1, {
     filter: `tenant_id = ${JSON.stringify(key)}`,
   });
@@ -149,7 +312,14 @@ async function findTenantDataRecord(tenantId) {
   return record || null;
 }
 
-function tenantToMeta(record) {
+async function resolveOwnerUid(tenantId, tenantRecord) {
+  const rows = await listTenantMembers(tenantId);
+  const ownerRow = rows.find((m) => m.role === 'owner');
+  if (ownerRow?.user_id) return ownerRow.user_id;
+  return tenantRecord?.owner_uid || '';
+}
+
+function tenantToMeta(record, ownerUid = '') {
   if (!record) return null;
   return {
     couple_names: record.couple_names || '',
@@ -160,7 +330,7 @@ function tenantToMeta(record) {
     status: record.status || 'active',
     slug: record.slug || '',
     plan: record.plan || 'standard',
-    owner_uid: record.owner_uid || '',
+    owner_uid: ownerUid || record.owner_uid || '',
     features: record.features || { checkin: true, guestlist: true, seating: true },
     created_at: record.created_at || null,
     created_by_uid: record.created_by_uid || '',
@@ -201,33 +371,66 @@ async function listTenantMembers(tenantId) {
   return list;
 }
 
-function memberToProfile(m) {
-  return {
-    email: m.email || '',
-    display_name: m.display_name || '',
-    ...(m.initial_password ? { initial_password: m.initial_password } : {}),
-    created_at: m.created_at || null,
-    created_by_uid: m.created_by_uid || '',
-    created_by_email: m.created_by_email || '',
-  };
+async function collectTenantUserIds(tenantId) {
+  const uids = new Set();
+  const rows = await listTenantMembers(tenantId);
+  rows.forEach((m) => {
+    if (m.user_id) uids.add(m.user_id);
+  });
+  return [...uids];
 }
 
-async function getMembersMap(slug) {
-  const rows = await listTenantMembers(slug);
+async function fetchMembersFromHook(tenantId) {
+  const pb = getPocketBase();
+  if (!pb.authStore.isValid) return null;
+  try {
+    const data = await callListTenantMembers({ tenantId });
+    return data?.members?.length ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getMembersMap(tenantId) {
+  const hookData = await fetchMembersFromHook(tenantId);
+  if (hookData) {
+    const map = {};
+    hookData.members.forEach((m) => {
+      if (!m.uid) return;
+      if (m.role === 'owner') map[m.uid] = 'owner';
+      else if (m.role === true) map[m.uid] = 'admin';
+      else map[m.uid] = m.role || 'admin';
+    });
+    return map;
+  }
+  const rows = await listTenantMembers(tenantId);
   const map = {};
   rows.forEach((m) => {
-    if (m.user_id) map[m.user_id] = m.role === true ? 'admin' : m.role || 'admin';
+    if (!m.user_id) return;
+    if (m.role === 'owner') map[m.user_id] = 'owner';
+    else if (m.role === true) map[m.user_id] = 'admin';
+    else map[m.user_id] = m.role || 'admin';
   });
   return map;
 }
 
-async function getProfilesMap(slug) {
-  const rows = await listTenantMembers(slug);
-  const map = {};
-  rows.forEach((m) => {
-    if (m.user_id) map[m.user_id] = memberToProfile(m);
-  });
-  return map;
+async function getProfilesMap(tenantId) {
+  const hookData = await fetchMembersFromHook(tenantId);
+  if (hookData) {
+    const map = {};
+    hookData.members.forEach((m) => {
+      if (!m.uid) return;
+      map[m.uid] = {
+        email: m.email || '',
+        display_name: m.display_name || '',
+        created_at: m.created_at ?? null,
+        created_by_uid: m.created_by_uid || '',
+        created_by_email: m.created_by_email || '',
+      };
+    });
+    return map;
+  }
+  return getUserProfilesByIds(await collectTenantUserIds(tenantId));
 }
 
 async function getPlatformAdminsMap() {
@@ -300,7 +503,10 @@ async function readPath(path) {
     if (parts.length === 2) {
       const tenant = await findTenantByIdOrSlug(tenantId);
       if (!tenant) return null;
-      const meta = tenantToMeta(await getPocketBase().collection('tenants').getOne(tenant.id));
+      const record = await getTenantRecordById(tenant.id, tenantId);
+      if (!record) return null;
+      const ownerUid = await resolveOwnerUid(tenantId, record);
+      const meta = tenantToMeta(record, ownerUid);
       const members = await getMembersMap(tenantId);
       const profiles = await getProfilesMap(tenantId);
       const dataRec = await findTenantDataRecord(tenantId);
@@ -320,8 +526,10 @@ async function readPath(path) {
     if (parts[2] === 'meta') {
       const tenant = await findTenantByIdOrSlug(tenantId);
       if (!tenant) return null;
-      const record = await getPocketBase().collection('tenants').getOne(tenant.id);
-      return tenantToMeta(record);
+      const record = await getTenantRecordById(tenant.id, tenantId);
+      if (!record) return null;
+      const ownerUid = await resolveOwnerUid(tenantId, record);
+      return tenantToMeta(record, ownerUid);
     }
 
     if (parts[2] === 'members') {
@@ -402,14 +610,44 @@ async function writePath(path, value) {
     if (parts.length === 2) {
       if (value === null) {
         const tenant = await findTenantByIdOrSlug(tenantId);
-        if (tenant) {
-          const members = await listTenantMembers(tenantId);
-          await Promise.all(members.map((m) => pb.collection('tenant_members').delete(m.id)));
-          const dataRec = await findTenantDataRecord(tenantId);
-          if (dataRec) await pb.collection('tenant_data').delete(dataRec.id);
-          await pb.collection('tenants').delete(tenant.id);
-          invalidateTenantCache(tenantId);
+        if (!tenant) return;
+
+        const tenantRecord = await getTenantRecordById(tenant.id, tenantId);
+        if (!tenantRecord) return;
+        const members = await listTenantMembers(tenantId);
+        const cleanupUids = new Set();
+        if (tenantRecord.owner_uid) cleanupUids.add(tenantRecord.owner_uid);
+        members.forEach((m) => {
+          if (m.user_id) cleanupUids.add(m.user_id);
+        });
+
+        for (const m of members) {
+          try {
+            await pb.collection('tenant_members').delete(m.id);
+          } catch (err) {
+            console.warn('tenant_members delete skipped:', m.id, err);
+          }
         }
+
+        const dataRec = await findTenantDataRecord(tenantId);
+        if (dataRec) {
+          try {
+            await pb.collection('tenant_data').delete(dataRec.id);
+          } catch (err) {
+            console.warn('tenant_data delete skipped:', dataRec.id, err);
+          }
+          tenantDataIdCache.delete(tenantId);
+        }
+
+        try {
+          await pb.collection('tenants').delete(tenant.id);
+        } catch (err) {
+          invalidateTenantCache(tenantId);
+          throw err;
+        }
+
+        invalidateTenantCache(tenantId);
+        await cleanupOrphanedAuthUsers([...cleanupUids]);
       }
       return;
     }
@@ -424,15 +662,7 @@ async function writePath(path, value) {
       } else if (value !== null) {
         const created = await pb.collection('tenants').create(fields);
         tenantCache.set(tenantId, { id: created.id, tenantId, slug: fields.slug });
-        await pb.collection('tenant_data').create({
-          tenant_id: tenantId,
-          wedding_guests: {},
-          unassigned_guests: [],
-          guest_status: {},
-          table_settings: {},
-          floor_layout: {},
-          meta_label_columns: DEFAULT_LABEL_COLUMNS,
-        });
+        await ensureTenantDataRecord(tenantId);
       }
       return;
     }
@@ -440,80 +670,29 @@ async function writePath(path, value) {
     if (parts[2] === 'members') {
       if (parts.length === 4) {
         const uid = parts[3];
-        const rows = await listTenantMembers(tenantId);
-        const existing = rows.find((r) => r.user_id === uid);
         if (value === null) {
-          if (existing) await pb.collection('tenant_members').delete(existing.id);
+          await callRemoveTenantMember({ tenantId, uid });
           return;
         }
         const role = value === true ? 'admin' : value;
-        if (existing) {
-          await pb.collection('tenant_members').update(existing.id, { role });
-        } else {
-          let email = '';
-          try {
-            const u = await pb.collection('users').getOne(uid);
-            email = u.email || '';
-          } catch {
-            /* user may not exist yet */
-          }
-          await pb.collection('tenant_members').create({
-            tenant_id: tenantId,
-            user_id: uid,
-            role,
-            email,
-            display_name: '',
-            created_at: Date.now(),
-          });
-        }
+        await upsertTenantMember(tenantId, uid, { role });
       }
       return;
     }
 
     if (parts[2] === 'user_profiles' && parts.length === 4) {
       const uid = parts[3];
-      const rows = await listTenantMembers(tenantId);
-      const existing = rows.find((r) => r.user_id === uid);
       if (value === null) {
-        if (existing) await pb.collection('tenant_members').delete(existing.id);
+        await callRemoveTenantMember({ tenantId, uid });
         return;
       }
-      const payload = {
-        email: value.email || '',
-        display_name: value.display_name || '',
-        initial_password: value.initial_password || '',
-        created_at: value.created_at || Date.now(),
-        created_by_uid: value.created_by_uid || '',
-        created_by_email: value.created_by_email || '',
-      };
-      if (existing) {
-        await pb.collection('tenant_members').update(existing.id, payload);
-      } else {
-        await pb.collection('tenant_members').create({
-          tenant_id: tenantId,
-          user_id: uid,
-          role: 'admin',
-          ...payload,
-        });
-      }
+      await callUpdateMemberProfile({ tenantId, uid, profile: value });
       return;
     }
 
     if (TENANT_DATA_KEYS.has(parts[2])) {
       const key = parts[2];
-      let dataRec = await findTenantDataRecord(tenantId);
-      if (!dataRec) {
-        dataRec = await pb.collection('tenant_data').create({
-          tenant_id: tenantId,
-          wedding_guests: {},
-          unassigned_guests: [],
-          guest_status: {},
-          table_settings: {},
-          floor_layout: {},
-          meta_label_columns: DEFAULT_LABEL_COLUMNS,
-        });
-        tenantDataIdCache.set(tenantId, dataRec.id);
-      }
+      const dataRec = await ensureTenantDataRecord(tenantId);
 
       let nextValue;
       if (parts.length === 3) {

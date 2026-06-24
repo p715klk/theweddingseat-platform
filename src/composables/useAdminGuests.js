@@ -54,8 +54,8 @@ export function useAdminGuests() {
     try {
       const snap = await get(tenantRef(`members/${uid}`));
       const role = snap.val();
-      if (role === true || role === 'admin') return;
-      await set(tenantRef(`members/${uid}`), 'admin');
+      if (role === true || role === 'admin' || role === 'owner') return;
+      await set(tenantRef(`members/${uid}`), 'owner');
     } catch (e) {
       console.warn('無法自動補寫 owner members 記錄（不影響賓客儲存）:', e);
     }
@@ -65,7 +65,7 @@ export function useAdminGuests() {
     const code = String(e?.code || '');
     const message = String(e?.message || '');
     if (code === 'PERMISSION_DENIED' || /permission denied/i.test(message)) {
-      return '權限不足：請確認你已登入 Owner 或後台管理員帳號，並聯絡平台管理員更新 Firebase 規則。';
+      return '權限不足：請確認你已登入 Owner 或後台管理員帳號。';
     }
     return message || '儲存失敗';
   }
@@ -264,7 +264,7 @@ export function useAdminGuests() {
       try {
         await load(true);
       } catch (reloadErr) {
-        console.warn('儲存成功但重新載入失敗（Firebase 資料已寫入）:', reloadErr);
+        console.warn('儲存成功但重新載入失敗（伺服器資料已寫入）:', reloadErr);
       }
     } catch (e) {
       throw new Error(formatSaveError(e));

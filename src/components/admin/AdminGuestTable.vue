@@ -63,7 +63,7 @@
       </thead>
       <tbody id="excel-tbody" ref="tbodyRef" class="text-sm font-medium text-gray-700">
         <tr v-if="loading">
-          <td colspan="8" class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td>
+          <td colspan="8" class="text-center py-8 text-gray-400 font-bold">⏳ 正在載入名單數據...</td>
         </tr>
         <tr v-else-if="loadError">
           <td colspan="8" class="text-center py-8 text-red-500 font-bold">

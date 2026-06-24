@@ -2,7 +2,7 @@
   <div class="panel">
     <h2>Super Admin 管理</h2>
     <p class="hint-block">
-      管理平台營運帳號（<code>platform_admins</code>）。新增後對方可登入 <code>/super</code>。
+      管理平台營運帳號（<code>is_platform_admin</code>）。新增後對方可登入 <code>/super</code>。
     </p>
 
     <section class="section">

@@ -23,6 +23,7 @@
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
+import { mapPocketBaseLoginError } from '@/lib/pocketbaseErrors';
 
 const emit = defineEmits(['success']);
 const { login, authError } = useAuth();
@@ -43,14 +44,7 @@ async function submit() {
     await login(email.value, password.value);
     emit('success');
   } catch (e) {
-    const code = e?.code || '';
-    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-      error.value = 'Email 或密碼錯誤';
-    } else if (code === 'auth/too-many-requests') {
-      error.value = '嘗試次數過多，請稍後再試';
-    } else {
-      error.value = e?.message || '登入失敗';
-    }
+    error.value = mapPocketBaseLoginError(e);
   } finally {
     loading.value = false;
   }

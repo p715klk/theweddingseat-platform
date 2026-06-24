@@ -268,7 +268,7 @@ export function parseCSVFileContent(text) {
 export function buildCSVImportSuccessMessage(plan) {
   const { stats, mode } = plan;
   const modeLabel = mode === 'merge' ? '合併匯入' : '完全取代';
-  let message = `✅ 已${modeLabel}並同步 ${stats.resultTotal} 位賓客至 Firebase！\n\n`;
+  let message = `✅ 已${modeLabel}並同步 ${stats.resultTotal} 位賓客至伺服器！\n\n`;
   message += `• CSV 讀取：${stats.csvTotal} 位\n`;
   message += `• 新增：${stats.added} 位\n`;
   message += `• 更新：${stats.updated} 位\n`;

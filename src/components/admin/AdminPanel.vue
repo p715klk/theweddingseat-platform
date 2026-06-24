@@ -308,7 +308,7 @@ function confirmEmpty() {
     showToast('目前沒有賓客可清空');
     return;
   }
-  const ok = window.confirm(`確定要清空所有賓客嗎？\n\n將移除 ${guests.value.length} 位賓客，需按「儲存變更」才會同步到 Firebase。`);
+  const ok = window.confirm(`確定要清空所有賓客嗎？\n\n將移除 ${guests.value.length} 位賓客，需按「儲存變更」才會同步到伺服器。`);
   if (ok) emptyAllGuests();
 }
 

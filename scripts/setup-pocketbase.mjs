@@ -58,6 +58,24 @@ function defaultOptions(type, options = {}) {
   }
 }
 
+function relationField(name, collectionId, { required = true } = {}) {
+  return {
+    id: fieldId(),
+    name,
+    type: 'relation',
+    system: false,
+    required,
+    presentable: false,
+    options: {
+      collectionId,
+      cascadeDelete: false,
+      minSelect: required ? 1 : 0,
+      maxSelect: 1,
+      displayFields: [],
+    },
+  };
+}
+
 function normalizeField({ name, type, required = false, options }) {
   return {
     id: fieldId(),
@@ -119,7 +137,78 @@ const userFieldDefs = [
   { name: 'created_by_email', type: 'text', required: false },
 ];
 
-async function ensureUsersFields(token, existing) {
+/** Super Admin 建帳；本人可讀寫自己；Super Admin 可刪；ManageRule 免 oldPassword 重設密碼 */
+const usersApiRules = {
+  listRule: '@request.auth.is_platform_admin = true || id = @request.auth.id',
+  viewRule: '@request.auth.is_platform_admin = true || id = @request.auth.id',
+  createRule: '@request.auth.is_platform_admin = true',
+  updateRule: '@request.auth.is_platform_admin = true || id = @request.auth.id',
+  deleteRule: '@request.auth.is_platform_admin = true',
+  manageRule: '@request.auth.is_platform_admin = true',
+};
+
+const platformAdmin = '@request.auth.is_platform_admin = true';
+
+/** 用戶喺該 project 有任何角色（owner / admin / reception） */
+const tenantMemberAny =
+  '@collection.tenant_members.user_id ?= @request.auth.id && @collection.tenant_members.tenant_id ?= tenant_id';
+
+/** 該 project 嘅 Owner（角色喺 tenant_members，唔再用 tenants.owner_uid） */
+const tenantMemberOwner =
+  '@collection.tenant_members.user_id ?= @request.auth.id && @collection.tenant_members.tenant_id ?= tenant_id && @collection.tenant_members.role = "owner"';
+
+/** Owner 或 Admin 可管理 project 設定 */
+const tenantMemberManager =
+  '@collection.tenant_members.user_id ?= @request.auth.id && @collection.tenant_members.tenant_id ?= tenant_id && (@collection.tenant_members.role = "owner" || @collection.tenant_members.role = "admin")';
+
+/** 任何人持 slug URL 可讀活動 project meta（Admin 登入前、賓客 check-in 都需要） */
+const tenantsPublicBySlug = 'slug != ""';
+
+const tenantsApiRules = {
+  listRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantsPublicBySlug}`,
+  viewRule: null,
+  createRule: platformAdmin,
+  updateRule: `${platformAdmin} || ${tenantMemberManager}`,
+  deleteRule: platformAdmin,
+};
+
+/** tenant_members — Owner 可經 hook 或 API 管理成員 */
+const tenantMembersOwnerRow =
+  '@collection.tenant_members.user_id ?= @request.auth.id && @collection.tenant_members.tenant_id ?= tenant_id && @collection.tenant_members.role = "owner"';
+
+/** Owner / Admin 可列出該 project 全部成員 */
+const tenantMembersManagerRow =
+  '@collection.tenant_members.user_id ?= @request.auth.id && @collection.tenant_members.tenant_id ?= tenant_id && (@collection.tenant_members.role = "owner" || @collection.tenant_members.role = "admin")';
+
+const tenantMembersApiRules = {
+  listRule: `${platformAdmin} || user_id = @request.auth.id || ${tenantMembersManagerRow}`,
+  viewRule: `${platformAdmin} || user_id = @request.auth.id || ${tenantMembersManagerRow}`,
+  createRule: `${platformAdmin} || ${tenantMembersOwnerRow}`,
+  updateRule: `${platformAdmin} || ${tenantMembersOwnerRow}`,
+  deleteRule: `${platformAdmin} || ${tenantMembersOwnerRow}`,
+};
+
+/** 持 project 連結可讀 check-in 資料（filter 由 client 指定 tenant_id） */
+const tenantDataPublicByTenant =
+  '@collection.tenants.tenant_id ?= tenant_id && @collection.tenants.slug != ""';
+
+const tenantDataApiRulesTight = {
+  listRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantDataPublicByTenant}`,
+  viewRule: null,
+  createRule: platformAdmin,
+  updateRule: `${platformAdmin} || ${tenantMemberAny}`,
+  deleteRule: platformAdmin,
+};
+
+const tenantDataApiRulesFallback = {
+  listRule: `${platformAdmin} || @request.auth.id != ""`,
+  viewRule: `${platformAdmin} || @request.auth.id != ""`,
+  createRule: platformAdmin,
+  updateRule: `${platformAdmin} || @request.auth.id != ""`,
+  deleteRule: platformAdmin,
+};
+
+async function ensureUsersCollection(token, existing) {
   const users = existing.find((c) => c.name === 'users');
   if (!users) {
     console.log('! 找不到 users auth collection');
@@ -128,32 +217,90 @@ async function ensureUsersFields(token, existing) {
 
   const names = new Set(users.schema.map((f) => f.name));
   const missing = userFieldDefs.filter((f) => !names.has(f.name));
-  if (!missing.length) {
-    console.log('✓ users 自訂欄位已齊');
+  const schema = missing.length
+    ? [...users.schema, ...missing.map((f) => normalizeField(f))]
+    : users.schema;
+
+  const rulesChanged = Object.entries(usersApiRules).some(
+    ([key, val]) => users[key] !== val,
+  );
+
+  if (missing.length || rulesChanged) {
+    const patch = { ...usersApiRules };
+    if (missing.length) {
+      patch.schema = schema;
+      console.log(`+ 更新 users 欄位: ${missing.map((f) => f.name).join(', ')}`);
+    }
+    if (rulesChanged) {
+      console.log('+ 更新 users API rules（Super Admin 建帳）');
+    }
+    await api(token, `/collections/${users.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  } else {
+    console.log('✓ users 欄位與 rules 已齊');
+  }
+}
+
+async function syncCollectionRules(token, existing, name, rules, { fallbackRules = null } = {}) {
+  const col = existing.find((c) => c.name === name);
+  if (!col) return;
+
+  const patch = {};
+  for (const [key, val] of Object.entries(rules)) {
+    if (col[key] !== val) patch[key] = val;
+  }
+  if (!Object.keys(patch).length) {
+    console.log(`✓ ${name} rules 已齊`);
     return;
   }
 
-  const schema = [
-    ...users.schema,
-    ...missing.map((f) => normalizeField(f)),
-  ];
+  console.log(`+ 更新 ${name} rules: ${Object.keys(patch).join(', ')}`);
+  try {
+    await api(token, `/collections/${col.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+    console.log(`✓ ${name} rules 已更新`);
+    return;
+  } catch (err) {
+    console.error(`! ${name} 批次更新失敗: ${err.message}`);
+    if (fallbackRules) {
+      console.log(`  嘗試 ${name} fallback rules...`);
+      return syncCollectionRules(token, existing, name, fallbackRules);
+    }
+  }
 
-  console.log(`+ 更新 users 欄位: ${missing.map((f) => f.name).join(', ')}`);
-  await api(token, `/collections/${users.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ schema }),
-  });
+  // 逐條更新；viewRule 失敗時改為 null（沿用 listRule）
+  for (const [key, val] of Object.entries(patch)) {
+    let ruleVal = val;
+    if (key === 'viewRule') {
+      try {
+        await api(token, `/collections/${col.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ [key]: ruleVal }),
+        });
+        console.log(`✓ ${name}.${key}`);
+        continue;
+      } catch {
+        ruleVal = null;
+        console.log(`  ${name}.viewRule 無效，改用 null（沿用 listRule）`);
+      }
+    }
+    await api(token, `/collections/${col.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ [key]: ruleVal }),
+    });
+    console.log(`✓ ${name}.${key}`);
+  }
 }
 
 const collectionDefs = [
   {
     name: 'tenants',
     type: 'base',
-    listRule: '',
-    viewRule: '',
-    createRule: '@request.auth.is_platform_admin = true',
-    updateRule: '@request.auth.is_platform_admin = true || owner_uid = @request.auth.id',
-    deleteRule: '@request.auth.is_platform_admin = true',
+    ...tenantsApiRules,
     fields: [
       { name: 'tenant_id', type: 'text', required: true, options: { min: 2, max: 64 } },
       { name: 'slug', type: 'text', required: true, options: { min: 2, max: 64 } },
@@ -181,11 +328,7 @@ const collectionDefs = [
   {
     name: 'tenant_data',
     type: 'base',
-    listRule: '',
-    viewRule: '',
-    createRule: '@request.auth.id != ""',
-    updateRule: '@request.auth.id != ""',
-    deleteRule: '@request.auth.is_platform_admin = true',
+    ...tenantDataApiRulesTight,
     fields: [
       { name: 'tenant_id', type: 'text', required: true, options: { min: 2, max: 64 } },
       { name: 'wedding_guests', type: 'json' },
@@ -200,11 +343,7 @@ const collectionDefs = [
   {
     name: 'tenant_members',
     type: 'base',
-    listRule: '@request.auth.id != ""',
-    viewRule: '@request.auth.id != ""',
-    createRule: '@request.auth.id != ""',
-    updateRule: '@request.auth.id != ""',
-    deleteRule: '@request.auth.id != ""',
+    ...tenantMembersApiRules,
     fields: [
       { name: 'tenant_id', type: 'text', required: true },
       { name: 'user_id', type: 'text', required: true },
@@ -212,15 +351,11 @@ const collectionDefs = [
         name: 'role',
         type: 'select',
         required: true,
-        options: { maxSelect: 1, values: ['admin', 'reception'] },
+        options: { maxSelect: 1, values: ['owner', 'admin', 'reception'] },
       },
-      { name: 'email', type: 'text' },
-      { name: 'display_name', type: 'text' },
-      { name: 'initial_password', type: 'text' },
-      { name: 'created_at', type: 'number' },
-      { name: 'created_by_uid', type: 'text' },
-      { name: 'created_by_email', type: 'text' },
+      { name: 'created_at', type: 'number', required: false },
     ],
+    relationFields: ['user', 'tenant'],
     indexes: [
       'CREATE UNIQUE INDEX idx_tenant_members_pair ON tenant_members (tenant_id, user_id)',
     ],
@@ -242,6 +377,55 @@ function buildCollectionPayload(def, { withIndexes = false } = {}) {
     payload.indexes = def.indexes;
   }
   return payload;
+}
+
+async function ensureTenantMembersSchema(token, existing) {
+  const users = existing.find((c) => c.name === 'users');
+  const tenants = existing.find((c) => c.name === 'tenants');
+  const members = existing.find((c) => c.name === 'tenant_members');
+  if (!members) return;
+
+  const schema = [...members.schema];
+  let changed = false;
+
+  const roleIdx = schema.findIndex((f) => f.name === 'role');
+  if (roleIdx >= 0) {
+    const vals = schema[roleIdx].options?.values || [];
+    if (!vals.includes('owner')) {
+      schema[roleIdx] = {
+        ...schema[roleIdx],
+        options: {
+          ...schema[roleIdx].options,
+          values: ['owner', ...vals.filter((v) => v !== 'owner')],
+        },
+      };
+      changed = true;
+      console.log('+ tenant_members.role 加入 owner');
+    }
+  }
+
+  const names = new Set(schema.map((f) => f.name));
+  if (users && !names.has('user')) {
+    schema.push(relationField('user', users.id, { required: false }));
+    changed = true;
+    console.log('+ tenant_members.user relation → users');
+  }
+  if (tenants && !names.has('tenant')) {
+    schema.push(relationField('tenant', tenants.id, { required: false }));
+    changed = true;
+    console.log('+ tenant_members.tenant relation → tenants');
+  }
+
+  if (!changed) {
+    console.log('✓ tenant_members schema 已齊');
+    return;
+  }
+
+  await api(token, `/collections/${members.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ schema }),
+  });
+  console.log('✓ tenant_members schema 已更新');
 }
 
 async function ensureCollection(token, existing, def) {
@@ -273,15 +457,27 @@ async function main() {
   const token = await adminAuth();
   let existing = await listCollections(token);
 
-  await ensureUsersFields(token, existing);
+  await ensureUsersCollection(token, existing);
   existing = await listCollections(token);
 
   for (const def of collectionDefs) {
     await ensureCollection(token, existing, def);
   }
 
-  console.log('\n完成！請將 pocketbase/pb_hooks/tws.pb.js 複製到 NAS 上 PocketBase 的 pb_hooks/ 目錄並重啟。');
-  console.log('然後在 users collection 建立帳號並設 is_platform_admin = true。');
+  existing = await listCollections(token);
+  await ensureTenantMembersSchema(token, existing);
+  existing = await listCollections(token);
+  await syncCollectionRules(token, existing, 'tenants', tenantsApiRules);
+  await syncCollectionRules(token, existing, 'tenant_members', tenantMembersApiRules);
+  await syncCollectionRules(token, existing, 'tenant_data', tenantDataApiRulesTight, {
+    fallbackRules: tenantDataApiRulesFallback,
+  });
+
+  console.log('\n完成！');
+  console.log('- 在 users 建立帳號並設 is_platform_admin = true（Super Admin 登入 /super）');
+  console.log('- 角色喺 tenant_members.role：owner / admin / reception（唔再用 tenants.owner_uid）');
+  console.log('- 建帳／成員 CUD 經 pb_hooks：create-user、upsert-member、remove-member');
+  console.log('- 部署 pocketbase/pb_hooks/tws_routes.pb.js + tws.pb.js；GET /tws/health 確認 version');
 }
 
 main().catch((e) => {

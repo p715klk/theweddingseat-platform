@@ -1,161 +1,170 @@
-/// <reference path="../pb_data/types.d.ts" />
+/// <reference path="../types.d.ts" />
+/**
+ * PocketBase record hooks（onRecord* 要 inline helper，見下方）
+ * HTTP routes 喺 tws_routes.pb.js（由 scripts/build-tws-hooks.mjs 生成）
+ */
 
-function requireAuth(c) {
-  const record = c.get("authRecord");
-  if (!record) throw new UnauthorizedError("需要登入");
-  return record;
-}
-
-function isPlatformAdmin(record) {
-  return record.getBool("is_platform_admin") === true;
-}
-
-function normalizeMemberRole(val) {
-  if (val === true || val === "admin") return "admin";
-  if (val === "reception") return "reception";
-  return "";
-}
-
-function countAdmins(members) {
-  let n = 0;
-  for (const m of members) {
-    if (normalizeMemberRole(m.getString("role")) === "admin") n += 1;
-  }
-  return n;
-}
-
-function isTenantOwner(tenantId, uid) {
-  const tenant = $app.findFirstRecordByFilter("tenants", `tenant_id = {:tid}`, { tid: tenantId });
-  return tenant && tenant.getString("owner_uid") === uid;
-}
-
-function callerCanManageUsers(caller, tenantId) {
-  if (isPlatformAdmin(caller)) return true;
-  return isTenantOwner(tenantId, caller.id);
-}
-
-function callerCanCreateUsers(caller) {
-  if (isPlatformAdmin(caller)) return true;
-  const owned = $app.findRecordsByFilter("tenants", `owner_uid = {:uid}`, { uid: caller.id }, 1, 0);
-  return owned.length > 0;
-}
-
-function shouldDeleteAuth(uid, excludeTenantId) {
-  const members = $app.findRecordsByFilter("tenant_members", `user_id = {:uid}`, { uid }, 200, 0);
-  for (const m of members) {
-    if (m.getString("tenant_id") !== excludeTenantId) return false;
-  }
+/** Admin 刪 user 時跳過；一般用戶刪除時先清 tenant_members */
+onRecordBeforeDeleteRequest(function(e) {
+  if (e.collection.name !== "users") return;
   try {
-    const user = $app.findRecordById("users", uid);
-    if (user && user.getBool("is_platform_admin")) return false;
-  } catch (err) {
+    if (e.hasSuperuserAuth && e.hasSuperuserAuth()) return;
+  } catch (err0) {
   }
-  return true;
-}
-
-routerAdd("POST", "/api/tws/create-user", (c) => {
-  const caller = requireAuth(c);
-  if (!callerCanCreateUsers(caller)) {
-    throw new ForbiddenError("沒有權限建立用戶");
-  }
-
-  const data = $apis.requestInfo(c).data;
-  const email = String(data.email || "").trim().toLowerCase();
-  const password = String(data.password || "");
-  if (!email) throw new BadRequestError("請輸入 Email");
-  if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
-
-  const collection = $app.findCollectionByNameOrId("users");
-  const record = new Record(collection);
-  record.set("email", email);
-  record.setPassword(password);
-  record.set("verified", true);
-  record.set("is_platform_admin", false);
-  record.set("created_at", Date.now());
-  record.set("created_by_uid", caller.id);
-  record.set("created_by_email", caller.getString("email"));
-
-  $app.save(record);
-
-  return c.json(200, { uid: record.id, email: record.getString("email") });
-});
-
-routerAdd("POST", "/api/tws/remove-member", (c) => {
-  const caller = requireAuth(c);
-  const data = $apis.requestInfo(c).data;
-  const tenantId = String(data.tenantId || "").trim();
-  const targetUid = String(data.uid || "").trim();
-
-  if (!tenantId || !targetUid) throw new BadRequestError("缺少 tenantId 或 uid");
-  if (targetUid === caller.id) throw new BadRequestError("不能移除自己的帳號");
-  if (!callerCanManageUsers(caller, tenantId)) {
-    throw new ForbiddenError("只有 owner 或平台管理員可以移除用戶");
-  }
-
-  const tenant = $app.findFirstRecordByFilter("tenants", `tenant_id = {:tid}`, { tid: tenantId });
-  if (!tenant) throw new NotFoundError("找不到專案");
-
-  const ownerUid = tenant.getString("owner_uid");
-  if (ownerUid && targetUid === ownerUid) {
-    throw new BadRequestError("不能移除專案 Owner");
-  }
-
-  const member = $app.findFirstRecordByFilter(
-    "tenant_members",
-    `tenant_id = {:tid} && user_id = {:uid}`,
-    { tid: tenantId, uid: targetUid },
-  );
-  if (!member) throw new NotFoundError("此用戶不在專案成員清單內");
-
-  const role = normalizeMemberRole(member.getString("role"));
-  if (!role) throw new NotFoundError("此用戶不在專案成員清單內");
-
-  if (role === "admin") {
-    const allMembers = $app.findRecordsByFilter("tenant_members", `tenant_id = {:tid}`, { tid: tenantId }, 200, 0);
-    if (countAdmins(allMembers) <= 1) {
-      throw new BadRequestError("至少需要保留一位後台用戶");
-    }
-  }
-
-  $app.delete(member);
-
-  let authDeleted = false;
-  if (shouldDeleteAuth(targetUid, tenantId)) {
+  var uid = e.record.id;
+  var findRows = function(col, filter, params, limit) {
+    var lim = limit || 500;
+    var bind = params || {};
     try {
-      const user = $app.findRecordById("users", targetUid);
-      $app.delete(user);
-      authDeleted = true;
+      if (typeof $app.findRecordsByFilter === "function") {
+        return $app.findRecordsByFilter(col, filter, "", lim, 0, bind) || [];
+      }
     } catch (err) {
     }
-  }
-
-  return c.json(200, { tenantId, uid: targetUid, authDeleted });
-});
-
-routerAdd("POST", "/api/tws/set-password", (c) => {
-  const caller = requireAuth(c);
-  if (!isPlatformAdmin(caller)) {
-    throw new ForbiddenError("只限平台管理員");
-  }
-
-  const data = $apis.requestInfo(c).data;
-  const uid = String(data.uid || "").trim();
-  const newPassword = String(data.newPassword || "");
-  if (!uid) throw new BadRequestError("缺少 uid");
-  if (newPassword.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
-
-  const user = $app.findRecordById("users", uid);
-  user.setPassword(newPassword);
-  $app.save(user);
-
-  return c.json(200, { uid });
-});
-
-onRecordBeforeDeleteRequest((e) => {
-  if (e.collection.name !== "users") return;
-  const uid = e.record.id;
-  const members = $app.findRecordsByFilter("tenant_members", `user_id = {:uid}`, { uid }, 500, 0);
-  for (const m of members) {
-    $app.delete(m);
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        return dao.findRecordsByFilter(col, filter, bind, lim, 0) || [];
+      }
+    } catch (err2) {
+    }
+    return [];
+  };
+  try {
+    var members = findRows("tenant_members", "user_id = {:uid}", { uid: uid }, 500);
+    for (var i = 0; i < members.length; i += 1) {
+      try {
+        $app.delete(members[i]);
+      } catch (err3) {
+        console.error("tws: member cascade skipped:", err3);
+      }
+    }
+  } catch (err) {
+    console.error("tws: users beforeDelete skipped:", err);
   }
 }, "users");
+
+onRecordBeforeDeleteRequest(function(e) {
+  if (e.collection.name !== "tenants") return;
+  var readStr = function(rec, field) {
+    try {
+      return rec.getString(field) || "";
+    } catch (err) {
+      try {
+        return String(rec.get(field) || "");
+      } catch (err2) {
+        return "";
+      }
+    }
+  };
+  var tenantId = readStr(e.record, "tenant_id") || readStr(e.record, "slug");
+  if (!tenantId) return;
+  var findRows = function(col, filter, params, limit) {
+    var lim = limit || 500;
+    var bind = params || {};
+    try {
+      if (typeof $app.findRecordsByFilter === "function") {
+        return $app.findRecordsByFilter(col, filter, "", lim, 0, bind) || [];
+      }
+    } catch (err) {
+    }
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        return dao.findRecordsByFilter(col, filter, bind, lim, 0) || [];
+      }
+    } catch (err2) {
+    }
+    return [];
+  };
+  var tenantRecordId = e.record.id;
+  var ownerUid = readStr(e.record, "owner_uid");
+  var cleanupUids = {};
+  if (ownerUid) cleanupUids[ownerUid] = true;
+
+  try {
+    var members = findRows("tenant_members", "tenant_id = {:tid}", { tid: tenantId }, 500);
+    for (var i = 0; i < members.length; i += 1) {
+      var memberUid = readStr(members[i], "user_id");
+      if (memberUid) cleanupUids[memberUid] = true;
+      try {
+        $app.delete(members[i]);
+      } catch (err) {
+        console.error("tws: tenant member cleanup skipped:", err);
+      }
+    }
+  } catch (err) {
+    console.error("tws: tenant member lookup skipped:", err);
+  }
+
+  try {
+    var dataRows = findRows("tenant_data", "tenant_id = {:tid}", { tid: tenantId }, 10);
+    for (var j = 0; j < dataRows.length; j += 1) {
+      try {
+        $app.delete(dataRows[j]);
+      } catch (err) {
+        console.error("tws: tenant_data cleanup skipped:", err);
+      }
+    }
+  } catch (err) {
+    console.error("tws: tenant_data lookup skipped:", err);
+  }
+
+  for (var key in cleanupUids) {
+    var cleanupUid = key;
+    try {
+      var remainMembers = findRows("tenant_members", "user_id = {:uid}", { uid: cleanupUid }, 1);
+      if (remainMembers.length > 0) continue;
+      var ownedTenants = findRows("tenants", "owner_uid = {:uid}", { uid: cleanupUid }, 200);
+      var hasOtherTenant = false;
+      for (var k = 0; k < ownedTenants.length; k += 1) {
+        if (ownedTenants[k].id !== tenantRecordId) {
+          hasOtherTenant = true;
+          break;
+        }
+      }
+      if (hasOtherTenant) continue;
+      var orphan = $app.findRecordById("users", cleanupUid);
+      var isAdmin = false;
+      try {
+        isAdmin = orphan.getBool("is_platform_admin") === true;
+      } catch (errA) {
+        try {
+          isAdmin = orphan.get("is_platform_admin") === true;
+        } catch (errB) {
+          isAdmin = false;
+        }
+      }
+      if (isAdmin) continue;
+      $app.delete(orphan);
+    } catch (err) {
+      console.error("tws: orphan user cleanup skipped:", cleanupUid, err);
+    }
+  }
+}, "tenants");
+
+/** Super Admin 建帳後自動 verified（兼容 PB <0.23 同 >=0.23） */
+(function registerAutoVerifyUsers() {
+  var fn = function(e) {
+    if (e.collection && e.collection.name !== "users") return;
+    var rec = e.record || e.model;
+    if (!rec) return;
+    try {
+      if (typeof rec.setVerified === "function") rec.setVerified(true);
+      else rec.set("verified", true);
+    } catch (err) {
+      console.error("tws: auto-verify skipped:", err);
+    }
+  };
+  if (typeof onRecordBeforeCreateRequest === "function") {
+    onRecordBeforeCreateRequest(fn, "users");
+    return;
+  }
+  if (typeof onRecordCreate === "function") {
+    onRecordCreate(fn, "users");
+    return;
+  }
+  if (typeof onRecordAfterCreateRequest === "function") {
+    onRecordAfterCreateRequest(fn, "users");
+  }
+})();

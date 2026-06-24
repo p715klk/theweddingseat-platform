@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "setup:pocketbase": "node scripts/setup-pocketbase.mjs",
+    "build:tws-hooks": "node scripts/build-tws-hooks.mjs",
+    "diagnose:pocketbase-tenant": "node scripts/diagnose-pocketbase-tenant.mjs",
+    "cleanup:pocketbase-users": "node scripts/cleanup-pocketbase-users.mjs",
     "sync:legacy": "node scripts/sync-legacy-to-public.js",
     "dev": "node scripts/sync-legacy-to-public.js && vite",
     "build": "node scripts/sync-legacy-to-public.js && vite build && node scripts/copy-404.js",

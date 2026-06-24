@@ -1,10 +1,9 @@
 import { ref } from 'vue';
-import { get, set, update, ref as dbRef } from '@/rtdb';
-import { database } from '@/firebase';
+import { get, set, ref as dbRef } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
-import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
+import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, getMemberQuota } from '@/lib/tenantMemberLimits';
 
@@ -18,9 +17,18 @@ export function useTenantUsers() {
   const error = ref('');
 
   function normalizeMemberRole(val) {
-    if (val === true) return 'admin'; // legacy
+    if (val === 'owner') return 'owner';
+    if (val === true) return 'admin';
     if (val === 'admin' || val === 'reception') return val;
     return '';
+  }
+
+  function isCurrentOwner() {
+    const uid = user.value?.uid;
+    if (!uid) return false;
+    const self = members.value.find((m) => m.uid === uid);
+    if (self?.role === 'owner') return true;
+    return meta.value?.owner_uid === uid;
   }
 
   function editorInfo() {
@@ -36,11 +44,11 @@ export function useTenantUsers() {
     loading.value = true;
     error.value = '';
     try {
-      const [membersSnap, profilesSnap] = await Promise.all([
+      const [memberSnap, profilesSnap] = await Promise.all([
         get(tenantRef('members')),
         get(tenantRef('user_profiles')),
       ]);
-      const memberMap = membersSnap.val() || {};
+      const memberMap = memberSnap.val() || {};
       const profiles = profilesSnap.val() || {};
       const uids = Object.keys(memberMap).filter((uid) => normalizeMemberRole(memberMap[uid]));
 
@@ -63,34 +71,41 @@ export function useTenantUsers() {
 
   async function createMember({ email, password, displayName = '', role = 'admin' }) {
     if (!tenantId.value) throw new Error('專案未就緒');
-    if (!isPlatformAdmin.value && meta.value?.owner_uid && meta.value.owner_uid !== user.value?.uid) {
-      throw new Error('只有 owner 可以新增用戶');
-    }
     if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
     const trimmedEmail = email?.trim();
     if (!trimmedEmail) throw new Error('請輸入 Email');
     if (!password || password.length < 6) throw new Error('密碼至少需要 6 個字元');
 
     await loadMembers();
+    if (!isPlatformAdmin.value && !isCurrentOwner()) {
+      throw new Error('只有 owner 可以新增用戶');
+    }
     assertCanAddMember(members.value, meta.value?.owner_uid || '', role, {
       bypassLimits: isPlatformAdmin.value,
     });
 
-    const { uid } = await createAuthUserViaRest(trimmedEmail, password);
+    const { uid } = await createAuthUserViaRest(
+      trimmedEmail,
+      password,
+      {
+        display_name: displayName.trim(),
+        initial_password: password,
+      },
+      { tenantId: tenantId.value },
+    );
     const editor = editorInfo();
 
     const profile = {
       email: trimmedEmail,
       display_name: displayName.trim(),
+      initial_password: password,
       created_at: Date.now(),
       created_by_uid: editor?.uid || '',
       created_by_email: editor?.email || '',
     };
 
-    await update(dbRef(database), {
-      [`tenants/${tenantId.value}/members/${uid}`]: role,
-      [`tenants/${tenantId.value}/user_profiles/${uid}`]: profile,
-    });
+    await callUpdateMemberProfile({ tenantId: tenantId.value, uid, profile });
+    await callUpsertTenantMember({ tenantId: tenantId.value, uid, role });
 
     await loadMembers();
     return { uid, email: trimmedEmail };
@@ -100,7 +115,7 @@ export function useTenantUsers() {
     if (!tenantId.value) throw new Error('專案未就緒');
     if (!uid) throw new Error('無效的用戶');
     if (uid === user.value?.uid) throw new Error('不能移除自己的帳號');
-    if (!isPlatformAdmin.value && meta.value?.owner_uid && meta.value.owner_uid !== user.value?.uid) {
+    if (!isPlatformAdmin.value && !isCurrentOwner()) {
       throw new Error('只有 owner 可以移除用戶');
     }
 

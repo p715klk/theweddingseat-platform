@@ -144,26 +144,33 @@ async function upsertTenant(token, tenantId, meta, dataPayload) {
 async function upsertMember(token, tenantId, uid, role, profile) {
   const filter = encodeURIComponent(`tenant_id = "${tenantId}" && user_id = "${uid}"`);
   const existing = await pbApi(token, `/collections/tenant_members/records?filter=${filter}&perPage=1`);
-  const fields = {
+  const memberFields = {
     tenant_id: tenantId,
     user_id: uid,
     role: role === true || role === 'admin' ? 'admin' : 'reception',
-    email: profile?.email || '',
-    display_name: profile?.display_name || '',
-    initial_password: profile?.initial_password || '',
     created_at: profile?.created_at || Date.now(),
-    created_by_uid: profile?.created_by_uid || '',
-    created_by_email: profile?.created_by_email || '',
   };
   if (existing.items?.[0]) {
     await pbApi(token, `/collections/tenant_members/records/${existing.items[0].id}`, {
       method: 'PATCH',
-      body: JSON.stringify(fields),
+      body: JSON.stringify(memberFields),
     });
   } else {
     await pbApi(token, '/collections/tenant_members/records', {
       method: 'POST',
-      body: JSON.stringify(fields),
+      body: JSON.stringify(memberFields),
+    });
+  }
+  if (profile) {
+    await pbApi(token, `/collections/users/records/${uid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        display_name: profile.display_name || '',
+        initial_password: profile.initial_password || '',
+        created_at: profile.created_at || Date.now(),
+        created_by_uid: profile.created_by_uid || '',
+        created_by_email: profile.created_by_email || '',
+      }),
     });
   }
 }

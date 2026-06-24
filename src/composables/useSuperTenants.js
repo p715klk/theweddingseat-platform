@@ -12,6 +12,7 @@ import {
 } from '@/lib/superAdminProvisioning';
 import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
+import { callSetUserPassword } from '@/lib/twsApi';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -294,7 +295,7 @@ export async function isSlugTaken(slug) {
 }
 
 /**
- * 建立新 tenant（Super Admin 用；Auth 帳號仍要 Console 或 Cloud Function 開）
+ * 建立新 tenant（Super Admin 用；會透過 PocketBase API 建立 Owner 帳號）
  */
 export async function createTenant({
   slug,
@@ -324,7 +325,12 @@ export async function createTenant({
   const pw = normalizePassword(ownerPassword);
   assertPassword(pw);
   await assertPlatformAdmin(editor);
-  const created = await createAuthUserForEmail({ email: trimmedEmail, password: pw });
+  const created = await createAuthUserForEmail({
+    email: trimmedEmail,
+    password: pw,
+    displayName: ownerDisplayName,
+    initialPassword: pw,
+  });
   const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
@@ -388,8 +394,6 @@ export async function createTenant({
   };
 }
 
-import { callSetUserPassword } from '@/lib/twsApi';
-
 export async function setAuthUserPassword({ uid, newPassword }) {
   const pw = String(newPassword || '').trim();
   if (pw.length < 6) throw new Error('密碼至少需要 6 個字元');
@@ -429,7 +433,12 @@ export async function cloneTenant({
   const pw = normalizePassword(ownerPassword);
   assertPassword(pw);
   await assertPlatformAdmin(editor);
-  const created = await createAuthUserForEmail({ email: trimmedEmail, password: pw });
+  const created = await createAuthUserForEmail({
+    email: trimmedEmail,
+    password: pw,
+    displayName: ownerDisplayName,
+    initialPassword: pw,
+  });
   const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
   const meta = {
     couple_names: coupleNames.trim(),
@@ -519,13 +528,10 @@ export async function setTenantFeatures(tenantId, features, editor = null) {
   );
 }
 
-/** 永久刪除 tenant（含 slug 對應及所有資料） */
+/** 永久刪除 tenant（含 slug 對應、成員、及無其他專案嘅 Owner 登入帳號） */
 export async function deleteTenant(slug, tenantId) {
   const trimmedSlug = String(slug || '').trim();
   const id = String(tenantId || '').trim();
   if (!trimmedSlug || !id) throw new Error('缺少 slug 或 tenantId');
-  await update(dbRef(database), {
-    [`slugs/${trimmedSlug}`]: null,
-    [`tenants/${id}`]: null,
-  });
+  await set(dbRef(database, `tenants/${id}`), null);
 }

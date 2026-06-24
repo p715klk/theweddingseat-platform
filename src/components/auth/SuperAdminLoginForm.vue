@@ -1,7 +1,7 @@
 <template>
   <form class="login-card" @submit.prevent="submit">
     <h2>平台 Super Admin</h2>
-    <p class="hint">僅限 platform_admins 帳號</p>
+    <p class="hint">僅限 platform admin 帳號</p>
     <label>Email</label>
     <input v-model="email" type="email" required autocomplete="username" />
     <label>密碼</label>
@@ -25,6 +25,7 @@
 import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
+import { mapPocketBaseLoginError } from '@/lib/pocketbaseErrors';
 
 const emit = defineEmits(['success']);
 const { login, authError } = useAuth();
@@ -45,12 +46,7 @@ async function submit() {
     await login(email.value, password.value);
     emit('success');
   } catch (e) {
-    const code = e?.code || '';
-    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-      error.value = 'Email 或密碼錯誤';
-    } else {
-      error.value = e?.message || '登入失敗';
-    }
+    error.value = mapPocketBaseLoginError(e);
   } finally {
     loading.value = false;
   }
