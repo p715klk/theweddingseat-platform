@@ -89,8 +89,9 @@ import { ref } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useSuperAdminSettings } from '@/composables/useSuperAdminSettings';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
+import { setPostLogoutNotice } from '@/lib/logoutNotices';
 
-const { user, changePassword } = useAuth();
+const { user, changePassword, logout } = useAuth();
 const { idleTimeoutMinutes, setIdleTimeoutMinutes, IDLE_TIMEOUT_OPTIONS } = useSuperAdminSettings();
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
@@ -115,8 +116,18 @@ function onIdleChange(e) {
 
 function passwordErrorMessage(e) {
   const code = e?.code || '';
-  if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-    return '目前密碼錯誤';
+  const status = e?.status ?? e?.response?.status;
+  const raw = String(e?.response?.message || e?.message || '');
+
+  // PocketBase: re-authenticate 失敗通常是 "Failed to authenticate."
+  if (
+    code === 'auth/wrong-password' ||
+    code === 'auth/invalid-credential' ||
+    raw.includes('Failed to authenticate') ||
+    raw.includes('Invalid login') ||
+    (status === 400 && raw)
+  ) {
+    return '目前密碼不正確';
   }
   if (code === 'auth/weak-password') {
     return '新密碼太弱（至少 6 個字元）';
@@ -124,7 +135,7 @@ function passwordErrorMessage(e) {
   if (code === 'auth/requires-recent-login') {
     return '請重新登入後再改密碼';
   }
-  return e?.message || '更新密碼失敗';
+  return raw || '更新密碼失敗';
 }
 
 async function submitPassword() {
@@ -151,7 +162,9 @@ async function submitPassword() {
     newPassword.value = '';
     confirmPassword.value = '';
     pwMsgOk.value = true;
-    pwMsg.value = '密碼已更新';
+    pwMsg.value = '密碼已更新，請重新登入';
+    setPostLogoutNotice('密碼已更新，請重新登入');
+    await logout();
   } catch (e) {
     pwMsgOk.value = false;
     pwMsg.value = passwordErrorMessage(e);

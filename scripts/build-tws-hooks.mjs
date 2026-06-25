@@ -765,6 +765,56 @@ const ROUTES = [
 `,
   },
   {
+    path: '/tws/transfer-owner',
+    body: `
+  if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  var tenantId = String(data.tenantId || "").trim();
+  var newOwnerUid = String(data.newOwnerUid || "").trim();
+  if (!tenantId || !newOwnerUid) throw new BadRequestError("缺少 tenantId 或 newOwnerUid");
+  var tenant = loadTenantByKey(tenantId);
+  if (!tenant) throw new NotFoundError("找不到專案");
+  var targetRole = getMemberRole(tenantId, newOwnerUid);
+  if (targetRole !== "admin") throw new BadRequestError("只能將 Owner 轉移給後台管理員");
+  var memberRows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantId });
+  var currentOwnerUid = "";
+  var currentOwnerRow = null;
+  for (var oi = 0; oi < memberRows.length; oi += 1) {
+    var orole = normalizeMemberRole(recordStr(memberRows[oi], "role"));
+    if (orole === "owner") {
+      currentOwnerUid = recordStr(memberRows[oi], "user_id");
+      currentOwnerRow = memberRows[oi];
+      break;
+    }
+  }
+  if (!currentOwnerUid) {
+    currentOwnerUid = recordStr(tenant, "owner_uid");
+    if (currentOwnerUid) currentOwnerRow = getMemberRow(tenantId, currentOwnerUid);
+  }
+  if (currentOwnerUid === newOwnerUid) {
+    return e.json(200, { tenantId: tenantId, ownerUid: newOwnerUid, changed: false });
+  }
+  if (currentOwnerRow && currentOwnerUid) {
+    setMemberFields(currentOwnerRow, tenantId, tenant, currentOwnerUid, "admin");
+    try { twsSave(currentOwnerRow); } catch (errDem) { throw new BadRequestError("更新原 Owner 角色失敗"); }
+  }
+  var newOwnerRow = getMemberRow(tenantId, newOwnerUid);
+  if (!newOwnerRow) throw new NotFoundError("找不到新 Owner 成員");
+  setMemberFields(newOwnerRow, tenantId, tenant, newOwnerUid, "owner");
+  try { twsSave(newOwnerRow); } catch (errProm) { throw new BadRequestError("更新新 Owner 角色失敗"); }
+  tenant.set("owner_uid", newOwnerUid);
+  tenant.set("updated_at", Date.now());
+  tenant.set("updated_by_uid", callerId(caller));
+  tenant.set("updated_by_email", recordStr(caller, "email"));
+  try { twsSave(tenant); } catch (errT) { throw new BadRequestError("更新專案 Owner 失敗"); }
+  return e.json(200, {
+    tenantId: tenantId,
+    ownerUid: newOwnerUid,
+    previousOwnerUid: currentOwnerUid,
+    changed: true,
+  });
+`,
+  },
+  {
     path: '/tws/swap-member-roles',
     body: `
   var tenantId = String(data.tenantId || "").trim();

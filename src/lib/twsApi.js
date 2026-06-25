@@ -286,6 +286,10 @@ export async function callCheckMemberEmail({ email, tenantId = '' }) {
   }
 }
 
+export async function callTransferTenantOwner({ tenantId, newOwnerUid }) {
+  return twsFetch('transfer-owner', { tenantId, newOwnerUid });
+}
+
 export async function callUpsertTenantMember({ tenantId, uid, role = 'admin', display_name = null }) {
   const body = {
     tenantId,

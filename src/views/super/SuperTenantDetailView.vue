@@ -94,87 +94,47 @@
           最後修改：{{ formatAuditTime(tenant.meta.updated_at) }}
           <span v-if="tenant.meta.updated_by_email"> · {{ tenant.meta.updated_by_email }}</span>
         </p>
+      </section>
+
+      <section class="section">
+        <h3>轉移 Owner</h3>
+        <p class="hint-block">
+          只可轉移給現有<strong>後台管理員</strong>；原 Owner 會自動降為後台管理員。
+        </p>
         <p class="meta-readonly">
-          Owner：
-          <select v-model="pwUid" class="owner-select" @change="saveOwnerUid">
-            <option value="">—</option>
-            <option v-for="m in memberEntries" :key="m.uid" :value="m.uid">
+          現任 Owner：<strong>{{ currentOwnerLabel }}</strong>
+        </p>
+        <div v-if="adminMemberCandidates.length" class="owner-transfer-row">
+          <select v-model="transferOwnerUid" class="owner-select" :disabled="transferringOwner">
+            <option value="">選擇後台管理員…</option>
+            <option v-for="m in adminMemberCandidates" :key="m.uid" :value="m.uid">
               {{ m.email || m.uid }}
             </option>
           </select>
-        </p>
-      </section>
-
-      <section class="section">
-        <h3>後台權限（members）</h3>
-        <p v-if="!memberUids.length" class="hint">尚未設定。客戶無法登入後台改賓客。</p>
-        <ul v-else class="uid-list">
-          <li v-for="m in memberEntries" :key="m.uid">
-            <code>{{ m.email || m.uid }}</code>
-            <span v-if="m.initialPassword" class="pw-chip">
-              密碼：
-              <code>{{ pwVisible[m.uid] ? m.initialPassword : '********' }}</code>
-              <button type="button" class="btn-eye" @click="pwVisible[m.uid] = !pwVisible[m.uid]">
-                {{ pwVisible[m.uid] ? '隱藏' : '顯示' }}
-              </button>
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="section">
-        <h3>新增後台用戶（members）</h3>
-        <p class="hint-block">會建立一個新登入帳號，並加入此 Project 嘅 <code>members</code>。</p>
-        <div v-if="createdOwner" class="created-box">
-          <p class="created-title">✅ 已加入 members</p>
-          <ul class="created-list">
-            <li>Email：<code>{{ createdOwner.email }}</code></li>
-            <li>
-              初始密碼：<code>{{ createdOwner.password }}</code>
-              <button type="button" class="btn-copy" @click="copy(createdOwner.password)">複製</button>
-            </li>
-          </ul>
-          <p class="field-hint">此密碼會儲存喺 members 清單（預設遮住）；請即時複製交畀客戶。</p>
-        </div>
-        <form class="edit-form" @submit.prevent="submitOwner">
-          <div class="grid">
-            <div class="field" :class="{ 'field-full': memberEmailReuse }">
-              <label>用戶 Email <span class="req">*</span></label>
-              <input v-model="ownerForm.email" type="email" required autocomplete="off" placeholder="client@example.com" />
-              <p v-if="memberEmailChecking" class="email-status checking">檢查 Email…</p>
-              <p v-else-if="memberEmailHint" class="email-status" :class="memberEmailStatus">
-                {{ memberEmailHint }}
-              </p>
-            </div>
-            <div v-if="!memberEmailReuse" class="field">
-              <label>初始密碼 <span class="req">*</span></label>
-              <div class="pw-row">
-                <input v-model="ownerForm.password" type="text" required minlength="6" autocomplete="new-password" />
-                <button type="button" class="btn-generate" :disabled="savingOwner" @click="generateOwnerPw">生成</button>
-              </div>
-            </div>
-          </div>
-          <div class="field">
-            <label>顯示名稱</label>
-            <input v-model="ownerForm.displayName" type="text" placeholder="例如：Mary（新娘）" />
-          </div>
-          <p v-if="ownerMsg" :class="ownerMsgOk ? 'ok' : 'error'">{{ ownerMsg }}</p>
           <button
-            type="submit"
+            type="button"
             class="btn-save"
-            :class="{ 'btn-save-muted': memberEmailStatus === 'member' }"
-            :disabled="savingOwner || !canSubmitAddMember"
+            :disabled="transferringOwner || !transferOwnerUid || transferOwnerUid === currentOwnerUid"
+            @click="submitTransferOwner"
           >
-            {{ savingOwner ? '建立中…' : '➕ 建立並加入 members' }}
+            {{ transferringOwner ? '轉移中…' : '轉移 Owner' }}
           </button>
-        </form>
+        </div>
+        <p v-else class="hint">沒有可轉移的後台管理員；請先於下方新增 admin 成員。</p>
+        <p v-if="transferOwnerMsg" :class="transferOwnerMsgOk ? 'ok' : 'error'">{{ transferOwnerMsg }}</p>
       </section>
 
       <section class="section">
-        <h3>重設 Owner 密碼</h3>
-        <p class="hint-block">
-          平台管理員可透過 Super Admin 重設密碼功能更新帳號密碼。
-        </p>
+        <h3>用戶管理</h3>
+        <TenantMembersPanel
+          v-if="tenant?.tenantId"
+          ref="membersPanelRef"
+          :tenant-id="tenant.tenantId"
+          :owner-uid="tenantOwnerUid"
+          :show-viewer-hint="false"
+          id-prefix="super-tenant-members"
+          @updated="onMembersUpdated"
+        />
       </section>
 
       <section class="section">
@@ -209,17 +169,15 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
 import {
   getTenantBySlug,
-  getTenantOwnerProfile,
-  createTenantMemberUser,
-  getTenantUserProfiles,
   setTenantFeatures,
   updateTenantMeta,
   renameTenantSlug,
+  transferTenantOwner,
   normalizeSlug,
   formatAuditTime,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
-import { useMemberEmailCheck } from '@/composables/useMemberEmailCheck';
+import TenantMembersPanel from '@/components/admin/TenantMembersPanel.vue';
 import {
   DEFAULT_TENANT_FEATURES,
   resolveTenantFeatures,
@@ -241,14 +199,12 @@ const saveMetaOk = ref(false);
 const savingSlug = ref(false);
 const slugMsg = ref('');
 const slugMsgOk = ref(false);
-const pwUid = ref('');
-const ownerEmail = ref('');
-const savingOwner = ref(false);
-const ownerMsg = ref('');
-const ownerMsgOk = ref(false);
-const createdOwner = ref(null);
-const memberProfiles = ref({});
-const pwVisible = reactive({});
+const panelMembers = ref([]);
+const membersPanelRef = ref(null);
+const transferringOwner = ref(false);
+const transferOwnerUid = ref('');
+const transferOwnerMsg = ref('');
+const transferOwnerMsgOk = ref(false);
 const savingFeatures = ref(false);
 const featureMsg = ref('');
 const featureMsgOk = ref(true);
@@ -282,31 +238,7 @@ const editForm = reactive({
   plan: 'standard',
 });
 
-const ownerForm = reactive({
-  email: '',
-  password: '',
-  displayName: '',
-});
-
-const {
-  status: memberEmailStatus,
-  hint: memberEmailHint,
-  canProceed: memberEmailCanProceed,
-  isBlocking: memberEmailBlocking,
-  isChecking: memberEmailChecking,
-  isReuse: memberEmailReuse,
-} = useMemberEmailCheck(
-  computed(() => ownerForm.email),
-  { tenantId: computed(() => tenant.value?.tenantId || '') },
-);
-
-const canSubmitAddMember = computed(() => {
-  if (!ownerForm.email.trim()) return false;
-  if (memberEmailChecking.value || memberEmailBlocking.value) return false;
-  if (!memberEmailCanProceed.value) return false;
-  if (!memberEmailReuse.value && ownerForm.password.trim().length < 6) return false;
-  return true;
-});
+const tenantOwnerUid = computed(() => tenant.value?.meta?.owner_uid || '');
 
 const slugPreview = computed(() => normalizeSlug(editForm.slug));
 
@@ -324,7 +256,6 @@ function syncEditForm() {
   editForm.weddingDate = m.wedding_date || '';
   editForm.themeColor = m.theme_color || '#b91c1c';
   editForm.plan = m.plan || 'standard';
-  pwUid.value = m.owner_uid || '';
 }
 
 function syncFeatureForm() {
@@ -337,35 +268,36 @@ function syncFeatureForm() {
 const checkInUrl = computed(() => appUrl(`p/${slug.value}`));
 const adminUrl = computed(() => appUrl(`p/${slug.value}/admin`));
 
-const memberUids = computed(() => Object.keys(tenant.value?.members || {}));
-const memberEntries = computed(() =>
-  memberUids.value.map((uid) => {
-    const p = memberProfiles.value?.[uid] || {};
-    return {
-      uid,
-      email: p.email || '',
-      initialPassword: p.initial_password || '',
-    };
-  }),
+function onMembersUpdated(list) {
+  panelMembers.value = Array.isArray(list) ? list : [];
+}
+
+const currentOwnerUid = computed(() => {
+  const fromRole = panelMembers.value.find((m) => m.role === 'owner')?.uid;
+  return fromRole || tenant.value?.meta?.owner_uid || '';
+});
+
+const currentOwnerLabel = computed(() => {
+  const owner = panelMembers.value.find((m) => m.uid === currentOwnerUid.value);
+  return owner?.email || currentOwnerUid.value || '—';
+});
+
+const adminMemberCandidates = computed(() =>
+  panelMembers.value.filter((m) => m.role === 'admin'),
 );
 
 async function load() {
   loading.value = true;
   error.value = '';
   tenant.value = null;
-  ownerEmail.value = '';
-  memberProfiles.value = {};
+  panelMembers.value = [];
+  transferOwnerUid.value = '';
+  transferOwnerMsg.value = '';
   try {
     tenant.value = await getTenantBySlug(slug.value);
     if (tenant.value) {
       syncEditForm();
       syncFeatureForm();
-      const uid = tenant.value?.meta?.owner_uid || '';
-      if (uid) {
-        const profile = await getTenantOwnerProfile(tenant.value.tenantId, uid);
-        ownerEmail.value = profile?.email || '';
-      }
-      memberProfiles.value = await getTenantUserProfiles(tenant.value.tenantId);
     }
   } catch (e) {
     error.value = e?.message || '載入失敗';
@@ -387,40 +319,9 @@ async function copy(text) {
   }
 }
 
-function generateOwnerPw() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-  let out = '';
-  for (let i = 0; i < 12; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  ownerForm.password = out;
-}
-
-async function submitOwner() {
-  ownerMsg.value = '';
-  ownerMsgOk.value = false;
-  createdOwner.value = null;
-  savingOwner.value = true;
-  try {
-    await createTenantMemberUser({
-      tenantId: tenant.value.tenantId,
-      email: ownerForm.email,
-      password: ownerForm.password,
-      displayName: ownerForm.displayName,
-      reuseExisting: memberEmailReuse.value,
-      editor: editorInfo(),
-    });
-    ownerMsgOk.value = true;
-    ownerMsg.value = '已建立並加入 members';
-    createdOwner.value = { email: ownerForm.email.trim(), password: ownerForm.password };
-    ownerForm.email = '';
-    ownerForm.password = '';
-    ownerForm.displayName = '';
-    await load();
-  } catch (e) {
-    ownerMsgOk.value = false;
-    ownerMsg.value = e?.message || '建立失敗';
-  } finally {
-    savingOwner.value = false;
-  }
+async function refreshAfterTransfer() {
+  await load();
+  await membersPanelRef.value?.loadMembers?.();
 }
 
 async function toggleFeature(key, enabled) {
@@ -449,13 +350,44 @@ async function toggleFeature(key, enabled) {
   }
 }
 
-async function saveOwnerUid() {
+async function submitTransferOwner() {
+  transferOwnerMsg.value = '';
+  transferOwnerMsgOk.value = false;
+  const uid = String(transferOwnerUid.value || '').trim();
+  if (!uid) {
+    transferOwnerMsgOk.value = false;
+    transferOwnerMsg.value = '請選擇後台管理員';
+    return;
+  }
+  if (uid === currentOwnerUid.value) {
+    transferOwnerMsgOk.value = false;
+    transferOwnerMsg.value = '已是現任 Owner';
+    return;
+  }
+  const target = adminMemberCandidates.value.find((m) => m.uid === uid);
+  if (!target) {
+    transferOwnerMsgOk.value = false;
+    transferOwnerMsg.value = '只能轉移給後台管理員';
+    return;
+  }
+  const label = target.email || uid;
+  const ok = window.confirm(
+    `確定將 Owner 轉移給「${label}」嗎？\n\n原 Owner 會降為後台管理員。`,
+  );
+  if (!ok) return;
+
+  transferringOwner.value = true;
   try {
-    const uid = String(pwUid.value || '').trim();
-    await updateTenantMeta(tenant.value.tenantId, { owner_uid: uid || null }, editorInfo());
-    await load();
+    await transferTenantOwner(tenant.value.tenantId, uid, editorInfo());
+    transferOwnerMsgOk.value = true;
+    transferOwnerMsg.value = `已將 Owner 轉移給 ${label}`;
+    transferOwnerUid.value = '';
+    await refreshAfterTransfer();
   } catch (e) {
-    error.value = e?.message || '更新 Owner 失敗';
+    transferOwnerMsgOk.value = false;
+    transferOwnerMsg.value = e?.message || '轉移 Owner 失敗';
+  } finally {
+    transferringOwner.value = false;
   }
 }
 
@@ -723,13 +655,20 @@ async function saveSlug() {
   color: #94a3b8;
 }
 .owner-select {
-  margin-left: 0.35rem;
   border: 1px solid #cbd5e1;
   border-radius: 0.5rem;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   background: #fff;
   color: #334155;
+  min-width: 12rem;
+}
+.owner-transfer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 .owner-uid {
   margin-left: 0.35rem;

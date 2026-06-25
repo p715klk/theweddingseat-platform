@@ -11,7 +11,7 @@ import {
   assertPassword,
 } from '@/lib/superAdminProvisioning';
 import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
-import { callRemoveTenantMember, callSetUserPassword, callUpsertTenantMember, callCreateTenant, isTwsHooksMissingError } from '@/lib/twsApi';
+import { callRemoveTenantMember, callSetUserPassword, callTransferTenantOwner, callUpsertTenantMember, callCreateTenant, isTwsHooksMissingError } from '@/lib/twsApi';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -196,6 +196,64 @@ export async function updateTenantMeta(tenantId, patch, editor = null) {
     slug: patch.slug ?? current.slug ?? tenantId,
     ...auditFields(editor),
   });
+}
+
+function normalizeMemberRole(val) {
+  if (val === 'owner') return 'owner';
+  if (val === true || val === 'admin') return 'admin';
+  if (val === 'reception') return 'reception';
+  return '';
+}
+
+function findOwnerUidFromMembers(members, fallbackUid = '') {
+  for (const [uid, role] of Object.entries(members || {})) {
+    if (normalizeMemberRole(role) === 'owner') return uid;
+  }
+  return String(fallbackUid || '').trim();
+}
+
+/** Super Admin：將 Owner 轉移給現有後台管理員（原 Owner 降為 admin） */
+export async function transferTenantOwner(tenantId, newOwnerUid, editor = null) {
+  const id = String(tenantId || '').trim();
+  const uid = String(newOwnerUid || '').trim();
+  if (!id || !uid) throw new Error('請選擇新 Owner');
+  await assertPlatformAdmin(editor);
+
+  const membersSnap = await get(dbRef(database, `tenants/${id}/members`));
+  const members = membersSnap.val() || {};
+  const metaSnap = await get(dbRef(database, `tenants/${id}/meta`));
+  const meta = metaSnap.val() || {};
+
+  if (normalizeMemberRole(members[uid]) !== 'admin') {
+    throw new Error('只能將 Owner 轉移給後台管理員');
+  }
+
+  const currentOwnerUid = findOwnerUidFromMembers(members, meta.owner_uid);
+  if (currentOwnerUid === uid) {
+    return { tenantId: id, ownerUid: uid, changed: false };
+  }
+
+  try {
+    return await callTransferTenantOwner({ tenantId: id, newOwnerUid: uid });
+  } catch (err) {
+    if (!isTwsHooksMissingError(err)) throw err;
+  }
+
+  const updates = {
+    [`tenants/${id}/members/${uid}`]: 'owner',
+    [`tenants/${id}/meta/owner_uid`]: uid,
+    ...auditFields(editor),
+  };
+  if (currentOwnerUid && currentOwnerUid !== uid) {
+    updates[`tenants/${id}/members/${currentOwnerUid}`] = 'admin';
+  }
+  await update(dbRef(database), updates);
+  return {
+    tenantId: id,
+    ownerUid: uid,
+    previousOwnerUid: currentOwnerUid,
+    changed: true,
+  };
 }
 
 export async function renameTenantSlug(tenantId, oldSlug, newSlugInput, editor = null) {

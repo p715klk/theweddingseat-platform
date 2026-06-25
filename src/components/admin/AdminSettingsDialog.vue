@@ -143,277 +143,29 @@
         </div>
 
         <!-- 用戶管理 -->
-        <div v-else-if="activeTab === 'users'" class="space-y-4" @click="closeMemberMenu">
-          <p class="hint">
-            管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。
-          </p>
-          <p v-if="!canManageUsers" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
-            你而家係一般後台用戶（非 Owner），只能查看用戶清單；如要新增／移除用戶，請用 Owner 帳號登入。
-          </p>
-
-          <p v-if="usersLoading" class="text-xs text-gray-400">⏳ 載入用戶清單…</p>
-          <p v-else-if="usersError" class="msg-error">{{ usersError }}</p>
-
-          <div v-else-if="members.length" class="member-table-wrap">
-            <table class="member-table">
-              <thead>
-                <tr>
-                  <th>顯示名稱</th>
-                  <th>登入 Email</th>
-                  <th>角色</th>
-                  <th class="actions-col">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="m in members" :key="m.uid">
-                  <td>
-                    <span class="member-name-cell">{{ m.displayName || '—' }}</span>
-                    <span v-if="m.isSelf" class="member-self-tag">你</span>
-                  </td>
-                  <td class="member-email-cell">{{ m.email || m.uid }}</td>
-                  <td>
-                    <span class="role-label">{{ memberRoleLabel(m.role) }}</span>
-                  </td>
-                  <td class="actions-cell" @click.stop>
-                    <div v-if="canManageUsers" class="actions-wrap">
-                      <button
-                        type="button"
-                        class="btn-member-edit"
-                        :class="{ open: openMenuUid === m.uid }"
-                        aria-haspopup="menu"
-                        :aria-expanded="openMenuUid === m.uid"
-                        @click="toggleMemberMenu(m.uid)"
-                      >
-                        編輯
-                      </button>
-                      <div
-                        v-if="openMenuUid === m.uid"
-                        class="member-actions-menu"
-                        role="menu"
-                        @click.stop
-                      >
-                        <button type="button" role="menuitem" @click="openNameEditor(m)">
-                          修改顯示名稱
-                        </button>
-                        <template v-if="canChangeMemberRole(m)">
-                          <button
-                            v-if="m.role !== 'admin' && canSelectRole(m, 'admin')"
-                            type="button"
-                            role="menuitem"
-                            :disabled="roleChangingUid === m.uid"
-                            @click="pickMemberRole(m, 'admin')"
-                          >
-                            設為後台管理員
-                          </button>
-                          <button
-                            v-if="m.role !== 'reception' && canSelectRole(m, 'reception')"
-                            type="button"
-                            role="menuitem"
-                            :disabled="roleChangingUid === m.uid"
-                            @click="pickMemberRole(m, 'reception')"
-                          >
-                            設為現場接待
-                          </button>
-                          <template v-if="!memberHasRoleChangeOptions(m) && swapCandidates(m).length">
-                            <p class="member-menu-label">與以下用戶交換角色</p>
-                            <button
-                              v-for="p in swapCandidates(m)"
-                              :key="p.uid"
-                              type="button"
-                              role="menuitem"
-                              :disabled="roleChangingUid === m.uid"
-                              @click="swapRolesFromMenu(m, p)"
-                            >
-                              與 {{ partnerLabel(p) }} 交換
-                            </button>
-                          </template>
-                        </template>
-                        <button
-                          v-if="canRemoveMember(m)"
-                          type="button"
-                          role="menuitem"
-                          class="danger"
-                          :disabled="removingUid === m.uid"
-                          @click="removeFromMenu(m)"
-                        >
-                          {{ removingUid === m.uid ? '移除中…' : '移除用戶' }}
-                        </button>
-                      </div>
-                    </div>
-                    <span v-else class="text-gray-300">—</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div v-if="memberEditPanel" class="member-edit-panel" @click.stop>
-            <form class="member-edit-form" @submit.prevent="submitMemberNameEdit">
-              <p class="member-edit-label">
-                修改顯示名稱
-                <span class="member-edit-email">{{ memberEditPanel.email }}</span>
-              </p>
-              <div class="member-edit-row">
-                <input
-                  v-model="memberEditPanel.displayName"
-                  type="text"
-                  maxlength="40"
-                  class="member-edit-input"
-                  placeholder="例如：統籌 Amy"
-                  :disabled="nameSavingUid === memberEditPanel.uid"
-                  autofocus
-                />
-                <button
-                  type="submit"
-                  class="btn-mini primary"
-                  :disabled="nameSavingUid === memberEditPanel.uid"
-                >
-                  {{ nameSavingUid === memberEditPanel.uid ? '儲存中…' : '儲存' }}
-                </button>
-                <button
-                  type="button"
-                  class="btn-mini"
-                  :disabled="nameSavingUid === memberEditPanel.uid"
-                  @click="closeMemberEdit"
-                >
-                  取消
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <template v-if="canManageUsers">
-            <div class="quota-summary">
-              <p class="quota-title">帳戶配額</p>
-              <ul class="quota-list">
-                <li>
-                  Owner：
-                  <strong :class="{ 'quota-over': quota.counts.owner > quota.limits.owner }">
-                    {{ quota.counts.owner }}/{{ quota.limits.owner }}
-                  </strong>
-                </li>
-                <li>
-                  後台管理員：
-                  <strong :class="{ 'quota-over': quota.counts.admin > quota.limits.admin }">
-                    {{ quota.counts.admin }}/{{ quota.limits.admin }}
-                  </strong>
-                </li>
-                <li>
-                  現場接待：
-                  <strong :class="{ 'quota-over': quota.counts.reception > quota.limits.reception }">
-                    {{ quota.counts.reception }}/{{ quota.limits.reception }}
-                  </strong>
-                </li>
-                <li>
-                  合計：
-                  <strong :class="{ 'quota-over': quota.counts.total > quota.limits.total }">
-                    {{ quota.counts.total }}/{{ quota.limits.total }}
-                  </strong>
-                </li>
-              </ul>
-              <p
-                v-if="!isPlatformAdmin && quota.counts.admin > quota.limits.admin"
-                class="quota-hint warn"
-              >
-                後台管理員已超出上限，請移除多餘用戶或調整角色後再新增。
-              </p>
-            </div>
-
-            <form v-if="isPlatformAdmin || hasAddableRole" class="add-user-form" @submit.prevent="submitAddUser">
-              <h4 class="section-title">➕ 新增用戶</h4>
-              <div class="field">
-                <label for="new-user-email">Email</label>
-                <input
-                  id="new-user-email"
-                  v-model="newUserEmail"
-                  type="email"
-                  required
-                  autocomplete="off"
-                  placeholder="coordinator@example.com"
-                />
-                <p v-if="addUserEmailChecking" class="email-check-hint checking">檢查 Email…</p>
-                <p v-else-if="addUserEmailHint" class="email-check-hint" :class="addUserEmailStatus">
-                  {{ addUserEmailHint }}
-                </p>
-              </div>
-              <div class="field">
-                <label for="new-user-name">顯示名稱（選填）</label>
-                <input
-                  id="new-user-name"
-                  v-model="newUserName"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="例如：統籌 Amy"
-                />
-              </div>
-              <div v-if="!addUserEmailReuse" class="field">
-                <label for="new-user-pw">初始密碼</label>
-                <input
-                  id="new-user-pw"
-                  v-model="newUserPassword"
-                  type="password"
-                  required
-                  minlength="6"
-                  autocomplete="new-password"
-                  v-on="passwordInputHandlers"
-                />
-              </div>
-              <div class="field">
-                <label for="new-user-role">角色</label>
-                <select
-                  id="new-user-role"
-                  v-model="newUserRole"
-                  class="w-full border border-gray-300 rounded-lg p-2 text-sm"
-                >
-                  <option v-if="canAddRole('admin')" value="admin">
-                    後台管理員 — 可進入後台管理賓客、排位、CSV（剩餘 {{ quota.remaining.admin }} 個）
-                  </option>
-                  <option v-if="canAddRole('reception')" value="reception">
-                    現場接待 — 點名、取消賓客、現場加座，不能進入後台（剩餘 {{ quota.remaining.reception }} 個）
-                  </option>
-                </select>
-              </div>
-              <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
-              <button
-                type="submit"
-                class="btn-primary"
-                :class="{ 'btn-primary-muted': addUserEmailStatus === 'member' }"
-                :disabled="addingUser || !canSubmitAddUser"
-              >
-                {{ addingUser ? '建立中…' : '建立用戶' }}
-              </button>
-            </form>
-            <p v-else class="quota-hint warn">
-              合計名額已滿，無法新增用戶；仍可用「編輯」調整或交換現有成員角色。
-            </p>
-          </template>
+        <div v-else-if="activeTab === 'users'" class="space-y-4">
+          <TenantMembersPanel
+            v-if="tenantId"
+            :tenant-id="tenantId"
+            :owner-uid="ownerUid"
+            hint="管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。"
+            id-prefix="admin-settings-members"
+          />
         </div>
       </div>
     </div>
   </div>
-
-  <Teleport to="body">
-    <p
-      v-if="userToast"
-      class="admin-toast is-visible"
-      role="status"
-      aria-live="polite"
-    >
-      {{ userToast }}
-    </p>
-  </Teleport>
 </template>
 
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useTenant } from '@/composables/useTenant';
-import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
-import { useMemberEmailCheck } from '@/composables/useMemberEmailCheck';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
-import { canAddMemberRole, canChangeMemberToRole, getMemberQuota, getSwapRoleCandidates, hasAddableMemberRole, hasRoleChangeOptions } from '@/lib/tenantMemberLimits';
+import { setPostLogoutNotice } from '@/lib/logoutNotices';
+import TenantMembersPanel from '@/components/admin/TenantMembersPanel.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -429,69 +181,22 @@ const tabs = [
 
 const activeTab = ref('data');
 
-const { user, changePassword } = useAuth();
-const { isPlatformAdmin } = usePlatformAdmin();
+const { user, changePassword, logout } = useAuth();
 const { memberRole } = useTenantAccess();
 const { meta, tenantId } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
 const {
   members,
-  loading: usersLoading,
-  error: usersError,
   loadMembers,
-  createMember,
-  removeMember,
-  updateMemberRole,
-  swapMemberRoles,
-  updateMemberDisplayName,
   ensureSelfProfile,
   updateSelfDisplayName,
 } = useTenantUsers();
-const isOwner = computed(() => {
-  const self = members.value.find((m) => m.isSelf);
-  if (self?.role === 'owner') return true;
-  return !!ownerUid.value && ownerUid.value === user.value?.uid;
-});
-const canManageUsers = computed(() => isPlatformAdmin.value || isOwner.value);
 const roleLabel = computed(() => {
   if (memberRole.value === 'platform_admin') return 'Super Admin';
   if (memberRole.value === 'reception') return '現場接待';
   return '後台管理員';
 });
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
-
-const quota = computed(() => getMemberQuota(members.value, ownerUid.value));
-
-const hasAddableRole = computed(() => hasAddableMemberRole(
-  members.value,
-  ownerUid.value,
-  { bypassLimits: isPlatformAdmin.value },
-));
-
-function canAddRole(role) {
-  return canAddMemberRole(
-    members.value,
-    ownerUid.value,
-    role,
-    { bypassLimits: isPlatformAdmin.value },
-  );
-}
-
-watch(
-  () => [
-    quota.value.remaining.admin,
-    quota.value.remaining.reception,
-    quota.value.remaining.total,
-    members.value.length,
-  ],
-  () => {
-    if (isPlatformAdmin.value) return;
-    if (!canAddRole(newUserRole.value)) {
-      if (canAddRole('admin')) newUserRole.value = 'admin';
-      else if (canAddRole('reception')) newUserRole.value = 'reception';
-    }
-  },
-);
 
 const currentPassword = ref('');
 const newPassword = ref('');
@@ -507,183 +212,6 @@ const nameMsgOk = ref(false);
 const editingName = ref(false);
 const originalDisplayName = ref('');
 
-const newUserEmail = ref('');
-const newUserName = ref('');
-const newUserPassword = ref('');
-const newUserRole = ref('admin');
-
-const {
-  status: addUserEmailStatus,
-  hint: addUserEmailHint,
-  canProceed: addUserEmailCanProceed,
-  isBlocking: addUserEmailBlocking,
-  isChecking: addUserEmailChecking,
-  isReuse: addUserEmailReuse,
-} = useMemberEmailCheck(newUserEmail, { tenantId });
-
-const canSubmitAddUser = computed(() => {
-  if (!canAddRole(newUserRole.value)) return false;
-  if (!newUserEmail.value.trim()) return false;
-  if (addUserEmailChecking.value || addUserEmailBlocking.value) return false;
-  if (!addUserEmailCanProceed.value) return false;
-  if (!addUserEmailReuse.value && newUserPassword.value.trim().length < 6) return false;
-  return true;
-});
-
-const addingUser = ref(false);
-const addUserMsg = ref('');
-const addUserMsgOk = ref(false);
-const removingUid = ref('');
-const roleChangingUid = ref('');
-const nameSavingUid = ref('');
-const openMenuUid = ref(null);
-const memberEditPanel = ref(null);
-const userToast = ref('');
-let userToastTimer = null;
-
-function showUserToast(message, ms = 2500) {
-  userToast.value = message;
-  clearTimeout(userToastTimer);
-  userToastTimer = setTimeout(() => {
-    userToast.value = '';
-  }, ms);
-}
-
-onUnmounted(() => {
-  clearTimeout(userToastTimer);
-});
-
-function memberRoleLabel(role) {
-  if (role === 'owner') return 'Owner';
-  if (role === 'reception') return '現場接待';
-  if (role === 'admin') return '後台管理員';
-  return '—';
-}
-
-function canSelectRole(member, targetRole) {
-  return canChangeMemberToRole(
-    members.value,
-    member.uid,
-    targetRole,
-    { bypassLimits: isPlatformAdmin.value },
-  );
-}
-
-function memberHasRoleChangeOptions(member) {
-  return hasRoleChangeOptions(
-    members.value,
-    member.uid,
-    { bypassLimits: isPlatformAdmin.value },
-  );
-}
-
-function swapCandidates(member) {
-  return getSwapRoleCandidates(members.value, member.uid);
-}
-
-function partnerLabel(partner) {
-  const name = partner.displayName || partner.email || partner.uid;
-  return `${name}（${memberRoleLabel(partner.role)}）`;
-}
-
-async function swapRolesFromMenu(member, partner) {
-  closeMemberMenu();
-  roleChangingUid.value = member.uid;
-  addUserMsg.value = '';
-  try {
-    await swapMemberRoles(member.uid, partner.uid);
-    showUserToast(
-      `已將「${member.email || member.uid}」與「${partner.email || partner.uid}」交換角色`,
-    );
-  } catch (e) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = e?.message || '交換角色失敗';
-  } finally {
-    roleChangingUid.value = '';
-  }
-}
-
-function canChangeMemberRole(member) {
-  return !member.isSelf && member.role !== 'owner';
-}
-
-function canRemoveMember(member) {
-  return !member.isSelf && member.role !== 'owner';
-}
-
-function toggleMemberMenu(uid) {
-  openMenuUid.value = openMenuUid.value === uid ? null : uid;
-}
-
-function closeMemberMenu() {
-  openMenuUid.value = null;
-}
-
-function openNameEditor(member) {
-  closeMemberMenu();
-  memberEditPanel.value = {
-    uid: member.uid,
-    email: member.email || member.uid,
-    displayName: member.displayName || '',
-  };
-}
-
-function closeMemberEdit() {
-  memberEditPanel.value = null;
-}
-
-async function submitMemberNameEdit() {
-  if (!memberEditPanel.value) return;
-  const { uid, email, displayName } = memberEditPanel.value;
-  const raw = String(displayName || '').trim();
-  const member = members.value.find((m) => m.uid === uid);
-  const prev = member?.displayName || '';
-  if (raw === prev) {
-    closeMemberEdit();
-    return;
-  }
-  if (raw.length > 40) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = '顯示名稱太長（最多 40 字）';
-    return;
-  }
-
-  nameSavingUid.value = uid;
-  addUserMsg.value = '';
-  try {
-    await updateMemberDisplayName(uid, raw);
-    closeMemberEdit();
-    showUserToast(`已更新「${email}」的顯示名稱`);
-  } catch (e) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = e?.message || '更新顯示名稱失敗';
-  } finally {
-    nameSavingUid.value = '';
-  }
-}
-
-async function pickMemberRole(member, role) {
-  closeMemberMenu();
-  if (member.role === role) return;
-
-  roleChangingUid.value = member.uid;
-  addUserMsg.value = '';
-  try {
-    await updateMemberRole(member.uid, role);
-    showUserToast(`已將「${member.email || member.uid}」改為${memberRoleLabel(role)}`);
-  } catch (e) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = e?.message || '變更角色失敗';
-  } finally {
-    roleChangingUid.value = '';
-  }
-}
-
-function removeFromMenu(member) {
-  closeMemberMenu();
-  confirmRemove(member);
-}
-
 watch(
   () => props.open,
   async (isOpen) => {
@@ -691,12 +219,7 @@ watch(
     activeTab.value = 'data';
     pwMsg.value = '';
     nameMsg.value = '';
-    addUserMsg.value = '';
     editingName.value = false;
-    userToast.value = '';
-    clearTimeout(userToastTimer);
-    closeMemberMenu();
-    closeMemberEdit();
     try {
       await ensureSelfProfile();
       await loadMembers();
@@ -709,17 +232,20 @@ watch(
   },
 );
 
-watch(activeTab, async (tab) => {
-  if (!props.open) return;
-  if (tab === 'users') {
-    await loadMembers();
-  }
-});
-
 function passwordErrorMessage(e) {
   const code = e?.code || '';
-  if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-    return '目前密碼錯誤';
+  const status = e?.status ?? e?.response?.status;
+  const raw = String(e?.response?.message || e?.message || '');
+
+  // PocketBase: re-authenticate 失敗通常是 "Failed to authenticate."
+  if (
+    code === 'auth/wrong-password' ||
+    code === 'auth/invalid-credential' ||
+    raw.includes('Failed to authenticate') ||
+    raw.includes('Invalid login') ||
+    (status === 400 && raw)
+  ) {
+    return '目前密碼不正確';
   }
   if (code === 'auth/weak-password') {
     return '新密碼太弱（至少 6 個字元）';
@@ -727,7 +253,7 @@ function passwordErrorMessage(e) {
   if (code === 'auth/requires-recent-login') {
     return '請重新登入後再改密碼';
   }
-  return e?.message || '更新密碼失敗';
+  return raw || '更新密碼失敗';
 }
 
 async function submitPassword() {
@@ -754,7 +280,9 @@ async function submitPassword() {
     newPassword.value = '';
     confirmPassword.value = '';
     pwMsgOk.value = true;
-    pwMsg.value = '密碼已更新';
+    pwMsg.value = '密碼已更新，請重新登入';
+    setPostLogoutNotice('密碼已更新，請重新登入');
+    await logout();
   } catch (e) {
     pwMsgOk.value = false;
     pwMsg.value = passwordErrorMessage(e);
@@ -793,75 +321,6 @@ function cancelEditName() {
   editingName.value = false;
   nameMsg.value = '';
   nameMsgOk.value = false;
-}
-
-async function submitAddUser() {
-  addUserMsg.value = '';
-  addUserMsgOk.value = false;
-  if (!canManageUsers.value) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = '只有 owner 可以新增用戶';
-    return;
-  }
-  if (!canSubmitAddUser.value) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = !hasAddableRole.value
-      ? '所有可新增角色名額已滿，請先移除或調整現有用戶'
-      : '所選角色名額已滿，請選擇其他角色';
-    return;
-  }
-  addingUser.value = true;
-  const createdRole = newUserRole.value;
-  try {
-    await createMember({
-      email: newUserEmail.value,
-      password: newUserPassword.value,
-      displayName: newUserName.value,
-      role: createdRole,
-      reuseExisting: addUserEmailReuse.value,
-    });
-    newUserEmail.value = '';
-    newUserName.value = '';
-    newUserPassword.value = '';
-    newUserRole.value = 'admin';
-    addUserMsgOk.value = true;
-    addUserMsg.value = createdRole === 'reception'
-      ? '用戶已建立，可登入點名頁進行現場接待'
-      : '用戶已建立，可登入後台管理賓客與排位';
-  } catch (e) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = e?.message || '建立用戶失敗';
-  } finally {
-    addingUser.value = false;
-  }
-}
-
-async function confirmRemove(member) {
-  if (!canManageUsers.value) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = '只有 owner 可以移除用戶';
-    return;
-  }
-  const label = member.email || member.uid;
-  const ok = window.confirm(
-    `確定要移除「${label}」嗎？\n\n對方將無法再登入此婚宴後台。若該帳號沒有加入其他專案，登入帳號亦會一併刪除。`,
-  );
-  if (!ok) return;
-
-  removingUid.value = member.uid;
-  addUserMsg.value = '';
-  try {
-    const result = await removeMember(member.uid);
-    addUserMsgOk.value = true;
-    addUserMsg.value = result?.authDeleted
-      ? '已移除用戶並刪除登入帳號'
-      : '已移除用戶權限（登入帳號仍用於其他專案）';
-  } catch (e) {
-    addUserMsgOk.value = false;
-    addUserMsg.value = e?.message || '移除失敗';
-  } finally {
-    removingUid.value = '';
-  }
 }
 </script>
 
@@ -979,7 +438,7 @@ async function confirmRemove(member) {
 }
 .btn-mini:disabled {
   opacity: 0.7;
-  cursor: wait;
+  cursor: not-allowed;
 }
 .badge {
   display: inline-block;
@@ -1041,7 +500,7 @@ async function confirmRemove(member) {
 }
 .btn-primary:disabled {
   opacity: 0.7;
-  cursor: wait;
+  cursor: not-allowed;
 }
 .btn-primary.btn-primary-muted:disabled {
   opacity: 0.52;
@@ -1265,5 +724,15 @@ async function confirmRemove(member) {
 .quota-hint.warn {
   color: #b45309;
   font-weight: 600;
+}
+.quota-hint.ok {
+  color: #15803d;
+  font-weight: 600;
+}
+.add-user-hint {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+  line-height: 1.4;
 }
 </style>

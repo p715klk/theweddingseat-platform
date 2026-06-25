@@ -65,8 +65,8 @@
           建立成功後，呢個 Email 可以登入 <code>/p/&lt;slug&gt;/admin</code>。Owner 會自動加入 <code>members</code>。
         </p>
 
-        <div class="grid owner-grid" :class="{ 'owner-grid-single': ownerEmailReuse }">
-          <div class="field" :class="{ 'field-span': ownerEmailReuse }">
+        <div class="owner-grid">
+          <div class="field">
             <label>Owner Email <span class="req">*</span></label>
             <input
               v-model="form.ownerEmail"
@@ -76,16 +76,27 @@
               autocomplete="off"
               :disabled="prefilling || saving"
             />
-            <p v-if="ownerEmailChecking" class="email-status checking">檢查 Email…</p>
-            <p v-else-if="ownerEmailHint" class="email-status" :class="ownerEmailStatus">
-              {{ ownerEmailHint }}
-              <span v-if="ownerEmailProjects.length" class="email-projects">
-                已加入 Project：{{ ownerEmailProjects.map((p) => p.slug).join('、') }}
-              </span>
-            </p>
           </div>
-
-          <div v-if="!ownerEmailReuse" class="field">
+          <div class="field">
+            <label>Owner 顯示名稱</label>
+            <input
+              v-model="form.ownerDisplayName"
+              type="text"
+              placeholder="例如：Mary（新娘）"
+              :disabled="prefilling || saving"
+            />
+          </div>
+          <p
+            v-if="ownerEmailChecking || ownerEmailHint"
+            class="email-status field-span-2"
+            :class="ownerEmailChecking ? 'checking' : ownerEmailStatus"
+          >
+            {{ ownerEmailChecking ? '檢查 Email…' : ownerEmailHint }}
+            <span v-if="!ownerEmailChecking && ownerEmailProjects.length" class="email-projects">
+              已加入 Project：{{ ownerEmailProjects.map((p) => p.slug).join('、') }}
+            </span>
+          </p>
+          <div v-if="!ownerEmailReuse" class="field field-span-2">
             <label>初始密碼 <span class="req">*</span></label>
             <div class="pw-row">
               <input
@@ -109,16 +120,6 @@
             <p class="field-hint">會以明文顯示，方便直接複製畀客戶。</p>
           </div>
         </div>
-
-        <div class="field">
-          <label>Owner 顯示名稱</label>
-          <input
-            v-model="form.ownerDisplayName"
-            type="text"
-            placeholder="例如：Mary（新娘）"
-            :disabled="prefilling || saving"
-          />
-        </div>
       </section>
 
       <div v-if="createdInfo" class="created-box">
@@ -136,6 +137,7 @@
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
+      <p v-else-if="!canSubmit && submitBlockReason" class="submit-hint">{{ submitBlockReason }}</p>
 
       <div class="actions">
         <RouterLink to="/super/tenants" class="btn-cancel">取消</RouterLink>
@@ -144,6 +146,7 @@
           class="btn-submit"
           :class="{ 'btn-submit-muted': ownerEmailStatus === 'member' }"
           :disabled="saving || prefilling || !canSubmit"
+          :title="submitBlockReason || undefined"
         >
           {{ saving ? '建立中…' : (copyFromSlug ? '儲存為新 Project' : '建立 Project') }}
         </button>
@@ -207,13 +210,24 @@ const {
   isReuse: ownerEmailReuse,
 } = useMemberEmailCheck(computed(() => form.ownerEmail));
 
-const canSubmit = computed(() => {
-  if (slugStatus.value !== 'available') return false;
-  if (!form.ownerEmail.trim()) return false;
-  if (ownerEmailChecking.value || ownerEmailBlocking.value) return false;
-  if (!ownerEmailCanProceed.value) return false;
-  if (!ownerEmailReuse.value && form.ownerPassword.trim().length < 6) return false;
-  return true;
+const canSubmit = computed(() => !submitBlockReason.value);
+
+const submitBlockReason = computed(() => {
+  if (prefilling.value) return '載入中…';
+  if (slugStatus.value !== 'available') {
+    if (slugStatus.value === 'checking') return '正在檢查 slug…';
+    if (slugStatus.value === 'taken') return 'Slug 已被使用';
+    if (slugStatus.value === 'invalid') return 'Slug 格式無效';
+    return '請輸入可用 slug';
+  }
+  if (!form.ownerEmail.trim()) return '請輸入 Owner Email';
+  if (ownerEmailChecking.value) return '正在檢查 Email…';
+  if (ownerEmailBlocking.value) return ownerEmailHint.value || '此 Email 無法使用';
+  if (!ownerEmailCanProceed.value) return '請輸入有效 Email 並等待檢查完成';
+  if (!ownerEmailReuse.value && form.ownerPassword.trim().length < 6) {
+    return '請輸入至少 6 字元的初始密碼';
+  }
+  return '';
 });
 
 let slugCheckTimer = null;
@@ -296,7 +310,6 @@ async function loadCopySource(slug) {
     form.venueHall = m.venue_hall || '';
     form.weddingDate = m.wedding_date || '';
     form.themeColor = m.theme_color || '#b91c1c';
-    form.ownerUid = '';
     form.slug = await suggestCloneSlug(slug);
   } catch (e) {
     error.value = e?.message || '載入複製資料失敗';
@@ -323,7 +336,7 @@ async function submit() {
       weddingDate: form.weddingDate,
       themeColor: form.themeColor,
       ownerEmail: form.ownerEmail,
-      ownerPassword: ownerEmailReuse ? '' : form.ownerPassword,
+      ownerPassword: ownerEmailReuse.value ? '' : form.ownerPassword,
       ownerReuseExisting: ownerEmailReuse.value,
       ownerDisplayName: form.ownerDisplayName,
       editor: editorInfo(),
@@ -537,13 +550,24 @@ onUnmounted(() => {
   flex: 1;
 }
 .owner-grid {
-  align-items: end;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  align-items: start;
 }
-.owner-grid-single {
-  grid-template-columns: 1fr;
+.owner-grid .field {
+  margin-bottom: 0;
 }
-.field-span {
+.field-span-2 {
   grid-column: 1 / -1;
+}
+@media (max-width: 640px) {
+  .owner-grid {
+    grid-template-columns: 1fr;
+  }
+  .field-span-2 {
+    grid-column: auto;
+  }
 }
 .btn-generate {
   flex-shrink: 0;
@@ -559,6 +583,11 @@ onUnmounted(() => {
 .btn-generate:disabled {
   opacity: 0.7;
   cursor: default;
+}
+.submit-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
 }
 .created-title {
   margin: 0 0 0.5rem;
