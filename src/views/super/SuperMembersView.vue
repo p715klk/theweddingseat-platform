@@ -2,8 +2,8 @@
   <div class="panel">
     <h2>Members 管理</h2>
     <p class="hint-block">
-      顯示所有 Project 成員（<code>tenant_members</code> + <code>users</code>）。
-      可修改顯示名稱、重設登入密碼，或移除 admin／reception 成員；若該帳號無其他專案 membership，會一併刪除登入帳號。
+      每列代表一個專案成員（<code>tenant_members</code>）。同一 email 若加入多個 project 會出現多列，各自可有唔同顯示名稱。
+      可修改顯示名稱、重設登入密碼（全帳號），或移除該專案成員。
     </p>
 
     <div class="toolbar">
@@ -21,12 +21,20 @@
     <ul v-else class="list">
       <li v-for="row in filteredRows" :key="row.key" class="item">
         <div class="top">
-          <div class="title">
-            <strong>{{ row.email || row.uid }}</strong>
-            <span class="role-badge" :class="`role-${row.role}`">{{ row.roleLabel }}</span>
-            <span class="sub">
-              · Project: <code>{{ row.slug }}</code>
-            </span>
+          <div class="title-block">
+            <div class="title">
+              <div class="title-identity">
+                <strong>{{ row.displayName || row.email || row.uid }}</strong>
+                <span v-if="row.displayName && row.email" class="email-sub">{{ row.email }}</span>
+              </div>
+              <span class="title-sep" aria-hidden="true">·</span>
+              <div class="title-context">
+                <span class="project-tag">Project:&nbsp<code>{{ row.slug }}</code></span>
+                <span class="role-badge" :class="`role-${row.role}`">{{ row.roleLabel }}</span>
+              </div>
+              <span class="title-sep" aria-hidden="true">·</span>
+              <span class="uid-tag">UID <code>{{ row.uid }}</code></span>
+            </div>
           </div>
           <button
             v-if="row.role !== 'owner'"
@@ -37,18 +45,10 @@
           >
             {{ busyKey === `${row.key}:remove` ? '移除中…' : '移除 members' }}
           </button>
-          <span v-else class="owner-hint">Owner 不可喺此移除</span>
+          <span v-else class="owner-hint">Owner 不可在此移除</span>
         </div>
 
         <div class="body-grid">
-          <div class="field-row">
-            <label>UID</label>
-            <div class="readonly-value">{{ row.uid }}</div>
-          </div>
-          <div class="field-row">
-            <label>Email</label>
-            <div class="readonly-value">{{ row.email || '—' }}</div>
-          </div>
           <div class="field-row">
             <label>顯示名稱</label>
             <div class="field-control">
@@ -267,35 +267,88 @@ onMounted(loadAll);
 .item {
   border: 1px solid #e2e8f0;
   border-radius: 0.5rem;
-  padding: 0.75rem 0.85rem;
+  padding: 0.85rem 0.95rem;
 }
 .top {
   display: flex;
   justify-content: space-between;
-  gap: 0.65rem;
+  gap: 0.75rem;
   align-items: center;
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.title-block {
+  min-width: 0;
+  flex: 1;
 }
 .title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem 0.55rem;
+  min-width: 0;
+  line-height: 1.45;
+}
+.title-identity {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
   min-width: 0;
 }
-.title strong {
-  font-size: 1rem;
+.title-context {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
-.sub {
+.title-sep {
+  color: #cbd5e1;
+  font-weight: 700;
+  user-select: none;
+  line-height: 1;
+}
+.title strong {
+  font-size: 1.0625rem;
+  color: #0f172a;
+}
+.email-sub {
+  font-size: 0.9375rem;
   color: #64748b;
+}
+.project-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+}
+.project-tag code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.uid-tag {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.uid-tag code {
+  color: #64748b;
 }
 .role-badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
+  padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 .role-owner {
   background: #fef3c7;
@@ -311,14 +364,22 @@ onMounted(loadAll);
 }
 .owner-hint {
   flex-shrink: 0;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   color: #94a3b8;
   white-space: nowrap;
 }
 .body-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5rem 0.85rem;
+  gap: 0.55rem 1rem;
+}
+@media (max-width: 900px) {
+  .title-sep {
+    display: none;
+  }
+  .title {
+    row-gap: 0.35rem;
+  }
 }
 @media (max-width: 768px) {
   .body-grid {
@@ -332,43 +393,28 @@ onMounted(loadAll);
   min-width: 0;
 }
 .field-row label {
-  flex: 0 0 4rem;
-  text-align: right;
-  font-size: 0.875rem;
+  flex: 0 0 5.25rem;
+  text-align: left;
+  font-size: 0.9375rem;
   font-weight: 700;
-  color: #64748b;
+  color: #475569;
   line-height: 1.3;
 }
-.field-control,
-.field-row > .readonly-value {
+.field-control {
   flex: 1;
   min-width: 0;
-}
-.field-control {
   display: flex;
   align-items: center;
   gap: 0.45rem;
 }
-.input-compact,
-.readonly-value {
+.input-compact {
+  flex: 1;
+  min-width: 0;
   border: 1px solid #cbd5e1;
   border-radius: 0.375rem;
   padding: 0.45rem 0.6rem;
   font-size: 1rem;
   line-height: 1.4;
-}
-.field-control .input-compact {
-  flex: 1;
-  min-width: 0;
-  width: auto;
-}
-.readonly-value {
-  border-color: #e2e8f0;
-  color: #334155;
-  background: #f8fafc;
-  word-break: break-all;
-}
-.input-compact {
   color: #1e293b;
   background: #fff;
 }
@@ -376,13 +422,13 @@ onMounted(loadAll);
   color: #94a3b8;
 }
 .btn {
-  padding: 0.45rem 0.7rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
   border: 1px solid #cbd5e1;
   background: #f8fafc;
   color: #334155;
   font-weight: 700;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -396,8 +442,8 @@ onMounted(loadAll);
   background: #fef2f2;
   color: #991b1b;
   border-color: #fecaca;
-  padding: 0.4rem 0.65rem;
-  font-size: 0.8125rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.875rem;
 }
 .btn:disabled {
   opacity: 0.7;
@@ -408,17 +454,17 @@ onMounted(loadAll);
   font-weight: 700;
 }
 .ok {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: #166534;
   flex-shrink: 0;
 }
 .error {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: #dc2626;
   flex-shrink: 0;
 }
 code {
-  font-size: 0.85em;
+  font-size: 0.92em;
   background: #f1f5f9;
   padding: 0.05rem 0.25rem;
   border-radius: 0.2rem;

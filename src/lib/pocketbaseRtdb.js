@@ -430,7 +430,27 @@ async function getProfilesMap(tenantId) {
     });
     return map;
   }
-  return getUserProfilesByIds(await collectTenantUserIds(tenantId));
+  return getMemberProfilesMap(tenantId);
+}
+
+async function getMemberProfilesMap(tenantId) {
+  const rows = await listTenantMembers(tenantId);
+  const uids = rows.map((m) => m.user_id).filter(Boolean);
+  const userMap = await getUserProfilesByIds(uids);
+  const map = {};
+  rows.forEach((m) => {
+    const uid = m.user_id;
+    if (!uid) return;
+    const u = userMap[uid] || {};
+    map[uid] = {
+      email: u.email || '',
+      display_name: m.display_name || u.display_name || '',
+      created_at: m.created_at ?? u.created_at ?? null,
+      created_by_uid: u.created_by_uid || '',
+      created_by_email: u.created_by_email || '',
+    };
+  });
+  return map;
 }
 
 async function getPlatformAdminsMap() {
@@ -822,9 +842,11 @@ export class DbRef {
 
   update(values) {
     if (!this._path) {
-      return Promise.all(
-        Object.entries(values).map(([p, v]) => writePath(p, v)),
-      );
+      return (async () => {
+        for (const [p, v] of Object.entries(values)) {
+          await writePath(p, v);
+        }
+      })();
     }
     return readPath(this._path).then(async (current) => {
       const base = current && typeof current === 'object' ? current : {};

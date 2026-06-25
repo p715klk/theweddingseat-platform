@@ -331,6 +331,10 @@
                   autocomplete="off"
                   placeholder="coordinator@example.com"
                 />
+                <p v-if="addUserEmailChecking" class="email-check-hint checking">檢查 Email…</p>
+                <p v-else-if="addUserEmailHint" class="email-check-hint" :class="addUserEmailStatus">
+                  {{ addUserEmailHint }}
+                </p>
               </div>
               <div class="field">
                 <label for="new-user-name">顯示名稱（選填）</label>
@@ -342,7 +346,7 @@
                   placeholder="例如：統籌 Amy"
                 />
               </div>
-              <div class="field">
+              <div v-if="!addUserEmailReuse" class="field">
                 <label for="new-user-pw">初始密碼</label>
                 <input
                   id="new-user-pw"
@@ -370,7 +374,12 @@
                 </select>
               </div>
               <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
-              <button type="submit" class="btn-primary" :disabled="addingUser || !canSubmitAddUser">
+              <button
+                type="submit"
+                class="btn-primary"
+                :class="{ 'btn-primary-muted': addUserEmailStatus === 'member' }"
+                :disabled="addingUser || !canSubmitAddUser"
+              >
                 {{ addingUser ? '建立中…' : '建立用戶' }}
               </button>
             </form>
@@ -402,6 +411,7 @@ import { useTenant } from '@/composables/useTenant';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
+import { useMemberEmailCheck } from '@/composables/useMemberEmailCheck';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { canAddMemberRole, canChangeMemberToRole, getMemberQuota, getSwapRoleCandidates, hasAddableMemberRole, hasRoleChangeOptions } from '@/lib/tenantMemberLimits';
 
@@ -422,7 +432,7 @@ const activeTab = ref('data');
 const { user, changePassword } = useAuth();
 const { isPlatformAdmin } = usePlatformAdmin();
 const { memberRole } = useTenantAccess();
-const { meta } = useTenant();
+const { meta, tenantId } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
 const {
   members,
@@ -467,8 +477,6 @@ function canAddRole(role) {
   );
 }
 
-const canSubmitAddUser = computed(() => canAddRole(newUserRole.value));
-
 watch(
   () => [
     quota.value.remaining.admin,
@@ -503,6 +511,25 @@ const newUserEmail = ref('');
 const newUserName = ref('');
 const newUserPassword = ref('');
 const newUserRole = ref('admin');
+
+const {
+  status: addUserEmailStatus,
+  hint: addUserEmailHint,
+  canProceed: addUserEmailCanProceed,
+  isBlocking: addUserEmailBlocking,
+  isChecking: addUserEmailChecking,
+  isReuse: addUserEmailReuse,
+} = useMemberEmailCheck(newUserEmail, { tenantId });
+
+const canSubmitAddUser = computed(() => {
+  if (!canAddRole(newUserRole.value)) return false;
+  if (!newUserEmail.value.trim()) return false;
+  if (addUserEmailChecking.value || addUserEmailBlocking.value) return false;
+  if (!addUserEmailCanProceed.value) return false;
+  if (!addUserEmailReuse.value && newUserPassword.value.trim().length < 6) return false;
+  return true;
+});
+
 const addingUser = ref(false);
 const addUserMsg = ref('');
 const addUserMsgOk = ref(false);
@@ -791,6 +818,7 @@ async function submitAddUser() {
       password: newUserPassword.value,
       displayName: newUserName.value,
       role: createdRole,
+      reuseExisting: addUserEmailReuse.value,
     });
     newUserEmail.value = '';
     newUserName.value = '';
@@ -979,6 +1007,24 @@ async function confirmRemove(member) {
   padding: 0.45rem 0.5rem;
   font-size: 0.8125rem;
 }
+.email-check-hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.email-check-hint.checking {
+  color: #6b7280;
+}
+.email-check-hint.new,
+.email-check-hint.reuse {
+  color: #15803d;
+}
+.email-check-hint.member,
+.email-check-hint.invalid,
+.email-check-hint.error {
+  color: #dc2626;
+}
 .pw-form,
 .add-user-form {
   margin-top: 0.5rem;
@@ -996,6 +1042,9 @@ async function confirmRemove(member) {
 .btn-primary:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+.btn-primary.btn-primary-muted:disabled {
+  opacity: 0.52;
 }
 .msg-ok {
   color: #15803d;

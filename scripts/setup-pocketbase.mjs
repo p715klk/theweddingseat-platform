@@ -354,6 +354,7 @@ const collectionDefs = [
         options: { maxSelect: 1, values: ['owner', 'admin', 'reception'] },
       },
       { name: 'created_at', type: 'number', required: false },
+      { name: 'display_name', type: 'text', required: false },
     ],
     relationFields: ['user', 'tenant'],
     indexes: [
@@ -415,6 +416,11 @@ async function ensureTenantMembersSchema(token, existing) {
     changed = true;
     console.log('+ tenant_members.tenant relation → tenants');
   }
+  if (!names.has('display_name')) {
+    schema.push({ name: 'display_name', type: 'text', required: false });
+    changed = true;
+    console.log('+ tenant_members.display_name（每個 project 獨立顯示名稱）');
+  }
 
   if (!changed) {
     console.log('✓ tenant_members schema 已齊');
@@ -426,6 +432,38 @@ async function ensureTenantMembersSchema(token, existing) {
     body: JSON.stringify({ schema }),
   });
   console.log('✓ tenant_members schema 已更新');
+}
+
+async function migrateMemberDisplayNames(token) {
+  let page = 1;
+  let migrated = 0;
+  for (;;) {
+    const data = await api(token, `/collections/tenant_members/records?page=${page}&perPage=100`);
+    const items = data.items || [];
+    if (!items.length) break;
+    for (const m of items) {
+      if (String(m.display_name || '').trim()) continue;
+      const uid = String(m.user_id || '').trim();
+      if (!uid) continue;
+      try {
+        const u = await api(token, `/collections/users/records/${uid}`);
+        const name = String(u.display_name || '').trim();
+        if (!name) continue;
+        await api(token, `/collections/tenant_members/records/${m.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ display_name: name }),
+        });
+        migrated += 1;
+      } catch {
+        /* 略過無法讀寫嘅記錄 */
+      }
+    }
+    if (items.length < 100) break;
+    page += 1;
+  }
+  if (migrated > 0) {
+    console.log(`+ 已將 users.display_name 複製到 tenant_members（${migrated} 筆）`);
+  }
 }
 
 async function ensureCollection(token, existing, def) {
@@ -466,6 +504,7 @@ async function main() {
 
   existing = await listCollections(token);
   await ensureTenantMembersSchema(token, existing);
+  await migrateMemberDisplayNames(token);
   existing = await listCollections(token);
   await syncCollectionRules(token, existing, 'tenants', tenantsApiRules);
   await syncCollectionRules(token, existing, 'tenant_members', tenantMembersApiRules);

@@ -285,6 +285,13 @@ ${APP_LAYER}
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
   };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
   var callerId = function(caller) {
     if (!caller) return "";
     if (caller.id) return String(caller.id);
@@ -469,16 +476,18 @@ const ROUTES = [
     var role = normalizeMemberRole(recordStr(rows[i], "role"));
     if (!role) continue;
     var email = "";
-    var displayName = "";
+    var displayName = recordStr(rows[i], "display_name");
     var createdAt = null;
     var createdByEmail = "";
     var createdByUid = "";
     try {
       var u = twsFindRecordById("users", uid);
       if (u) {
-        email = recordStr(u, "email");
-        displayName = recordStr(u, "display_name");
-        try { createdAt = u.get("created_at"); } catch (e0) { createdAt = null; }
+        email = recordEmail(u);
+        if (!displayName) displayName = recordStr(u, "display_name");
+        try { createdAt = rows[i].get("created_at"); } catch (e0a) {
+          try { createdAt = u.get("created_at"); } catch (e0b) { createdAt = null; }
+        }
         createdByEmail = recordStr(u, "created_by_email");
         createdByUid = recordStr(u, "created_by_uid");
       }
@@ -497,6 +506,48 @@ const ROUTES = [
 `,
   },
   {
+    path: '/tws/list-all-members',
+    body: `
+  if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  var memberRows = queryRecords("tenant_members", "tenant_id != ''", 500);
+  var tenantRows = queryRecords("tenants", "tenant_id != ''", 200);
+  var slugByTid = {};
+  for (var ti = 0; ti < tenantRows.length; ti++) {
+    var tKey = recordStr(tenantRows[ti], "tenant_id");
+    if (tKey) slugByTid[tKey] = recordStr(tenantRows[ti], "slug") || tKey;
+  }
+  var out = [];
+  for (var mi = 0; mi < memberRows.length; mi++) {
+    var mrow = memberRows[mi];
+    var mTid = recordStr(mrow, "tenant_id");
+    var mUid = recordStr(mrow, "user_id");
+    var mRole = normalizeMemberRole(recordStr(mrow, "role"));
+    if (!mTid || !mUid || !mRole) continue;
+    var mEmail = "";
+    var mDisplay = recordStr(mrow, "display_name");
+    var mCreated = null;
+    try { mCreated = mrow.get("created_at"); } catch (eCr) { mCreated = null; }
+    try {
+      var mu = twsFindRecordById("users", mUid);
+      if (mu) {
+        mEmail = recordEmail(mu);
+        if (!mDisplay) mDisplay = recordStr(mu, "display_name");
+      }
+    } catch (errMu) {}
+    out.push({
+      tenant_id: mTid,
+      slug: slugByTid[mTid] || mTid,
+      uid: mUid,
+      role: mRole,
+      email: mEmail,
+      display_name: mDisplay,
+      created_at: mCreated,
+    });
+  }
+  return e.json(200, { members: out });
+`,
+  },
+  {
     path: '/tws/create-user',
     body: `
   var createTenantId = String(data.tenantId || "").trim();
@@ -504,19 +555,175 @@ const ROUTES = [
   var email = String(data.email || "").trim().toLowerCase();
   var password = String(data.password || "");
   if (!email) throw new BadRequestError("請輸入 Email");
-  if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
   var existing = null;
   try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
   if (existing) {
-    if (!shouldDeleteAuth(existing.id)) throw new BadRequestError("此 Email 已被使用");
-    try { twsDelete(existing); } catch (errDel) { throw new BadRequestError("清除舊帳號失敗"); }
+    var existUid = String(existing.id || "");
+    if (!existUid) throw new BadRequestError("此 Email 已被使用");
+    if (createTenantId) {
+      var inTenant = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: createTenantId, uid: existUid })[0] || null;
+      if (inTenant) throw new BadRequestError("此 Email 已是本專案成員");
+    }
+    return e.json(200, { uid: existUid, email: email, reused: true });
   }
+  if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
   var usersCol = findCollection("users");
   var newUser = new Record(usersCol);
   applyAuthFields(newUser, email, password);
   try { saveAuthRecord(newUser); } catch (errSave) { throw new BadRequestError(mapSaveError(errSave, "建立帳號失敗")); }
-  setOptionalUserMeta(newUser, caller, { display_name: data.display_name || "", initial_password: data.initial_password || password });
-  return e.json(200, { uid: newUser.id, email: newUser.email() });
+  setOptionalUserMeta(newUser, caller, { initial_password: data.initial_password || password });
+  return e.json(200, { uid: newUser.id, email: newUser.email(), reused: false });
+`,
+  },
+  {
+    path: '/tws/check-member-email',
+    body: `
+  var email = String(data.email || "").trim().toLowerCase();
+  var checkTenantId = String(data.tenantId || "").trim();
+  if (!email) throw new BadRequestError("請輸入 Email");
+  if (checkTenantId) {
+    if (!isPlatformAdmin(caller)) {
+      if (!isTenantOwner(checkTenantId, callerId(caller))) {
+        throw new ForbiddenError("只有 owner 或平台管理員可以檢查");
+      }
+    }
+  } else {
+    if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  }
+  var existing = null;
+  try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
+  if (!existing) {
+    return e.json(200, { status: "new", message: "此 Email 可以使用", uid: null, projects: [] });
+  }
+  var existUid = String(existing.id || "");
+  if (!existUid) throw new BadRequestError("此 Email 已被使用");
+  if (checkTenantId) {
+    var inRow = getMemberRow(checkTenantId, existUid);
+    if (inRow) {
+      var inRole = normalizeMemberRole(recordStr(inRow, "role"));
+      return e.json(200, {
+        status: "member",
+        message: "此 Email 已是本專案成員",
+        uid: existUid,
+        memberRole: inRole,
+        projects: [],
+      });
+    }
+    return e.json(200, {
+      status: "reuse",
+      message: "已有登入帳號，會加入本專案（密碼不變）",
+      uid: existUid,
+      projects: [],
+    });
+  }
+  var memRows = queryRecords("tenant_members", "user_id = {:uid}", 50, { uid: existUid });
+  var projOut = [];
+  for (var pi = 0; pi < memRows.length; pi += 1) {
+    var ptid = recordStr(memRows[pi], "tenant_id");
+    if (!ptid) continue;
+    var pt = loadTenantByKey(ptid);
+    projOut.push({
+      tenantId: ptid,
+      slug: pt ? recordStr(pt, "slug") : ptid,
+      role: normalizeMemberRole(recordStr(memRows[pi], "role")),
+    });
+  }
+  return e.json(200, {
+    status: "reuse",
+    message: "已有登入帳號，會加入新 Project（密碼不變）",
+    uid: existUid,
+    projects: projOut,
+  });
+`,
+  },
+  {
+    path: '/tws/create-tenant',
+    body: `
+  if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  var slug = String(data.slug || "").trim().toLowerCase();
+  if (!slug || slug.length < 2) throw new BadRequestError("Slug 格式無效");
+  if (loadTenantByKey(slug)) throw new BadRequestError("Slug「" + slug + "」已被使用");
+  var email = String(data.ownerEmail || "").trim().toLowerCase();
+  var password = String(data.ownerPassword || "");
+  var displayName = String(data.ownerDisplayName || "");
+  if (!email) throw new BadRequestError("請輸入 Owner Email");
+  var ownerUid = "";
+  var reused = false;
+  var existing = null;
+  try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
+  if (existing) {
+    ownerUid = String(existing.id || "");
+    if (!ownerUid) throw new BadRequestError("此 Email 已被使用");
+    reused = true;
+  } else {
+    if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
+    var usersCol = findCollection("users");
+    var newUser = new Record(usersCol);
+    applyAuthFields(newUser, email, password);
+    try { saveAuthRecord(newUser); } catch (errSave) { throw new BadRequestError(mapSaveError(errSave, "建立帳號失敗")); }
+    setOptionalUserMeta(newUser, caller, {
+      display_name: displayName,
+      initial_password: data.initial_password || password,
+    });
+    ownerUid = String(newUser.id || "");
+  }
+  var now = Date.now();
+  var editorUid = callerId(caller);
+  var editorEmail = recordEmail(caller);
+  var tenantRec = null;
+  var dataRec = null;
+  try {
+    var tenantsCol = findCollection("tenants");
+    tenantRec = new Record(tenantsCol);
+    tenantRec.set("tenant_id", slug);
+    tenantRec.set("slug", slug);
+    tenantRec.set("couple_names", String(data.coupleNames || "").trim());
+    tenantRec.set("venue_name", String(data.venueName || "").trim());
+    tenantRec.set("venue_hall", String(data.venueHall || "").trim());
+    tenantRec.set("wedding_date", String(data.weddingDate || "").trim());
+    tenantRec.set("theme_color", String(data.themeColor || "#b91c1c").trim());
+    tenantRec.set("status", "active");
+    tenantRec.set("plan", String(data.plan || "standard").trim());
+    tenantRec.set("owner_uid", ownerUid);
+    tenantRec.set("features", data.features || { checkin: true, guestlist: true, seating: true });
+    tenantRec.set("created_at", now);
+    tenantRec.set("created_by_uid", editorUid);
+    tenantRec.set("created_by_email", editorEmail);
+    tenantRec.set("updated_at", now);
+    tenantRec.set("updated_by_uid", editorUid);
+    tenantRec.set("updated_by_email", editorEmail);
+    twsSave(tenantRec);
+    var tenantDataCol = findCollection("tenant_data");
+    dataRec = new Record(tenantDataCol);
+    dataRec.set("tenant_id", slug);
+    dataRec.set("wedding_guests", data.wedding_guests || {});
+    dataRec.set("unassigned_guests", data.unassigned_guests || []);
+    dataRec.set("guest_status", data.guest_status || {});
+    dataRec.set("table_settings", data.table_settings || {});
+    dataRec.set("floor_layout", data.floor_layout || {});
+    dataRec.set("meta_label_columns", data.meta_label_columns || null);
+    twsSave(dataRec);
+    var membersCol = findCollection("tenant_members");
+    var memberRec = new Record(membersCol);
+    memberRec.set("created_at", now);
+    setMemberFields(memberRec, slug, tenantRec, ownerUid, "owner");
+    memberRec.set("display_name", displayName);
+    twsSave(memberRec);
+  } catch (errCreate) {
+    if (dataRec && dataRec.id) { try { twsDelete(dataRec); } catch (e1) {} }
+    if (tenantRec && tenantRec.id) { try { twsDelete(tenantRec); } catch (e2) {} }
+    var errMsg = errCreate && errCreate.message ? String(errCreate.message) : "建立 Project 失敗";
+    throw new BadRequestError(errMsg);
+  }
+  return e.json(200, {
+    tenantId: slug,
+    slug: slug,
+    ownerUid: ownerUid,
+    ownerEmail: email,
+    reused: reused,
+    checkInUrl: "/p/" + slug,
+    adminUrl: "/p/" + slug + "/admin",
+  });
 `,
   },
   {
@@ -525,6 +732,7 @@ const ROUTES = [
   var tenantId = String(data.tenantId || "").trim();
   var targetUid = String(data.uid || "").trim();
   var role = normalizeMemberRole(data.role || "admin");
+  var memberDisplayName = data.display_name != null ? String(data.display_name || "") : null;
   if (!tenantId || !targetUid) throw new BadRequestError("缺少 tenantId 或 uid");
   if (!role) throw new BadRequestError("無效的角色");
   assertOwnerOrPlatformAdmin(caller, tenantId);
@@ -542,6 +750,7 @@ const ROUTES = [
     var prevRole = normalizeMemberRole(recordStr(existingMember, "role"));
     if (prevRole !== role) assertMemberQuotaForRoleChange(tenantId, prevRole, role, bypassQuota);
     setMemberFields(existingMember, tenantId, tenant, targetUid, role);
+    if (memberDisplayName != null) existingMember.set("display_name", memberDisplayName);
     try { twsSave(existingMember); } catch (errUpd) { throw new BadRequestError("更新成員失敗"); }
     return e.json(200, { tenantId: tenantId, uid: targetUid, created: false });
   }
@@ -550,6 +759,7 @@ const ROUTES = [
   var memberRec = new Record(membersCol);
   memberRec.set("created_at", Date.now());
   setMemberFields(memberRec, tenantId, tenant, targetUid, role);
+  if (memberDisplayName != null) memberRec.set("display_name", memberDisplayName);
   try { twsSave(memberRec); } catch (errIns) { throw new BadRequestError("新增成員失敗"); }
   return e.json(200, { tenantId: tenantId, uid: targetUid, created: true });
 `,
@@ -588,17 +798,15 @@ const ROUTES = [
   var profileTenantId = String(data.tenantId || "").trim();
   var profileUid = String(data.uid || "").trim();
   if (!profileUid) throw new BadRequestError("缺少 uid");
+  if (!profileTenantId) throw new BadRequestError("缺少 tenantId");
   if (profileUid !== callerId(caller)) {
     assertOwnerOrPlatformAdmin(caller, profileTenantId);
   }
-  var profileUser = twsFindRecordById("users", profileUid);
-  if (data.display_name != null) profileUser.set("display_name", String(data.display_name || ""));
-  if (data.initial_password != null) profileUser.set("initial_password", String(data.initial_password || ""));
-  if (data.created_at != null) profileUser.set("created_at", data.created_at);
-  if (data.created_by_uid != null) profileUser.set("created_by_uid", String(data.created_by_uid || ""));
-  if (data.created_by_email != null) profileUser.set("created_by_email", String(data.created_by_email || ""));
-  try { twsSave(profileUser); } catch (errProf) { throw new BadRequestError("更新用戶資料失敗"); }
-  return e.json(200, { uid: profileUid });
+  var memberRow = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: profileTenantId, uid: profileUid })[0] || null;
+  if (!memberRow) throw new NotFoundError("此用戶不在專案成員清單內");
+  if (data.display_name != null) memberRow.set("display_name", String(data.display_name || ""));
+  try { twsSave(memberRow); } catch (errProf) { throw new BadRequestError("更新用戶資料失敗"); }
+  return e.json(200, { uid: profileUid, tenantId: profileTenantId });
 `,
   },
   {
@@ -672,7 +880,7 @@ output += `var twsUserAuthMiddleware = (function() {
 `;
 
 output += `routerAdd("GET", "/tws/health", function(e) {
-  return e.json(200, { ok: true, service: "tws", version: 34, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
+  return e.json(200, { ok: true, service: "tws", version: 38, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
 });
 
 routerAdd("GET", "/tws/debug-auth", function(e) {

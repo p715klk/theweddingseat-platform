@@ -80,12 +80,14 @@ export function useTenantUsers() {
     }
   }
 
-  async function createMember({ email, password, displayName = '', role = 'admin' }) {
+  async function createMember({ email, password, displayName = '', role = 'admin', reuseExisting = false }) {
     if (!tenantId.value) throw new Error('專案未就緒');
     if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
     const trimmedEmail = email?.trim();
     if (!trimmedEmail) throw new Error('請輸入 Email');
-    if (!password || password.length < 6) throw new Error('密碼至少需要 6 個字元');
+    if (!reuseExisting && (!password || password.length < 6)) {
+      throw new Error('密碼至少需要 6 個字元');
+    }
 
     await loadMembers();
     if (!isPlatformAdmin.value && !isCurrentOwner()) {
@@ -95,7 +97,7 @@ export function useTenantUsers() {
       bypassLimits: isPlatformAdmin.value,
     });
 
-    const { uid } = await createAuthUserViaRest(
+    const { uid, reused } = await createAuthUserViaRest(
       trimmedEmail,
       password,
       {
@@ -104,22 +106,16 @@ export function useTenantUsers() {
       },
       { tenantId: tenantId.value },
     );
-    const editor = editorInfo();
 
-    const profile = {
-      email: trimmedEmail,
+    await callUpsertTenantMember({
+      tenantId: tenantId.value,
+      uid,
+      role,
       display_name: displayName.trim(),
-      initial_password: password,
-      created_at: Date.now(),
-      created_by_uid: editor?.uid || '',
-      created_by_email: editor?.email || '',
-    };
-
-    await callUpdateMemberProfile({ tenantId: tenantId.value, uid, profile });
-    await callUpsertTenantMember({ tenantId: tenantId.value, uid, role });
+    });
 
     await loadMembers();
-    return { uid, email: trimmedEmail };
+    return { uid, email: trimmedEmail, reused };
   }
 
   async function removeMember(uid) {

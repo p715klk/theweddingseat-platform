@@ -11,8 +11,7 @@ import {
   assertPassword,
 } from '@/lib/superAdminProvisioning';
 import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
-import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
-import { callSetUserPassword } from '@/lib/twsApi';
+import { callRemoveTenantMember, callSetUserPassword, callUpsertTenantMember, callCreateTenant, isTwsHooksMissingError } from '@/lib/twsApi';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -240,11 +239,17 @@ export async function createTenantMemberUser({
   password,
   displayName = '',
   editor = null,
+  reuseExisting = false,
 }) {
   const id = String(tenantId || '').trim();
   if (!id) throw new Error('缺少 tenantId');
   await assertPlatformAdmin(editor);
-  const { uid, email: trimmedEmail, password: pw } = await createAuthUserForEmail({ email, password });
+  const { uid, email: trimmedEmail, password: pw } = await createAuthUserForEmail({
+    email,
+    password,
+    reuseExisting,
+    tenantId: id,
+  });
   const now = Date.now();
   const profile = buildUserProfile({
     email: trimmedEmail,
@@ -294,6 +299,120 @@ export async function isSlugTaken(slug) {
   return snap.exists();
 }
 
+async function provisionTenantOwner({
+  tenantId,
+  uid,
+  displayName = '',
+}) {
+  await callUpsertTenantMember({
+    tenantId,
+    uid,
+    role: 'owner',
+    display_name: String(displayName || '').trim(),
+  });
+}
+
+function buildCreateTenantApiPayload({
+  normalized,
+  coupleNames,
+  venueName,
+  venueHall,
+  weddingDate,
+  themeColor,
+  plan,
+  ownerEmail,
+  ownerPassword,
+  ownerDisplayName,
+  tenantData = {},
+}) {
+  const defaultTableSettings = buildDefaultTableSettings();
+  const defaultFloorLayout = buildFloorPlanFromTableSettings(defaultTableSettings);
+  return {
+    slug: normalized,
+    coupleNames: coupleNames.trim(),
+    venueName: venueName.trim(),
+    venueHall: venueHall.trim(),
+    weddingDate,
+    themeColor,
+    plan,
+    ownerEmail,
+    ownerPassword,
+    ownerDisplayName: String(ownerDisplayName || '').trim(),
+    initial_password: ownerPassword,
+    features: { ...DEFAULT_TENANT_FEATURES },
+    wedding_guests: tenantData.wedding_guests ?? {},
+    unassigned_guests: tenantData.unassigned_guests ?? [],
+    guest_status: tenantData.guest_status ?? {},
+    table_settings: tenantData.table_settings ?? defaultTableSettings,
+    floor_layout: tenantData.floor_layout ?? defaultFloorLayout,
+    meta_label_columns: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
+  };
+}
+
+async function createTenantViaClient({
+  normalized,
+  tenantId,
+  trimmedEmail,
+  pw,
+  ownerDisplayName,
+  meta,
+  tenantData,
+  ownerReuseExisting = false,
+}) {
+  let tenantWritten = false;
+  try {
+    const created = await createAuthUserForEmail({
+      email: trimmedEmail,
+      password: pw,
+      displayName: ownerDisplayName,
+      initialPassword: pw,
+      reuseExisting: ownerReuseExisting,
+    });
+    const resolvedOwnerUid = created.uid;
+    if (!resolvedOwnerUid) throw new Error('建立帳號失敗（缺少 uid）');
+
+    const tenantBase = `tenants/${tenantId}`;
+    await update(dbRef(database), {
+      [`${tenantBase}/meta`]: {
+        ...meta,
+        owner_uid: resolvedOwnerUid,
+      },
+      [`${tenantBase}/wedding_guests`]: tenantData.wedding_guests ?? {},
+      [`${tenantBase}/unassigned_guests`]: tenantData.unassigned_guests ?? [],
+      [`${tenantBase}/guest_status`]: tenantData.guest_status ?? {},
+      [`${tenantBase}/table_settings`]: tenantData.table_settings ?? buildDefaultTableSettings(),
+      [`${tenantBase}/floor_layout`]: tenantData.floor_layout ?? buildFloorPlanFromTableSettings(buildDefaultTableSettings()),
+      [`${tenantBase}/meta_label_columns`]: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
+    });
+    tenantWritten = true;
+
+    await provisionTenantOwner({
+      tenantId,
+      uid: resolvedOwnerUid,
+      displayName: ownerDisplayName,
+    });
+
+    return {
+      tenantId,
+      slug: normalized,
+      checkInUrl: `/p/${normalized}`,
+      adminUrl: `/p/${normalized}/admin`,
+      ownerUid: resolvedOwnerUid,
+      ownerEmail: trimmedEmail,
+      ownerReused: created.reused === true,
+    };
+  } catch (err) {
+    if (tenantWritten) {
+      try {
+        await deleteTenant(normalized, tenantId);
+      } catch {
+        /* rollback best-effort */
+      }
+    }
+    throw err;
+  }
+}
+
 /**
  * 建立新 tenant（Super Admin 用；會透過 PocketBase API 建立 Owner 帳號）
  */
@@ -309,6 +428,7 @@ export async function createTenant({
   ownerEmail = '',
   ownerPassword = '',
   ownerDisplayName = '',
+  ownerReuseExisting = false,
   editor = null,
 }) {
   const normalized = normalizeSlug(slug);
@@ -323,15 +443,38 @@ export async function createTenant({
   const trimmedEmail = normalizeEmail(ownerEmail);
   if (!trimmedEmail) throw new Error('請輸入 Owner Email');
   const pw = normalizePassword(ownerPassword);
-  assertPassword(pw);
+  if (!ownerReuseExisting) assertPassword(pw);
+  else if (pw) assertPassword(pw);
   await assertPlatformAdmin(editor);
-  const created = await createAuthUserForEmail({
-    email: trimmedEmail,
-    password: pw,
-    displayName: ownerDisplayName,
-    initialPassword: pw,
+
+  const apiPayload = buildCreateTenantApiPayload({
+    normalized,
+    coupleNames,
+    venueName,
+    venueHall,
+    weddingDate,
+    themeColor,
+    plan,
+    ownerEmail: trimmedEmail,
+    ownerPassword: pw,
+    ownerDisplayName,
   });
-  const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
+
+  try {
+    const data = await callCreateTenant(apiPayload);
+    return {
+      tenantId: data.tenantId || normalized,
+      slug: data.slug || normalized,
+      checkInUrl: data.checkInUrl || `/p/${normalized}`,
+      adminUrl: data.adminUrl || `/p/${normalized}/admin`,
+      ownerUid: data.ownerUid,
+      ownerEmail: data.ownerEmail || trimmedEmail,
+      ownerReused: data.reused === true,
+    };
+  } catch (err) {
+    if (!isTwsHooksMissingError(err)) throw err;
+  }
+
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -342,56 +485,26 @@ export async function createTenant({
     features: { ...DEFAULT_TENANT_FEATURES },
     slug: normalized,
     plan,
-    ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
     ...auditFields(editor, { isCreate: true }),
   };
 
-  const tenantBase = `tenants/${tenantId}`;
-  const defaultTableSettings = buildDefaultTableSettings();
-  const defaultFloorLayout = buildFloorPlanFromTableSettings(defaultTableSettings);
-  const updates = {
-    [`slugs/${normalized}`]: tenantId,
-    [`${tenantBase}/meta`]: meta,
-    [`${tenantBase}/wedding_guests`]: {},
-    [`${tenantBase}/unassigned_guests`]: [],
-    [`${tenantBase}/guest_status`]: {},
-    [`${tenantBase}/table_settings`]: defaultTableSettings,
-    [`${tenantBase}/floor_layout`]: defaultFloorLayout,
-    [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,
-  };
-
-  if (resolvedOwnerUid) {
-    const now = Date.now();
-    const profile = buildUserProfile({
-      email: trimmedEmail,
-      displayName: ownerDisplayName,
-      initialPassword: pw,
-      editor,
-      now,
-    });
-    Object.assign(
-      updates,
-      buildMemberProvisionUpdates({
-        tenantId,
-        uid: resolvedOwnerUid,
-        profile,
-        editor,
-        now,
-        includeMetaPaths: false,
-      }),
-    );
-  }
-
-  await update(dbRef(database), updates);
-
-  return {
+  return createTenantViaClient({
+    normalized,
     tenantId,
-    slug: normalized,
-    checkInUrl: `/p/${normalized}`,
-    adminUrl: `/p/${normalized}/admin`,
-    ownerUid: resolvedOwnerUid,
-    ownerEmail: trimmedEmail,
-  };
+    trimmedEmail,
+    pw,
+    ownerDisplayName,
+    meta,
+    ownerReuseExisting,
+    tenantData: {
+      wedding_guests: {},
+      unassigned_guests: [],
+      guest_status: {},
+      table_settings: apiPayload.table_settings,
+      floor_layout: apiPayload.floor_layout,
+      meta_label_columns: apiPayload.meta_label_columns,
+    },
+  });
 }
 
 export async function setAuthUserPassword({ uid, newPassword }) {
@@ -416,6 +529,7 @@ export async function cloneTenant({
   ownerEmail = '',
   ownerPassword = '',
   ownerDisplayName = '',
+  ownerReuseExisting = false,
   editor = null,
 }) {
   const normalized = normalizeSlug(slug);
@@ -431,15 +545,39 @@ export async function cloneTenant({
   const trimmedEmail = normalizeEmail(ownerEmail);
   if (!trimmedEmail) throw new Error('請輸入 Owner Email');
   const pw = normalizePassword(ownerPassword);
-  assertPassword(pw);
+  if (!ownerReuseExisting) assertPassword(pw);
+  else if (pw) assertPassword(pw);
   await assertPlatformAdmin(editor);
-  const created = await createAuthUserForEmail({
-    email: trimmedEmail,
-    password: pw,
-    displayName: ownerDisplayName,
-    initialPassword: pw,
+
+  const apiPayload = buildCreateTenantApiPayload({
+    normalized,
+    coupleNames,
+    venueName,
+    venueHall,
+    weddingDate,
+    themeColor,
+    plan,
+    ownerEmail: trimmedEmail,
+    ownerPassword: pw,
+    ownerDisplayName,
+    tenantData: sourceData,
   });
-  const resolvedOwnerUid = created.uid || ownerUid?.trim() || editor?.uid || '';
+
+  try {
+    const data = await callCreateTenant(apiPayload);
+    return {
+      tenantId: data.tenantId || normalized,
+      slug: data.slug || normalized,
+      checkInUrl: data.checkInUrl || `/p/${normalized}`,
+      adminUrl: data.adminUrl || `/p/${normalized}/admin`,
+      ownerUid: data.ownerUid,
+      ownerEmail: data.ownerEmail || trimmedEmail,
+      ownerReused: data.reused === true,
+    };
+  } catch (err) {
+    if (!isTwsHooksMissingError(err)) throw err;
+  }
+
   const meta = {
     couple_names: coupleNames.trim(),
     venue_name: venueName.trim(),
@@ -450,54 +588,19 @@ export async function cloneTenant({
     features: { ...DEFAULT_TENANT_FEATURES },
     slug: normalized,
     plan,
-    ...(resolvedOwnerUid ? { owner_uid: resolvedOwnerUid } : {}),
     ...auditFields(editor, { isCreate: true }),
   };
 
-  const tenantBase = `tenants/${tenantId}`;
-  const updates = {
-    [`slugs/${normalized}`]: tenantId,
-    [`${tenantBase}/meta`]: meta,
-    [`${tenantBase}/wedding_guests`]: sourceData.wedding_guests,
-    [`${tenantBase}/unassigned_guests`]: sourceData.unassigned_guests,
-    [`${tenantBase}/guest_status`]: sourceData.guest_status,
-    [`${tenantBase}/table_settings`]: sourceData.table_settings,
-    [`${tenantBase}/floor_layout`]: sourceData.floor_layout,
-    [`${tenantBase}/meta_label_columns`]: sourceData.meta_label_columns,
-  };
-
-  if (resolvedOwnerUid) {
-    const now = Date.now();
-    const profile = buildUserProfile({
-      email: trimmedEmail,
-      displayName: ownerDisplayName,
-      initialPassword: pw,
-      editor,
-      now,
-    });
-    Object.assign(
-      updates,
-      buildMemberProvisionUpdates({
-        tenantId,
-        uid: resolvedOwnerUid,
-        profile,
-        editor,
-        now,
-        includeMetaPaths: false,
-      }),
-    );
-  }
-
-  await update(dbRef(database), updates);
-
-  return {
+  return createTenantViaClient({
+    normalized,
     tenantId,
-    slug: normalized,
-    checkInUrl: `/p/${normalized}`,
-    adminUrl: `/p/${normalized}/admin`,
-    ownerUid: resolvedOwnerUid,
-    ownerEmail: trimmedEmail,
-  };
+    trimmedEmail,
+    pw,
+    ownerDisplayName,
+    meta,
+    ownerReuseExisting,
+    tenantData: sourceData,
+  });
 }
 
 export async function setTenantStatus(tenantId, status, editor = null) {

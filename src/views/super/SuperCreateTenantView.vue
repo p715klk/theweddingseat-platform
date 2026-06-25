@@ -65,8 +65,8 @@
           建立成功後，呢個 Email 可以登入 <code>/p/&lt;slug&gt;/admin</code>。Owner 會自動加入 <code>members</code>。
         </p>
 
-        <div class="grid owner-grid">
-          <div class="field">
+        <div class="grid owner-grid" :class="{ 'owner-grid-single': ownerEmailReuse }">
+          <div class="field" :class="{ 'field-span': ownerEmailReuse }">
             <label>Owner Email <span class="req">*</span></label>
             <input
               v-model="form.ownerEmail"
@@ -76,9 +76,16 @@
               autocomplete="off"
               :disabled="prefilling || saving"
             />
+            <p v-if="ownerEmailChecking" class="email-status checking">檢查 Email…</p>
+            <p v-else-if="ownerEmailHint" class="email-status" :class="ownerEmailStatus">
+              {{ ownerEmailHint }}
+              <span v-if="ownerEmailProjects.length" class="email-projects">
+                已加入 Project：{{ ownerEmailProjects.map((p) => p.slug).join('、') }}
+              </span>
+            </p>
           </div>
 
-          <div class="field">
+          <div v-if="!ownerEmailReuse" class="field">
             <label>初始密碼 <span class="req">*</span></label>
             <div class="pw-row">
               <input
@@ -123,6 +130,7 @@
             臨時密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
             <button type="button" class="btn-copy" @click="copy(createdInfo.ownerTempPassword)">複製</button>
           </li>
+          <li v-if="createdInfo.reusedNote">{{ createdInfo.reusedNote }}</li>
         </ul>
         <p class="field-hint">建議客戶首次登入後即刻喺「設定 → 我的帳號」更改密碼。</p>
       </div>
@@ -131,7 +139,12 @@
 
       <div class="actions">
         <RouterLink to="/super/tenants" class="btn-cancel">取消</RouterLink>
-        <button type="submit" class="btn-submit" :disabled="saving || prefilling || !canSubmit">
+        <button
+          type="submit"
+          class="btn-submit"
+          :class="{ 'btn-submit-muted': ownerEmailStatus === 'member' }"
+          :disabled="saving || prefilling || !canSubmit"
+        >
           {{ saving ? '建立中…' : (copyFromSlug ? '儲存為新 Project' : '建立 Project') }}
         </button>
       </div>
@@ -153,6 +166,7 @@ import {
   isValidSlug,
   isSlugTaken,
 } from '@/composables/useSuperTenants';
+import { useMemberEmailCheck } from '@/composables/useMemberEmailCheck';
 
 const route = useRoute();
 const router = useRouter();
@@ -183,7 +197,24 @@ const createdInfo = ref(null);
 
 const slugPreview = computed(() => normalizeSlug(form.slug));
 
-const canSubmit = computed(() => slugStatus.value === 'available');
+const {
+  status: ownerEmailStatus,
+  hint: ownerEmailHint,
+  projects: ownerEmailProjects,
+  canProceed: ownerEmailCanProceed,
+  isBlocking: ownerEmailBlocking,
+  isChecking: ownerEmailChecking,
+  isReuse: ownerEmailReuse,
+} = useMemberEmailCheck(computed(() => form.ownerEmail));
+
+const canSubmit = computed(() => {
+  if (slugStatus.value !== 'available') return false;
+  if (!form.ownerEmail.trim()) return false;
+  if (ownerEmailChecking.value || ownerEmailBlocking.value) return false;
+  if (!ownerEmailCanProceed.value) return false;
+  if (!ownerEmailReuse.value && form.ownerPassword.trim().length < 6) return false;
+  return true;
+});
 
 let slugCheckTimer = null;
 let slugCheckSeq = 0;
@@ -292,18 +323,24 @@ async function submit() {
       weddingDate: form.weddingDate,
       themeColor: form.themeColor,
       ownerEmail: form.ownerEmail,
-      ownerPassword: form.ownerPassword,
+      ownerPassword: ownerEmailReuse ? '' : form.ownerPassword,
+      ownerReuseExisting: ownerEmailReuse.value,
       ownerDisplayName: form.ownerDisplayName,
       editor: editorInfo(),
     };
     const result = copySourceTenantId.value
       ? await cloneTenant({ ...payload, sourceTenantId: copySourceTenantId.value, plan: copyPlan.value })
       : await createTenant(payload);
-    if (result?.ownerUid) {
+    if (result?.ownerReused) {
+      createdInfo.value = {
+        ownerEmail: result.ownerEmail || form.ownerEmail,
+        reusedNote: '已重用現有登入帳號；密碼維持不變。',
+      };
+    } else if (result?.ownerUid && form.ownerPassword) {
       createdInfo.value = {
         ownerUid: result.ownerUid,
         ownerEmail: result.ownerEmail || form.ownerEmail,
-        ownerTempPassword: result.ownerTempPassword,
+        ownerTempPassword: form.ownerPassword,
       };
     }
     router.push(`/super/tenants/${result.slug}`);
@@ -446,6 +483,30 @@ onUnmounted(() => {
 .slug-status.available {
   color: #15803d;
 }
+.email-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+.email-status.checking {
+  color: #64748b;
+}
+.email-status.new,
+.email-status.reuse {
+  color: #15803d;
+}
+.email-status.member,
+.email-status.invalid,
+.email-status.error {
+  color: #dc2626;
+}
+.email-projects {
+  display: block;
+  margin-top: 0.2rem;
+  font-weight: 500;
+  color: #64748b;
+}
 .error {
   color: #dc2626;
   font-size: 0.875rem;
@@ -477,6 +538,12 @@ onUnmounted(() => {
 }
 .owner-grid {
   align-items: end;
+}
+.owner-grid-single {
+  grid-template-columns: 1fr;
+}
+.field-span {
+  grid-column: 1 / -1;
 }
 .btn-generate {
   flex-shrink: 0;
@@ -544,6 +611,10 @@ onUnmounted(() => {
 }
 .btn-submit:disabled {
   opacity: 0.7;
+  cursor: default;
+}
+.btn-submit.btn-submit-muted:disabled {
+  opacity: 0.52;
 }
 code {
   font-size: 0.85em;

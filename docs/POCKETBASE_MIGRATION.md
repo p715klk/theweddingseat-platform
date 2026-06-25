@@ -19,7 +19,8 @@ Owner / Super Admin 建帳、成員 CUD、移除成員等操作經 **`pb_hooks/`
 
 | 端點 | 用途 |
 |------|------|
-| `GET /tws/health` | 檢查 hooks 是否載入（version 應為 **34+**） |
+| `GET /tws/health` | 檢查 hooks 是否載入（version 應為 **36+**） |
+| `POST /tws/list-all-members` | Super Admin 列出**所有** project 成員（含 email） |
 | `POST /tws/create-user` | Super Admin 或 Owner 建 Auth 帳號 |
 | `POST /tws/list-members` | Owner / Admin 列出成員（含 email、display_name） |
 | `POST /tws/upsert-member` | 新增／更新 `tenant_members`（含配額檢查） |
@@ -174,18 +175,14 @@ tenant_members        → 邊個 user 屬於邊個 project、role（owner / admi
 |-------------|----------|
 
 | email、password | `users`（Auth） |
-
 | Super Admin | `users.is_platform_admin` |
-
-| 顯示名、初始密碼記錄 | `users.display_name`、`users.initial_password` |
-
+| **顯示名稱（per project）** | **`tenant_members.display_name`** |
 | Owner | `tenant_members.role = 'owner'`（`tenants.owner_uid` 為 legacy／顯示用） |
-
 | Project admin / Reception | `tenant_members.role`（`admin` / `reception`） |
 
+同一 email 可加入多個 project（同一 `users` UID、多條 `tenant_members`）；`create-user` 若 email 已存在會 **reuse** 現有 UID（唔改 password），只喺本 project 尚非成員時成功。
 
-
-前端仍用 Firebase 路徑 `tenants/{id}/user_profiles/{uid}`；PocketBase 層會讀寫 **`users`**，唔再複製去 `tenant_members`。
+前端 RTDB 路徑 `tenants/{id}/user_profiles` 的 `display_name` 由 PocketBase 層對應 **`tenant_members.display_name`**（email 仍來自 `users`）。
 
 
 
@@ -201,9 +198,8 @@ tenant_members        → 邊個 user 屬於邊個 project、role（owner / admi
 
 | `tenants/{id}/meta` | `tenants` collection |
 
-| `tenants/{id}/members` | `tenant_members`（`tenant_id`, `user_id`, `role`） |
-
-| `tenants/{id}/user_profiles` | **`users`**（profile 欄位） |
+| `tenants/{id}/members` | `tenant_members`（`tenant_id`, `user_id`, `role`, `display_name`） |
+| `tenants/{id}/user_profiles` | email 來自 **`users`**；`display_name` 來自 **`tenant_members`** |
 
 | `tenants/{id}/wedding_guests` 等 | `tenant_data` JSON 欄位 |
 

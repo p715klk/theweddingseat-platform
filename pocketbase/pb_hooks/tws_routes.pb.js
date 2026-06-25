@@ -18,7 +18,7 @@ var twsUserAuthMiddleware = (function() {
 })();
 
 routerAdd("GET", "/tws/health", function(e) {
-  return e.json(200, { ok: true, service: "tws", version: 34, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
+  return e.json(200, { ok: true, service: "tws", version: 38, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
 });
 
 routerAdd("GET", "/tws/debug-auth", function(e) {
@@ -421,6 +421,13 @@ routerAdd("POST", "/tws/list-members", function(e) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
   };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
   var callerId = function(caller) {
     if (!caller) return "";
     if (caller.id) return String(caller.id);
@@ -600,16 +607,18 @@ routerAdd("POST", "/tws/list-members", function(e) {
     var role = normalizeMemberRole(recordStr(rows[i], "role"));
     if (!role) continue;
     var email = "";
-    var displayName = "";
+    var displayName = recordStr(rows[i], "display_name");
     var createdAt = null;
     var createdByEmail = "";
     var createdByUid = "";
     try {
       var u = twsFindRecordById("users", uid);
       if (u) {
-        email = recordStr(u, "email");
-        displayName = recordStr(u, "display_name");
-        try { createdAt = u.get("created_at"); } catch (e0) { createdAt = null; }
+        email = recordEmail(u);
+        if (!displayName) displayName = recordStr(u, "display_name");
+        try { createdAt = rows[i].get("created_at"); } catch (e0a) {
+          try { createdAt = u.get("created_at"); } catch (e0b) { createdAt = null; }
+        }
         createdByEmail = recordStr(u, "created_by_email");
         createdByUid = recordStr(u, "created_by_uid");
       }
@@ -625,6 +634,490 @@ routerAdd("POST", "/tws/list-members", function(e) {
     });
   }
   return e.json(200, { tenantId: tenantId, members: members });
+
+}, twsUserAuthMiddleware);
+
+routerAdd("POST", "/tws/list-all-members", function(e) {
+  var escFilter = function(s) {
+    return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  };
+
+  var findByField = function(collection, field, value) {
+    var v = String(value || "").trim();
+    if (!v) return null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findFirstRecordByData === "function") {
+        return dao.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err) {}
+    try {
+      if (typeof $app.findFirstRecordByData === "function") {
+        return $app.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var queryRecords = function(collection, filter, limit, bind) {
+    var lim = limit || 500;
+    var f = String(filter || "").trim();
+    var params = bind || null;
+    if (params) {
+      try {
+        var daoOld = $app.dao();
+        if (daoOld && typeof daoOld.findRecordsByFilter === "function") {
+          var rowsOld = daoOld.findRecordsByFilter(collection, f, params, lim, 0);
+          if (rowsOld && rowsOld.length) return rowsOld;
+        }
+      } catch (errOld) {}
+    }
+    try {
+      if (typeof $app.findRecordsByFilter === "function") {
+        var rowsApp = params
+          ? $app.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : $app.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsApp && rowsApp.length) return rowsApp;
+      }
+    } catch (errApp) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        var rowsDao = params
+          ? dao.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : dao.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsDao && rowsDao.length) return rowsDao;
+      }
+    } catch (errDao) {}
+    if (lim === 1 && f) {
+      try {
+        if (typeof $app.findFirstRecordByFilter === "function") {
+          var one = $app.findFirstRecordByFilter(collection, f);
+          if (one) return [one];
+        }
+      } catch (errOne) {}
+      try {
+        var daoOne = $app.dao();
+        if (daoOne && typeof daoOne.findFirstRecordByFilter === "function") {
+          var one2 = daoOne.findFirstRecordByFilter(collection, f);
+          if (one2) return [one2];
+        }
+      } catch (errOne2) {}
+    }
+    return [];
+  };
+
+
+  var findCollection = function(name) {
+    try {
+      if (typeof $app.findCollectionByNameOrId === "function") {
+        return $app.findCollectionByNameOrId(name);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findCollectionByNameOrId === "function") {
+        return dao.findCollectionByNameOrId(name);
+      }
+    } catch (err2) {}
+    try {
+      var dao2 = $app.dao();
+      if (dao2 && typeof dao2.findCollectionByName === "function") {
+        return dao2.findCollectionByName(name);
+      }
+    } catch (err3) {}
+    throw new BadRequestError("找不到 collection: " + name);
+  };
+  var twsFindRecordById = function(collection, id) {
+    try {
+      if (typeof $app.findRecordById === "function") {
+        return $app.findRecordById(collection, id);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordById === "function") {
+        return dao.findRecordById(collection, id);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsFindAuthByEmail = function(collection, email) {
+    try {
+      if (typeof $app.findAuthRecordByEmail === "function") {
+        return $app.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findAuthRecordByEmail === "function") {
+        return dao.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsSave = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.saveRecord === "function") {
+        dao.saveRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.save === "function") {
+        $app.save(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    try {
+      if (typeof $app.saveNoValidate === "function") {
+        $app.saveNoValidate(record);
+        return;
+      }
+    } catch (err2) { lastErr = err2; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "儲存失敗"));
+  };
+  var deriveUsername = function(email) {
+    var em = String(email || "").trim().toLowerCase();
+    return em.replace(/@/g, "_").replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 150) || "tws_user";
+  };
+  var applyAuthFields = function(record, email, password) {
+    var em = String(email || "").trim().toLowerCase();
+    var pw = String(password || "");
+    var uname = deriveUsername(em);
+    try {
+      if (typeof record.setEmail === "function") record.setEmail(em);
+      else record.set("email", em);
+    } catch (errE) { record.set("email", em); }
+    try {
+      if (typeof record.setUsername === "function") record.setUsername(uname);
+      else record.set("username", uname);
+    } catch (errU) { try { record.set("username", uname); } catch (errU2) {} }
+    try {
+      if (typeof record.setPassword === "function") record.setPassword(pw);
+      else record.set("password", pw);
+    } catch (errP) { record.set("password", pw); }
+    try {
+      if (typeof record.setVerified === "function") record.setVerified(true);
+      else record.set("verified", true);
+    } catch (errV) { try { record.set("verified", true); } catch (errV2) {} }
+  };
+  var twsDelete = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.deleteRecord === "function") {
+        dao.deleteRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.delete === "function") {
+        $app.delete(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "刪除失敗"));
+  };
+
+  var resolveAuth = function(ev) {
+    if (ev && ev.auth) return ev.auth;
+    try {
+      var info = $apis.requestInfo(ev);
+      if (info && info.authRecord) return info.authRecord;
+    } catch (err) {}
+    try {
+      if (ev && typeof ev.get === "function") {
+        var ar = ev.get("authRecord");
+        if (ar) return ar;
+      }
+    } catch (err2) {}
+    try {
+      if (ev && typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        if (infoA && infoA.authRecord) return infoA.authRecord;
+      }
+    } catch (err3) {}
+    var token = "";
+    try {
+      var infoB = $apis.requestInfo(ev);
+      var authHdr = (infoB && infoB.headers && (infoB.headers.authorization || infoB.headers.Authorization)) || "";
+      if (authHdr) token = String(authHdr).replace(/^Bearer\s+/i, "").trim();
+    } catch (err4) {}
+    if (token) {
+      try {
+        if (typeof $app.findAuthRecordByToken === "function") {
+          var rec = $app.findAuthRecordByToken(token, "users");
+          if (rec) return rec;
+        }
+      } catch (err5) {}
+      try {
+        var dao = $app.dao();
+        if (dao && typeof dao.findAuthRecordByToken === "function") {
+          var rec2 = dao.findAuthRecordByToken(token, "users");
+          if (rec2) return rec2;
+        }
+      } catch (err6) {}
+    }
+    return null;
+  };
+  var loadCaller = function(ev) {
+    var auth = resolveAuth(ev);
+    if (!auth) throw new UnauthorizedError("需要登入");
+    try { return twsFindRecordById("users", auth.id); } catch (err) { return auth; }
+  };
+  var tryParseJson = function(val) {
+    if (val && typeof val === "object") return val;
+    if (typeof val === "string" && val.trim()) {
+      try { return JSON.parse(val); } catch (err) {}
+    }
+    return null;
+  };
+  var getJsonBody = function(ev) {
+    try {
+      var info = $apis.requestInfo(ev);
+      var parsed = tryParseJson(info && info.body) || tryParseJson(info && info.data);
+      if (parsed) return parsed;
+    } catch (err) {}
+    try {
+      if (typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        var parsedA = tryParseJson(infoA && infoA.body) || tryParseJson(infoA && infoA.data);
+        if (parsedA) return parsedA;
+      }
+    } catch (err2) {}
+    try {
+      if (ev.request && ev.request.body && typeof $utils.readerToString === "function") {
+        var raw = $utils.readerToString(ev.request.body);
+        var parsedC = tryParseJson(raw);
+        if (parsedC) return parsedC;
+      }
+    } catch (err3) {}
+    return {};
+  };
+  var recordBool = function(record, name) {
+    try { return record.getBool(name) === true; } catch (err) {
+      try { return record.get(name) === true; } catch (err2) { return false; }
+    }
+  };
+  var recordStr = function(record, name) {
+    try { return record.getString(name) || ""; } catch (err) {
+      try { return String(record.get(name) || ""); } catch (err2) { return ""; }
+    }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
+  var callerId = function(caller) {
+    if (!caller) return "";
+    if (caller.id) return String(caller.id);
+    try { return String(caller.get("id") || ""); } catch (err) { return ""; }
+  };
+  var normalizeMemberRole = function(val) {
+    if (val === "owner") return "owner";
+    if (val === true || val === "admin") return "admin";
+    if (val === "reception") return "reception";
+    return "";
+  };
+  var getMemberRow = function(tenantKey, uid) {
+    var tid = String(tenantKey || "").trim();
+    var id = String(uid || "").trim();
+    if (!tid || !id) return null;
+    var row = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tid, uid: id })[0];
+    if (row) return row;
+    row = findByField("tenant_members", "user_id", id);
+    if (row && recordStr(row, "tenant_id") === tid) return row;
+    return null;
+  };
+  var getMemberRole = function(tenantKey, uid) {
+    var row = getMemberRow(tenantKey, uid);
+    return row ? normalizeMemberRole(recordStr(row, "role")) : "";
+  };
+  var loadTenantByKey = function(key) {
+    var k = String(key || "").trim();
+    if (!k) return null;
+    var t = findByField("tenants", "tenant_id", k);
+    if (t) return t;
+    t = findByField("tenants", "slug", k);
+    if (t) return t;
+    var rows = queryRecords("tenants", "tenant_id = {:k}", 1, { k: k });
+    if (rows.length) return rows[0];
+    rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
+    return rows.length ? rows[0] : null;
+  };
+  var listOwnedTenants = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return [];
+    var rows = queryRecords("tenant_members", "user_id = {:uid} && role = 'owner'", 50, { uid: id });
+    var out = [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var tid = recordStr(rows[oi], "tenant_id");
+      var tenant = loadTenantByKey(tid);
+      out.push({
+        tenant_id: tid,
+        slug: tenant ? recordStr(tenant, "slug") : tid,
+        role: "owner",
+      });
+    }
+    return out;
+  };
+  var isPlatformAdmin = function(record) { return recordBool(record, "is_platform_admin"); };
+  var isTenantOwner = function(tenantId, uid) {
+    return getMemberRole(tenantId, uid) === "owner";
+  };
+  var callerCanManageUsers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return true;
+    return isTenantOwner(tenantId, callerId(caller));
+  };
+  var assertOwnerOrPlatformAdmin = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var tid = String(tenantId || "").trim();
+    if (!tid) throw new BadRequestError("缺少 tenantId");
+    if (!isTenantOwner(tid, callerId(caller))) {
+      throw new ForbiddenError("只有 owner 或平台管理員可以執行此操作");
+    }
+  };
+  var assertCanViewMembers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var role = getMemberRole(tenantId, callerId(caller));
+    if (role === "owner" || role === "admin") return;
+    throw new ForbiddenError("無權查看成員清單");
+  };
+  var countAdmins = function(members) {
+    var n = 0;
+    for (var i = 0; i < members.length; i += 1) {
+      var r = normalizeMemberRole(recordStr(members[i], "role"));
+      if (r === "admin" || r === "owner") n += 1;
+    }
+    return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var shouldDeleteAuth = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return false;
+    if (findByField("tenant_members", "user_id", id)) return false;
+    if (queryRecords("tenant_members", "user_id = {:uid}", 1, { uid: id }).length > 0) return false;
+    try {
+      var user = twsFindRecordById("users", uid);
+      if (user && recordBool(user, "is_platform_admin")) return false;
+    } catch (err) { return false; }
+    return true;
+  };
+  var mapSaveError = function(err, fallback) {
+    var msg = String((err && err.message) || err || fallback);
+    if (msg.indexOf("already in use") >= 0 || msg.indexOf("unique") >= 0) return "此 Email 已被使用";
+    return msg || fallback;
+  };
+  var setMemberFields = function(record, tenantKey, tenantRec, uid, role) {
+    record.set("tenant_id", tenantKey);
+    record.set("user_id", uid);
+    record.set("role", role);
+    try { record.set("user", uid); } catch (errU) {}
+    try {
+      var tid = tenantRec && tenantRec.id ? tenantRec.id : recordStr(tenantRec, "id");
+      if (tid) record.set("tenant", tid);
+    } catch (errT) {}
+  };
+  var saveAuthRecord = function(record) {
+    twsSave(record);
+  };
+  var setOptionalUserMeta = function(record, caller, extra) {
+    try {
+      record.set("is_platform_admin", false);
+      record.set("created_at", Date.now());
+      record.set("created_by_uid", callerId(caller));
+      record.set("created_by_email", recordStr(caller, "email"));
+      if (extra && extra.display_name) record.set("display_name", String(extra.display_name));
+      if (extra && extra.initial_password) record.set("initial_password", String(extra.initial_password));
+      twsSave(record);
+    } catch (err) { console.error("tws: optional user meta skipped:", err); }
+  };
+  var data = getJsonBody(e);
+  var caller = loadCaller(e);
+
+  if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  var memberRows = queryRecords("tenant_members", "tenant_id != ''", 500);
+  var tenantRows = queryRecords("tenants", "tenant_id != ''", 200);
+  var slugByTid = {};
+  for (var ti = 0; ti < tenantRows.length; ti++) {
+    var tKey = recordStr(tenantRows[ti], "tenant_id");
+    if (tKey) slugByTid[tKey] = recordStr(tenantRows[ti], "slug") || tKey;
+  }
+  var out = [];
+  for (var mi = 0; mi < memberRows.length; mi++) {
+    var mrow = memberRows[mi];
+    var mTid = recordStr(mrow, "tenant_id");
+    var mUid = recordStr(mrow, "user_id");
+    var mRole = normalizeMemberRole(recordStr(mrow, "role"));
+    if (!mTid || !mUid || !mRole) continue;
+    var mEmail = "";
+    var mDisplay = recordStr(mrow, "display_name");
+    var mCreated = null;
+    try { mCreated = mrow.get("created_at"); } catch (eCr) { mCreated = null; }
+    try {
+      var mu = twsFindRecordById("users", mUid);
+      if (mu) {
+        mEmail = recordEmail(mu);
+        if (!mDisplay) mDisplay = recordStr(mu, "display_name");
+      }
+    } catch (errMu) {}
+    out.push({
+      tenant_id: mTid,
+      slug: slugByTid[mTid] || mTid,
+      uid: mUid,
+      role: mRole,
+      email: mEmail,
+      display_name: mDisplay,
+      created_at: mCreated,
+    });
+  }
+  return e.json(200, { members: out });
 
 }, twsUserAuthMiddleware);
 
@@ -897,6 +1390,13 @@ routerAdd("POST", "/tws/create-user", function(e) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
   };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
   var callerId = function(caller) {
     if (!caller) return "";
     if (caller.id) return String(caller.id);
@@ -1070,19 +1570,1059 @@ routerAdd("POST", "/tws/create-user", function(e) {
   var email = String(data.email || "").trim().toLowerCase();
   var password = String(data.password || "");
   if (!email) throw new BadRequestError("請輸入 Email");
-  if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
   var existing = null;
   try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
   if (existing) {
-    if (!shouldDeleteAuth(existing.id)) throw new BadRequestError("此 Email 已被使用");
-    try { twsDelete(existing); } catch (errDel) { throw new BadRequestError("清除舊帳號失敗"); }
+    var existUid = String(existing.id || "");
+    if (!existUid) throw new BadRequestError("此 Email 已被使用");
+    if (createTenantId) {
+      var inTenant = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: createTenantId, uid: existUid })[0] || null;
+      if (inTenant) throw new BadRequestError("此 Email 已是本專案成員");
+    }
+    return e.json(200, { uid: existUid, email: email, reused: true });
   }
+  if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
   var usersCol = findCollection("users");
   var newUser = new Record(usersCol);
   applyAuthFields(newUser, email, password);
   try { saveAuthRecord(newUser); } catch (errSave) { throw new BadRequestError(mapSaveError(errSave, "建立帳號失敗")); }
-  setOptionalUserMeta(newUser, caller, { display_name: data.display_name || "", initial_password: data.initial_password || password });
-  return e.json(200, { uid: newUser.id, email: newUser.email() });
+  setOptionalUserMeta(newUser, caller, { initial_password: data.initial_password || password });
+  return e.json(200, { uid: newUser.id, email: newUser.email(), reused: false });
+
+}, twsUserAuthMiddleware);
+
+routerAdd("POST", "/tws/check-member-email", function(e) {
+  var escFilter = function(s) {
+    return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  };
+
+  var findByField = function(collection, field, value) {
+    var v = String(value || "").trim();
+    if (!v) return null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findFirstRecordByData === "function") {
+        return dao.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err) {}
+    try {
+      if (typeof $app.findFirstRecordByData === "function") {
+        return $app.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var queryRecords = function(collection, filter, limit, bind) {
+    var lim = limit || 500;
+    var f = String(filter || "").trim();
+    var params = bind || null;
+    if (params) {
+      try {
+        var daoOld = $app.dao();
+        if (daoOld && typeof daoOld.findRecordsByFilter === "function") {
+          var rowsOld = daoOld.findRecordsByFilter(collection, f, params, lim, 0);
+          if (rowsOld && rowsOld.length) return rowsOld;
+        }
+      } catch (errOld) {}
+    }
+    try {
+      if (typeof $app.findRecordsByFilter === "function") {
+        var rowsApp = params
+          ? $app.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : $app.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsApp && rowsApp.length) return rowsApp;
+      }
+    } catch (errApp) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        var rowsDao = params
+          ? dao.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : dao.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsDao && rowsDao.length) return rowsDao;
+      }
+    } catch (errDao) {}
+    if (lim === 1 && f) {
+      try {
+        if (typeof $app.findFirstRecordByFilter === "function") {
+          var one = $app.findFirstRecordByFilter(collection, f);
+          if (one) return [one];
+        }
+      } catch (errOne) {}
+      try {
+        var daoOne = $app.dao();
+        if (daoOne && typeof daoOne.findFirstRecordByFilter === "function") {
+          var one2 = daoOne.findFirstRecordByFilter(collection, f);
+          if (one2) return [one2];
+        }
+      } catch (errOne2) {}
+    }
+    return [];
+  };
+
+
+  var findCollection = function(name) {
+    try {
+      if (typeof $app.findCollectionByNameOrId === "function") {
+        return $app.findCollectionByNameOrId(name);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findCollectionByNameOrId === "function") {
+        return dao.findCollectionByNameOrId(name);
+      }
+    } catch (err2) {}
+    try {
+      var dao2 = $app.dao();
+      if (dao2 && typeof dao2.findCollectionByName === "function") {
+        return dao2.findCollectionByName(name);
+      }
+    } catch (err3) {}
+    throw new BadRequestError("找不到 collection: " + name);
+  };
+  var twsFindRecordById = function(collection, id) {
+    try {
+      if (typeof $app.findRecordById === "function") {
+        return $app.findRecordById(collection, id);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordById === "function") {
+        return dao.findRecordById(collection, id);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsFindAuthByEmail = function(collection, email) {
+    try {
+      if (typeof $app.findAuthRecordByEmail === "function") {
+        return $app.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findAuthRecordByEmail === "function") {
+        return dao.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsSave = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.saveRecord === "function") {
+        dao.saveRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.save === "function") {
+        $app.save(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    try {
+      if (typeof $app.saveNoValidate === "function") {
+        $app.saveNoValidate(record);
+        return;
+      }
+    } catch (err2) { lastErr = err2; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "儲存失敗"));
+  };
+  var deriveUsername = function(email) {
+    var em = String(email || "").trim().toLowerCase();
+    return em.replace(/@/g, "_").replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 150) || "tws_user";
+  };
+  var applyAuthFields = function(record, email, password) {
+    var em = String(email || "").trim().toLowerCase();
+    var pw = String(password || "");
+    var uname = deriveUsername(em);
+    try {
+      if (typeof record.setEmail === "function") record.setEmail(em);
+      else record.set("email", em);
+    } catch (errE) { record.set("email", em); }
+    try {
+      if (typeof record.setUsername === "function") record.setUsername(uname);
+      else record.set("username", uname);
+    } catch (errU) { try { record.set("username", uname); } catch (errU2) {} }
+    try {
+      if (typeof record.setPassword === "function") record.setPassword(pw);
+      else record.set("password", pw);
+    } catch (errP) { record.set("password", pw); }
+    try {
+      if (typeof record.setVerified === "function") record.setVerified(true);
+      else record.set("verified", true);
+    } catch (errV) { try { record.set("verified", true); } catch (errV2) {} }
+  };
+  var twsDelete = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.deleteRecord === "function") {
+        dao.deleteRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.delete === "function") {
+        $app.delete(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "刪除失敗"));
+  };
+
+  var resolveAuth = function(ev) {
+    if (ev && ev.auth) return ev.auth;
+    try {
+      var info = $apis.requestInfo(ev);
+      if (info && info.authRecord) return info.authRecord;
+    } catch (err) {}
+    try {
+      if (ev && typeof ev.get === "function") {
+        var ar = ev.get("authRecord");
+        if (ar) return ar;
+      }
+    } catch (err2) {}
+    try {
+      if (ev && typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        if (infoA && infoA.authRecord) return infoA.authRecord;
+      }
+    } catch (err3) {}
+    var token = "";
+    try {
+      var infoB = $apis.requestInfo(ev);
+      var authHdr = (infoB && infoB.headers && (infoB.headers.authorization || infoB.headers.Authorization)) || "";
+      if (authHdr) token = String(authHdr).replace(/^Bearer\s+/i, "").trim();
+    } catch (err4) {}
+    if (token) {
+      try {
+        if (typeof $app.findAuthRecordByToken === "function") {
+          var rec = $app.findAuthRecordByToken(token, "users");
+          if (rec) return rec;
+        }
+      } catch (err5) {}
+      try {
+        var dao = $app.dao();
+        if (dao && typeof dao.findAuthRecordByToken === "function") {
+          var rec2 = dao.findAuthRecordByToken(token, "users");
+          if (rec2) return rec2;
+        }
+      } catch (err6) {}
+    }
+    return null;
+  };
+  var loadCaller = function(ev) {
+    var auth = resolveAuth(ev);
+    if (!auth) throw new UnauthorizedError("需要登入");
+    try { return twsFindRecordById("users", auth.id); } catch (err) { return auth; }
+  };
+  var tryParseJson = function(val) {
+    if (val && typeof val === "object") return val;
+    if (typeof val === "string" && val.trim()) {
+      try { return JSON.parse(val); } catch (err) {}
+    }
+    return null;
+  };
+  var getJsonBody = function(ev) {
+    try {
+      var info = $apis.requestInfo(ev);
+      var parsed = tryParseJson(info && info.body) || tryParseJson(info && info.data);
+      if (parsed) return parsed;
+    } catch (err) {}
+    try {
+      if (typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        var parsedA = tryParseJson(infoA && infoA.body) || tryParseJson(infoA && infoA.data);
+        if (parsedA) return parsedA;
+      }
+    } catch (err2) {}
+    try {
+      if (ev.request && ev.request.body && typeof $utils.readerToString === "function") {
+        var raw = $utils.readerToString(ev.request.body);
+        var parsedC = tryParseJson(raw);
+        if (parsedC) return parsedC;
+      }
+    } catch (err3) {}
+    return {};
+  };
+  var recordBool = function(record, name) {
+    try { return record.getBool(name) === true; } catch (err) {
+      try { return record.get(name) === true; } catch (err2) { return false; }
+    }
+  };
+  var recordStr = function(record, name) {
+    try { return record.getString(name) || ""; } catch (err) {
+      try { return String(record.get(name) || ""); } catch (err2) { return ""; }
+    }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
+  var callerId = function(caller) {
+    if (!caller) return "";
+    if (caller.id) return String(caller.id);
+    try { return String(caller.get("id") || ""); } catch (err) { return ""; }
+  };
+  var normalizeMemberRole = function(val) {
+    if (val === "owner") return "owner";
+    if (val === true || val === "admin") return "admin";
+    if (val === "reception") return "reception";
+    return "";
+  };
+  var getMemberRow = function(tenantKey, uid) {
+    var tid = String(tenantKey || "").trim();
+    var id = String(uid || "").trim();
+    if (!tid || !id) return null;
+    var row = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tid, uid: id })[0];
+    if (row) return row;
+    row = findByField("tenant_members", "user_id", id);
+    if (row && recordStr(row, "tenant_id") === tid) return row;
+    return null;
+  };
+  var getMemberRole = function(tenantKey, uid) {
+    var row = getMemberRow(tenantKey, uid);
+    return row ? normalizeMemberRole(recordStr(row, "role")) : "";
+  };
+  var loadTenantByKey = function(key) {
+    var k = String(key || "").trim();
+    if (!k) return null;
+    var t = findByField("tenants", "tenant_id", k);
+    if (t) return t;
+    t = findByField("tenants", "slug", k);
+    if (t) return t;
+    var rows = queryRecords("tenants", "tenant_id = {:k}", 1, { k: k });
+    if (rows.length) return rows[0];
+    rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
+    return rows.length ? rows[0] : null;
+  };
+  var listOwnedTenants = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return [];
+    var rows = queryRecords("tenant_members", "user_id = {:uid} && role = 'owner'", 50, { uid: id });
+    var out = [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var tid = recordStr(rows[oi], "tenant_id");
+      var tenant = loadTenantByKey(tid);
+      out.push({
+        tenant_id: tid,
+        slug: tenant ? recordStr(tenant, "slug") : tid,
+        role: "owner",
+      });
+    }
+    return out;
+  };
+  var isPlatformAdmin = function(record) { return recordBool(record, "is_platform_admin"); };
+  var isTenantOwner = function(tenantId, uid) {
+    return getMemberRole(tenantId, uid) === "owner";
+  };
+  var callerCanManageUsers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return true;
+    return isTenantOwner(tenantId, callerId(caller));
+  };
+  var assertOwnerOrPlatformAdmin = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var tid = String(tenantId || "").trim();
+    if (!tid) throw new BadRequestError("缺少 tenantId");
+    if (!isTenantOwner(tid, callerId(caller))) {
+      throw new ForbiddenError("只有 owner 或平台管理員可以執行此操作");
+    }
+  };
+  var assertCanViewMembers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var role = getMemberRole(tenantId, callerId(caller));
+    if (role === "owner" || role === "admin") return;
+    throw new ForbiddenError("無權查看成員清單");
+  };
+  var countAdmins = function(members) {
+    var n = 0;
+    for (var i = 0; i < members.length; i += 1) {
+      var r = normalizeMemberRole(recordStr(members[i], "role"));
+      if (r === "admin" || r === "owner") n += 1;
+    }
+    return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var shouldDeleteAuth = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return false;
+    if (findByField("tenant_members", "user_id", id)) return false;
+    if (queryRecords("tenant_members", "user_id = {:uid}", 1, { uid: id }).length > 0) return false;
+    try {
+      var user = twsFindRecordById("users", uid);
+      if (user && recordBool(user, "is_platform_admin")) return false;
+    } catch (err) { return false; }
+    return true;
+  };
+  var mapSaveError = function(err, fallback) {
+    var msg = String((err && err.message) || err || fallback);
+    if (msg.indexOf("already in use") >= 0 || msg.indexOf("unique") >= 0) return "此 Email 已被使用";
+    return msg || fallback;
+  };
+  var setMemberFields = function(record, tenantKey, tenantRec, uid, role) {
+    record.set("tenant_id", tenantKey);
+    record.set("user_id", uid);
+    record.set("role", role);
+    try { record.set("user", uid); } catch (errU) {}
+    try {
+      var tid = tenantRec && tenantRec.id ? tenantRec.id : recordStr(tenantRec, "id");
+      if (tid) record.set("tenant", tid);
+    } catch (errT) {}
+  };
+  var saveAuthRecord = function(record) {
+    twsSave(record);
+  };
+  var setOptionalUserMeta = function(record, caller, extra) {
+    try {
+      record.set("is_platform_admin", false);
+      record.set("created_at", Date.now());
+      record.set("created_by_uid", callerId(caller));
+      record.set("created_by_email", recordStr(caller, "email"));
+      if (extra && extra.display_name) record.set("display_name", String(extra.display_name));
+      if (extra && extra.initial_password) record.set("initial_password", String(extra.initial_password));
+      twsSave(record);
+    } catch (err) { console.error("tws: optional user meta skipped:", err); }
+  };
+  var data = getJsonBody(e);
+  var caller = loadCaller(e);
+
+  var email = String(data.email || "").trim().toLowerCase();
+  var checkTenantId = String(data.tenantId || "").trim();
+  if (!email) throw new BadRequestError("請輸入 Email");
+  if (checkTenantId) {
+    if (!isPlatformAdmin(caller)) {
+      if (!isTenantOwner(checkTenantId, callerId(caller))) {
+        throw new ForbiddenError("只有 owner 或平台管理員可以檢查");
+      }
+    }
+  } else {
+    if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  }
+  var existing = null;
+  try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
+  if (!existing) {
+    return e.json(200, { status: "new", message: "此 Email 可以使用", uid: null, projects: [] });
+  }
+  var existUid = String(existing.id || "");
+  if (!existUid) throw new BadRequestError("此 Email 已被使用");
+  if (checkTenantId) {
+    var inRow = getMemberRow(checkTenantId, existUid);
+    if (inRow) {
+      var inRole = normalizeMemberRole(recordStr(inRow, "role"));
+      return e.json(200, {
+        status: "member",
+        message: "此 Email 已是本專案成員",
+        uid: existUid,
+        memberRole: inRole,
+        projects: [],
+      });
+    }
+    return e.json(200, {
+      status: "reuse",
+      message: "已有登入帳號，會加入本專案（密碼不變）",
+      uid: existUid,
+      projects: [],
+    });
+  }
+  var memRows = queryRecords("tenant_members", "user_id = {:uid}", 50, { uid: existUid });
+  var projOut = [];
+  for (var pi = 0; pi < memRows.length; pi += 1) {
+    var ptid = recordStr(memRows[pi], "tenant_id");
+    if (!ptid) continue;
+    var pt = loadTenantByKey(ptid);
+    projOut.push({
+      tenantId: ptid,
+      slug: pt ? recordStr(pt, "slug") : ptid,
+      role: normalizeMemberRole(recordStr(memRows[pi], "role")),
+    });
+  }
+  return e.json(200, {
+    status: "reuse",
+    message: "已有登入帳號，會加入新 Project（密碼不變）",
+    uid: existUid,
+    projects: projOut,
+  });
+
+}, twsUserAuthMiddleware);
+
+routerAdd("POST", "/tws/create-tenant", function(e) {
+  var escFilter = function(s) {
+    return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  };
+
+  var findByField = function(collection, field, value) {
+    var v = String(value || "").trim();
+    if (!v) return null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findFirstRecordByData === "function") {
+        return dao.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err) {}
+    try {
+      if (typeof $app.findFirstRecordByData === "function") {
+        return $app.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var queryRecords = function(collection, filter, limit, bind) {
+    var lim = limit || 500;
+    var f = String(filter || "").trim();
+    var params = bind || null;
+    if (params) {
+      try {
+        var daoOld = $app.dao();
+        if (daoOld && typeof daoOld.findRecordsByFilter === "function") {
+          var rowsOld = daoOld.findRecordsByFilter(collection, f, params, lim, 0);
+          if (rowsOld && rowsOld.length) return rowsOld;
+        }
+      } catch (errOld) {}
+    }
+    try {
+      if (typeof $app.findRecordsByFilter === "function") {
+        var rowsApp = params
+          ? $app.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : $app.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsApp && rowsApp.length) return rowsApp;
+      }
+    } catch (errApp) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        var rowsDao = params
+          ? dao.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : dao.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsDao && rowsDao.length) return rowsDao;
+      }
+    } catch (errDao) {}
+    if (lim === 1 && f) {
+      try {
+        if (typeof $app.findFirstRecordByFilter === "function") {
+          var one = $app.findFirstRecordByFilter(collection, f);
+          if (one) return [one];
+        }
+      } catch (errOne) {}
+      try {
+        var daoOne = $app.dao();
+        if (daoOne && typeof daoOne.findFirstRecordByFilter === "function") {
+          var one2 = daoOne.findFirstRecordByFilter(collection, f);
+          if (one2) return [one2];
+        }
+      } catch (errOne2) {}
+    }
+    return [];
+  };
+
+
+  var findCollection = function(name) {
+    try {
+      if (typeof $app.findCollectionByNameOrId === "function") {
+        return $app.findCollectionByNameOrId(name);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findCollectionByNameOrId === "function") {
+        return dao.findCollectionByNameOrId(name);
+      }
+    } catch (err2) {}
+    try {
+      var dao2 = $app.dao();
+      if (dao2 && typeof dao2.findCollectionByName === "function") {
+        return dao2.findCollectionByName(name);
+      }
+    } catch (err3) {}
+    throw new BadRequestError("找不到 collection: " + name);
+  };
+  var twsFindRecordById = function(collection, id) {
+    try {
+      if (typeof $app.findRecordById === "function") {
+        return $app.findRecordById(collection, id);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordById === "function") {
+        return dao.findRecordById(collection, id);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsFindAuthByEmail = function(collection, email) {
+    try {
+      if (typeof $app.findAuthRecordByEmail === "function") {
+        return $app.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findAuthRecordByEmail === "function") {
+        return dao.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsSave = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.saveRecord === "function") {
+        dao.saveRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.save === "function") {
+        $app.save(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    try {
+      if (typeof $app.saveNoValidate === "function") {
+        $app.saveNoValidate(record);
+        return;
+      }
+    } catch (err2) { lastErr = err2; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "儲存失敗"));
+  };
+  var deriveUsername = function(email) {
+    var em = String(email || "").trim().toLowerCase();
+    return em.replace(/@/g, "_").replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 150) || "tws_user";
+  };
+  var applyAuthFields = function(record, email, password) {
+    var em = String(email || "").trim().toLowerCase();
+    var pw = String(password || "");
+    var uname = deriveUsername(em);
+    try {
+      if (typeof record.setEmail === "function") record.setEmail(em);
+      else record.set("email", em);
+    } catch (errE) { record.set("email", em); }
+    try {
+      if (typeof record.setUsername === "function") record.setUsername(uname);
+      else record.set("username", uname);
+    } catch (errU) { try { record.set("username", uname); } catch (errU2) {} }
+    try {
+      if (typeof record.setPassword === "function") record.setPassword(pw);
+      else record.set("password", pw);
+    } catch (errP) { record.set("password", pw); }
+    try {
+      if (typeof record.setVerified === "function") record.setVerified(true);
+      else record.set("verified", true);
+    } catch (errV) { try { record.set("verified", true); } catch (errV2) {} }
+  };
+  var twsDelete = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.deleteRecord === "function") {
+        dao.deleteRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.delete === "function") {
+        $app.delete(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "刪除失敗"));
+  };
+
+  var resolveAuth = function(ev) {
+    if (ev && ev.auth) return ev.auth;
+    try {
+      var info = $apis.requestInfo(ev);
+      if (info && info.authRecord) return info.authRecord;
+    } catch (err) {}
+    try {
+      if (ev && typeof ev.get === "function") {
+        var ar = ev.get("authRecord");
+        if (ar) return ar;
+      }
+    } catch (err2) {}
+    try {
+      if (ev && typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        if (infoA && infoA.authRecord) return infoA.authRecord;
+      }
+    } catch (err3) {}
+    var token = "";
+    try {
+      var infoB = $apis.requestInfo(ev);
+      var authHdr = (infoB && infoB.headers && (infoB.headers.authorization || infoB.headers.Authorization)) || "";
+      if (authHdr) token = String(authHdr).replace(/^Bearer\s+/i, "").trim();
+    } catch (err4) {}
+    if (token) {
+      try {
+        if (typeof $app.findAuthRecordByToken === "function") {
+          var rec = $app.findAuthRecordByToken(token, "users");
+          if (rec) return rec;
+        }
+      } catch (err5) {}
+      try {
+        var dao = $app.dao();
+        if (dao && typeof dao.findAuthRecordByToken === "function") {
+          var rec2 = dao.findAuthRecordByToken(token, "users");
+          if (rec2) return rec2;
+        }
+      } catch (err6) {}
+    }
+    return null;
+  };
+  var loadCaller = function(ev) {
+    var auth = resolveAuth(ev);
+    if (!auth) throw new UnauthorizedError("需要登入");
+    try { return twsFindRecordById("users", auth.id); } catch (err) { return auth; }
+  };
+  var tryParseJson = function(val) {
+    if (val && typeof val === "object") return val;
+    if (typeof val === "string" && val.trim()) {
+      try { return JSON.parse(val); } catch (err) {}
+    }
+    return null;
+  };
+  var getJsonBody = function(ev) {
+    try {
+      var info = $apis.requestInfo(ev);
+      var parsed = tryParseJson(info && info.body) || tryParseJson(info && info.data);
+      if (parsed) return parsed;
+    } catch (err) {}
+    try {
+      if (typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        var parsedA = tryParseJson(infoA && infoA.body) || tryParseJson(infoA && infoA.data);
+        if (parsedA) return parsedA;
+      }
+    } catch (err2) {}
+    try {
+      if (ev.request && ev.request.body && typeof $utils.readerToString === "function") {
+        var raw = $utils.readerToString(ev.request.body);
+        var parsedC = tryParseJson(raw);
+        if (parsedC) return parsedC;
+      }
+    } catch (err3) {}
+    return {};
+  };
+  var recordBool = function(record, name) {
+    try { return record.getBool(name) === true; } catch (err) {
+      try { return record.get(name) === true; } catch (err2) { return false; }
+    }
+  };
+  var recordStr = function(record, name) {
+    try { return record.getString(name) || ""; } catch (err) {
+      try { return String(record.get(name) || ""); } catch (err2) { return ""; }
+    }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
+  var callerId = function(caller) {
+    if (!caller) return "";
+    if (caller.id) return String(caller.id);
+    try { return String(caller.get("id") || ""); } catch (err) { return ""; }
+  };
+  var normalizeMemberRole = function(val) {
+    if (val === "owner") return "owner";
+    if (val === true || val === "admin") return "admin";
+    if (val === "reception") return "reception";
+    return "";
+  };
+  var getMemberRow = function(tenantKey, uid) {
+    var tid = String(tenantKey || "").trim();
+    var id = String(uid || "").trim();
+    if (!tid || !id) return null;
+    var row = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tid, uid: id })[0];
+    if (row) return row;
+    row = findByField("tenant_members", "user_id", id);
+    if (row && recordStr(row, "tenant_id") === tid) return row;
+    return null;
+  };
+  var getMemberRole = function(tenantKey, uid) {
+    var row = getMemberRow(tenantKey, uid);
+    return row ? normalizeMemberRole(recordStr(row, "role")) : "";
+  };
+  var loadTenantByKey = function(key) {
+    var k = String(key || "").trim();
+    if (!k) return null;
+    var t = findByField("tenants", "tenant_id", k);
+    if (t) return t;
+    t = findByField("tenants", "slug", k);
+    if (t) return t;
+    var rows = queryRecords("tenants", "tenant_id = {:k}", 1, { k: k });
+    if (rows.length) return rows[0];
+    rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
+    return rows.length ? rows[0] : null;
+  };
+  var listOwnedTenants = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return [];
+    var rows = queryRecords("tenant_members", "user_id = {:uid} && role = 'owner'", 50, { uid: id });
+    var out = [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var tid = recordStr(rows[oi], "tenant_id");
+      var tenant = loadTenantByKey(tid);
+      out.push({
+        tenant_id: tid,
+        slug: tenant ? recordStr(tenant, "slug") : tid,
+        role: "owner",
+      });
+    }
+    return out;
+  };
+  var isPlatformAdmin = function(record) { return recordBool(record, "is_platform_admin"); };
+  var isTenantOwner = function(tenantId, uid) {
+    return getMemberRole(tenantId, uid) === "owner";
+  };
+  var callerCanManageUsers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return true;
+    return isTenantOwner(tenantId, callerId(caller));
+  };
+  var assertOwnerOrPlatformAdmin = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var tid = String(tenantId || "").trim();
+    if (!tid) throw new BadRequestError("缺少 tenantId");
+    if (!isTenantOwner(tid, callerId(caller))) {
+      throw new ForbiddenError("只有 owner 或平台管理員可以執行此操作");
+    }
+  };
+  var assertCanViewMembers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var role = getMemberRole(tenantId, callerId(caller));
+    if (role === "owner" || role === "admin") return;
+    throw new ForbiddenError("無權查看成員清單");
+  };
+  var countAdmins = function(members) {
+    var n = 0;
+    for (var i = 0; i < members.length; i += 1) {
+      var r = normalizeMemberRole(recordStr(members[i], "role"));
+      if (r === "admin" || r === "owner") n += 1;
+    }
+    return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var shouldDeleteAuth = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return false;
+    if (findByField("tenant_members", "user_id", id)) return false;
+    if (queryRecords("tenant_members", "user_id = {:uid}", 1, { uid: id }).length > 0) return false;
+    try {
+      var user = twsFindRecordById("users", uid);
+      if (user && recordBool(user, "is_platform_admin")) return false;
+    } catch (err) { return false; }
+    return true;
+  };
+  var mapSaveError = function(err, fallback) {
+    var msg = String((err && err.message) || err || fallback);
+    if (msg.indexOf("already in use") >= 0 || msg.indexOf("unique") >= 0) return "此 Email 已被使用";
+    return msg || fallback;
+  };
+  var setMemberFields = function(record, tenantKey, tenantRec, uid, role) {
+    record.set("tenant_id", tenantKey);
+    record.set("user_id", uid);
+    record.set("role", role);
+    try { record.set("user", uid); } catch (errU) {}
+    try {
+      var tid = tenantRec && tenantRec.id ? tenantRec.id : recordStr(tenantRec, "id");
+      if (tid) record.set("tenant", tid);
+    } catch (errT) {}
+  };
+  var saveAuthRecord = function(record) {
+    twsSave(record);
+  };
+  var setOptionalUserMeta = function(record, caller, extra) {
+    try {
+      record.set("is_platform_admin", false);
+      record.set("created_at", Date.now());
+      record.set("created_by_uid", callerId(caller));
+      record.set("created_by_email", recordStr(caller, "email"));
+      if (extra && extra.display_name) record.set("display_name", String(extra.display_name));
+      if (extra && extra.initial_password) record.set("initial_password", String(extra.initial_password));
+      twsSave(record);
+    } catch (err) { console.error("tws: optional user meta skipped:", err); }
+  };
+  var data = getJsonBody(e);
+  var caller = loadCaller(e);
+
+  if (!isPlatformAdmin(caller)) throw new ForbiddenError("只限平台管理員");
+  var slug = String(data.slug || "").trim().toLowerCase();
+  if (!slug || slug.length < 2) throw new BadRequestError("Slug 格式無效");
+  if (loadTenantByKey(slug)) throw new BadRequestError("Slug「" + slug + "」已被使用");
+  var email = String(data.ownerEmail || "").trim().toLowerCase();
+  var password = String(data.ownerPassword || "");
+  var displayName = String(data.ownerDisplayName || "");
+  if (!email) throw new BadRequestError("請輸入 Owner Email");
+  var ownerUid = "";
+  var reused = false;
+  var existing = null;
+  try { existing = twsFindAuthByEmail("users", email); } catch (errFind) {}
+  if (existing) {
+    ownerUid = String(existing.id || "");
+    if (!ownerUid) throw new BadRequestError("此 Email 已被使用");
+    reused = true;
+  } else {
+    if (password.length < 6) throw new BadRequestError("密碼至少需要 6 個字元");
+    var usersCol = findCollection("users");
+    var newUser = new Record(usersCol);
+    applyAuthFields(newUser, email, password);
+    try { saveAuthRecord(newUser); } catch (errSave) { throw new BadRequestError(mapSaveError(errSave, "建立帳號失敗")); }
+    setOptionalUserMeta(newUser, caller, {
+      display_name: displayName,
+      initial_password: data.initial_password || password,
+    });
+    ownerUid = String(newUser.id || "");
+  }
+  var now = Date.now();
+  var editorUid = callerId(caller);
+  var editorEmail = recordEmail(caller);
+  var tenantRec = null;
+  var dataRec = null;
+  try {
+    var tenantsCol = findCollection("tenants");
+    tenantRec = new Record(tenantsCol);
+    tenantRec.set("tenant_id", slug);
+    tenantRec.set("slug", slug);
+    tenantRec.set("couple_names", String(data.coupleNames || "").trim());
+    tenantRec.set("venue_name", String(data.venueName || "").trim());
+    tenantRec.set("venue_hall", String(data.venueHall || "").trim());
+    tenantRec.set("wedding_date", String(data.weddingDate || "").trim());
+    tenantRec.set("theme_color", String(data.themeColor || "#b91c1c").trim());
+    tenantRec.set("status", "active");
+    tenantRec.set("plan", String(data.plan || "standard").trim());
+    tenantRec.set("owner_uid", ownerUid);
+    tenantRec.set("features", data.features || { checkin: true, guestlist: true, seating: true });
+    tenantRec.set("created_at", now);
+    tenantRec.set("created_by_uid", editorUid);
+    tenantRec.set("created_by_email", editorEmail);
+    tenantRec.set("updated_at", now);
+    tenantRec.set("updated_by_uid", editorUid);
+    tenantRec.set("updated_by_email", editorEmail);
+    twsSave(tenantRec);
+    var tenantDataCol = findCollection("tenant_data");
+    dataRec = new Record(tenantDataCol);
+    dataRec.set("tenant_id", slug);
+    dataRec.set("wedding_guests", data.wedding_guests || {});
+    dataRec.set("unassigned_guests", data.unassigned_guests || []);
+    dataRec.set("guest_status", data.guest_status || {});
+    dataRec.set("table_settings", data.table_settings || {});
+    dataRec.set("floor_layout", data.floor_layout || {});
+    dataRec.set("meta_label_columns", data.meta_label_columns || null);
+    twsSave(dataRec);
+    var membersCol = findCollection("tenant_members");
+    var memberRec = new Record(membersCol);
+    memberRec.set("created_at", now);
+    setMemberFields(memberRec, slug, tenantRec, ownerUid, "owner");
+    memberRec.set("display_name", displayName);
+    twsSave(memberRec);
+  } catch (errCreate) {
+    if (dataRec && dataRec.id) { try { twsDelete(dataRec); } catch (e1) {} }
+    if (tenantRec && tenantRec.id) { try { twsDelete(tenantRec); } catch (e2) {} }
+    var errMsg = errCreate && errCreate.message ? String(errCreate.message) : "建立 Project 失敗";
+    throw new BadRequestError(errMsg);
+  }
+  return e.json(200, {
+    tenantId: slug,
+    slug: slug,
+    ownerUid: ownerUid,
+    ownerEmail: email,
+    reused: reused,
+    checkInUrl: "/p/" + slug,
+    adminUrl: "/p/" + slug + "/admin",
+  });
 
 }, twsUserAuthMiddleware);
 
@@ -1355,6 +2895,13 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
   };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
   var callerId = function(caller) {
     if (!caller) return "";
     if (caller.id) return String(caller.id);
@@ -1526,6 +3073,7 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
   var tenantId = String(data.tenantId || "").trim();
   var targetUid = String(data.uid || "").trim();
   var role = normalizeMemberRole(data.role || "admin");
+  var memberDisplayName = data.display_name != null ? String(data.display_name || "") : null;
   if (!tenantId || !targetUid) throw new BadRequestError("缺少 tenantId 或 uid");
   if (!role) throw new BadRequestError("無效的角色");
   assertOwnerOrPlatformAdmin(caller, tenantId);
@@ -1543,6 +3091,7 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
     var prevRole = normalizeMemberRole(recordStr(existingMember, "role"));
     if (prevRole !== role) assertMemberQuotaForRoleChange(tenantId, prevRole, role, bypassQuota);
     setMemberFields(existingMember, tenantId, tenant, targetUid, role);
+    if (memberDisplayName != null) existingMember.set("display_name", memberDisplayName);
     try { twsSave(existingMember); } catch (errUpd) { throw new BadRequestError("更新成員失敗"); }
     return e.json(200, { tenantId: tenantId, uid: targetUid, created: false });
   }
@@ -1551,6 +3100,7 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
   var memberRec = new Record(membersCol);
   memberRec.set("created_at", Date.now());
   setMemberFields(memberRec, tenantId, tenant, targetUid, role);
+  if (memberDisplayName != null) memberRec.set("display_name", memberDisplayName);
   try { twsSave(memberRec); } catch (errIns) { throw new BadRequestError("新增成員失敗"); }
   return e.json(200, { tenantId: tenantId, uid: targetUid, created: true });
 
@@ -1824,6 +3374,13 @@ routerAdd("POST", "/tws/swap-member-roles", function(e) {
     try { return record.getString(name) || ""; } catch (err) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
   };
   var callerId = function(caller) {
     if (!caller) return "";
@@ -2288,6 +3845,13 @@ routerAdd("POST", "/tws/update-member-profile", function(e) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
   };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
+  };
   var callerId = function(caller) {
     if (!caller) return "";
     if (caller.id) return String(caller.id);
@@ -2459,17 +4023,15 @@ routerAdd("POST", "/tws/update-member-profile", function(e) {
   var profileTenantId = String(data.tenantId || "").trim();
   var profileUid = String(data.uid || "").trim();
   if (!profileUid) throw new BadRequestError("缺少 uid");
+  if (!profileTenantId) throw new BadRequestError("缺少 tenantId");
   if (profileUid !== callerId(caller)) {
     assertOwnerOrPlatformAdmin(caller, profileTenantId);
   }
-  var profileUser = twsFindRecordById("users", profileUid);
-  if (data.display_name != null) profileUser.set("display_name", String(data.display_name || ""));
-  if (data.initial_password != null) profileUser.set("initial_password", String(data.initial_password || ""));
-  if (data.created_at != null) profileUser.set("created_at", data.created_at);
-  if (data.created_by_uid != null) profileUser.set("created_by_uid", String(data.created_by_uid || ""));
-  if (data.created_by_email != null) profileUser.set("created_by_email", String(data.created_by_email || ""));
-  try { twsSave(profileUser); } catch (errProf) { throw new BadRequestError("更新用戶資料失敗"); }
-  return e.json(200, { uid: profileUid });
+  var memberRow = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: profileTenantId, uid: profileUid })[0] || null;
+  if (!memberRow) throw new NotFoundError("此用戶不在專案成員清單內");
+  if (data.display_name != null) memberRow.set("display_name", String(data.display_name || ""));
+  try { twsSave(memberRow); } catch (errProf) { throw new BadRequestError("更新用戶資料失敗"); }
+  return e.json(200, { uid: profileUid, tenantId: profileTenantId });
 
 }, twsUserAuthMiddleware);
 
@@ -2741,6 +4303,13 @@ routerAdd("POST", "/tws/remove-member", function(e) {
     try { return record.getString(name) || ""; } catch (err) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
   };
   var callerId = function(caller) {
     if (!caller) return "";
@@ -3209,6 +4778,13 @@ routerAdd("POST", "/tws/set-password", function(e) {
     try { return record.getString(name) || ""; } catch (err) {
       try { return String(record.get(name) || ""); } catch (err2) { return ""; }
     }
+  };
+  var recordEmail = function(record) {
+    if (!record) return "";
+    try {
+      if (typeof record.email === "function") return String(record.email() || "").trim();
+    } catch (errE) {}
+    return recordStr(record, "email");
   };
   var callerId = function(caller) {
     if (!caller) return "";

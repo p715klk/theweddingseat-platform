@@ -39,17 +39,28 @@ export async function createAuthUserForEmail({
   password,
   displayName = '',
   initialPassword = '',
+  tenantId = '',
+  reuseExisting = false,
 }) {
   const trimmedEmail = normalizeEmail(email);
   if (!trimmedEmail) throw new Error('請輸入 Email');
   const pw = normalizePassword(password);
-  assertPassword(pw);
+  if (!reuseExisting) {
+    assertPassword(pw);
+  } else if (pw) {
+    assertPassword(pw);
+  }
   const created = await createAuthUserViaRest(trimmedEmail, pw, {
     display_name: displayName,
     initial_password: initialPassword || pw,
-  });
+  }, { tenantId: String(tenantId || '').trim() });
   if (!created?.uid) throw new Error('建立帳號失敗（缺少 uid）');
-  return { uid: created.uid, email: trimmedEmail, password: pw };
+  return {
+    uid: created.uid,
+    email: trimmedEmail,
+    password: pw,
+    reused: created.reused === true,
+  };
 }
 
 export function buildUserProfile({ email, displayName = '', initialPassword = '', editor = null, now = Date.now() }) {

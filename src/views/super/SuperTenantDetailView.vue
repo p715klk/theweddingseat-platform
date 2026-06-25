@@ -138,16 +138,20 @@
         </div>
         <form class="edit-form" @submit.prevent="submitOwner">
           <div class="grid">
-            <div class="field">
+            <div class="field" :class="{ 'field-full': memberEmailReuse }">
               <label>用戶 Email <span class="req">*</span></label>
               <input v-model="ownerForm.email" type="email" required autocomplete="off" placeholder="client@example.com" />
+              <p v-if="memberEmailChecking" class="email-status checking">檢查 Email…</p>
+              <p v-else-if="memberEmailHint" class="email-status" :class="memberEmailStatus">
+                {{ memberEmailHint }}
+              </p>
             </div>
-            <div class="field">
+            <div v-if="!memberEmailReuse" class="field">
               <label>初始密碼 <span class="req">*</span></label>
               <div class="pw-row">
                 <input v-model="ownerForm.password" type="text" required minlength="6" autocomplete="new-password" />
                 <button type="button" class="btn-generate" :disabled="savingOwner" @click="generateOwnerPw">生成</button>
-              </div>              
+              </div>
             </div>
           </div>
           <div class="field">
@@ -155,7 +159,12 @@
             <input v-model="ownerForm.displayName" type="text" placeholder="例如：Mary（新娘）" />
           </div>
           <p v-if="ownerMsg" :class="ownerMsgOk ? 'ok' : 'error'">{{ ownerMsg }}</p>
-          <button type="submit" class="btn-save" :disabled="savingOwner">
+          <button
+            type="submit"
+            class="btn-save"
+            :class="{ 'btn-save-muted': memberEmailStatus === 'member' }"
+            :disabled="savingOwner || !canSubmitAddMember"
+          >
             {{ savingOwner ? '建立中…' : '➕ 建立並加入 members' }}
           </button>
         </form>
@@ -210,6 +219,7 @@ import {
   formatAuditTime,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
+import { useMemberEmailCheck } from '@/composables/useMemberEmailCheck';
 import {
   DEFAULT_TENANT_FEATURES,
   resolveTenantFeatures,
@@ -276,6 +286,26 @@ const ownerForm = reactive({
   email: '',
   password: '',
   displayName: '',
+});
+
+const {
+  status: memberEmailStatus,
+  hint: memberEmailHint,
+  canProceed: memberEmailCanProceed,
+  isBlocking: memberEmailBlocking,
+  isChecking: memberEmailChecking,
+  isReuse: memberEmailReuse,
+} = useMemberEmailCheck(
+  computed(() => ownerForm.email),
+  { tenantId: computed(() => tenant.value?.tenantId || '') },
+);
+
+const canSubmitAddMember = computed(() => {
+  if (!ownerForm.email.trim()) return false;
+  if (memberEmailChecking.value || memberEmailBlocking.value) return false;
+  if (!memberEmailCanProceed.value) return false;
+  if (!memberEmailReuse.value && ownerForm.password.trim().length < 6) return false;
+  return true;
 });
 
 const slugPreview = computed(() => normalizeSlug(editForm.slug));
@@ -375,6 +405,7 @@ async function submitOwner() {
       email: ownerForm.email,
       password: ownerForm.password,
       displayName: ownerForm.displayName,
+      reuseExisting: memberEmailReuse.value,
       editor: editorInfo(),
     });
     ownerMsgOk.value = true;
@@ -530,6 +561,24 @@ async function saveSlug() {
   font-size: 0.85rem;
   color: #b45309;
 }
+.email-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+.email-status.checking {
+  color: #64748b;
+}
+.email-status.new,
+.email-status.reuse {
+  color: #15803d;
+}
+.email-status.member,
+.email-status.invalid,
+.email-status.error {
+  color: #dc2626;
+}
 .section {
   margin-bottom: 1.25rem;
   padding-top: 1rem;
@@ -660,6 +709,13 @@ async function saveSlug() {
 }
 .btn-save:disabled {
   opacity: 0.7;
+  cursor: default;
+}
+.btn-save.btn-save-muted:disabled {
+  opacity: 0.52;
+}
+.field-full {
+  grid-column: 1 / -1;
 }
 .meta-readonly {
   margin: 0.35rem 0 0;
