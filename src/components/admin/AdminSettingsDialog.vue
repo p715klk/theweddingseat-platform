@@ -143,9 +143,9 @@
         </div>
 
         <!-- 用戶管理 -->
-        <div v-else-if="activeTab === 'users'" class="space-y-4">
+        <div v-else-if="activeTab === 'users'" class="space-y-4" @click="closeMemberMenu">
           <p class="hint">
-            管理可登入此婚宴專案的帳號。新增用戶會建立登入帳號；後台管理員可進入後台，現場接待只可進入點名頁。
+            管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。
           </p>
           <p v-if="!canManageUsers" class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">
             你而家係一般後台用戶（非 Owner），只能查看用戶清單；如要新增／移除用戶，請用 Owner 帳號登入。
@@ -154,30 +154,120 @@
           <p v-if="usersLoading" class="text-xs text-gray-400">⏳ 載入用戶清單…</p>
           <p v-else-if="usersError" class="msg-error">{{ usersError }}</p>
 
-          <ul v-else-if="members.length" class="member-list">
-            <li v-for="m in members" :key="m.uid" class="member-item">
-              <div class="member-main">
-                <span class="member-email">{{ m.email || m.uid }}</span>
-                <span v-if="m.displayName" class="member-name">{{ m.displayName }}</span>
-                <span v-if="m.uid === ownerUid" class="member-owner">（Owner）</span>
-                <span v-else-if="m.role === 'reception'" class="member-role">（現場接待）</span>
-                <span v-else-if="m.role === 'admin'" class="member-role">（後台管理員）</span>
-                <span v-else-if="m.isSelf" class="member-self">（你）</span>
+          <div v-else-if="members.length" class="member-table-wrap">
+            <table class="member-table">
+              <thead>
+                <tr>
+                  <th>顯示名稱</th>
+                  <th>登入 Email</th>
+                  <th>角色</th>
+                  <th class="actions-col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in members" :key="m.uid">
+                  <td>
+                    <span class="member-name-cell">{{ m.displayName || '—' }}</span>
+                    <span v-if="m.isSelf" class="member-self-tag">你</span>
+                  </td>
+                  <td class="member-email-cell">{{ m.email || m.uid }}</td>
+                  <td>
+                    <span class="role-label">{{ memberRoleLabel(m.role) }}</span>
+                  </td>
+                  <td class="actions-cell" @click.stop>
+                    <div v-if="canManageUsers" class="actions-wrap">
+                      <button
+                        type="button"
+                        class="btn-member-edit"
+                        :class="{ open: openMenuUid === m.uid }"
+                        aria-haspopup="menu"
+                        :aria-expanded="openMenuUid === m.uid"
+                        @click="toggleMemberMenu(m.uid)"
+                      >
+                        編輯
+                      </button>
+                      <div
+                        v-if="openMenuUid === m.uid"
+                        class="member-actions-menu"
+                        role="menu"
+                        @click.stop
+                      >
+                        <button type="button" role="menuitem" @click="openNameEditor(m)">
+                          修改顯示名稱
+                        </button>
+                        <template v-if="canChangeMemberRole(m)">
+                          <button
+                            v-if="m.role !== 'admin'"
+                            type="button"
+                            role="menuitem"
+                            :disabled="!canSelectRole(m, 'admin') || roleChangingUid === m.uid"
+                            @click="pickMemberRole(m, 'admin')"
+                          >
+                            設為後台管理員
+                          </button>
+                          <button
+                            v-if="m.role !== 'reception'"
+                            type="button"
+                            role="menuitem"
+                            :disabled="!canSelectRole(m, 'reception') || roleChangingUid === m.uid"
+                            @click="pickMemberRole(m, 'reception')"
+                          >
+                            設為現場接待
+                          </button>
+                        </template>
+                        <button
+                          v-if="canRemoveMember(m)"
+                          type="button"
+                          role="menuitem"
+                          class="danger"
+                          :disabled="removingUid === m.uid"
+                          @click="removeFromMenu(m)"
+                        >
+                          {{ removingUid === m.uid ? '移除中…' : '移除用戶' }}
+                        </button>
+                      </div>
+                    </div>
+                    <span v-else class="text-gray-300">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-if="memberEditPanel" class="member-edit-panel" @click.stop>
+            <form class="member-edit-form" @submit.prevent="submitMemberNameEdit">
+              <p class="member-edit-label">
+                修改顯示名稱
+                <span class="member-edit-email">{{ memberEditPanel.email }}</span>
+              </p>
+              <div class="member-edit-row">
+                <input
+                  v-model="memberEditPanel.displayName"
+                  type="text"
+                  maxlength="40"
+                  class="member-edit-input"
+                  placeholder="例如：統籌 Amy"
+                  :disabled="nameSavingUid === memberEditPanel.uid"
+                  autofocus
+                />
+                <button
+                  type="submit"
+                  class="btn-mini primary"
+                  :disabled="nameSavingUid === memberEditPanel.uid"
+                >
+                  {{ nameSavingUid === memberEditPanel.uid ? '儲存中…' : '儲存' }}
+                </button>
+                <button
+                  type="button"
+                  class="btn-mini"
+                  :disabled="nameSavingUid === memberEditPanel.uid"
+                  @click="closeMemberEdit"
+                >
+                  取消
+                </button>
               </div>
-              <button
-                v-if="canManageUsers && !m.isSelf && m.uid !== ownerUid"
-                type="button"
-                class="btn-remove"
-                :disabled="removingUid === m.uid"
-                @click="confirmRemove(m)"
-              >
-                {{ removingUid === m.uid ? '移除中…' : '移除' }}
-              </button>
-            </li>
-          </ul>
-          <p v-else class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
-            尚未有用戶資料。如你係平台管理員手動開嘅帳號，可能只顯示 UID。
-          </p>
+            </form>
+          </div>
 
           <template v-if="canManageUsers">
             <div class="quota-summary">
@@ -262,10 +352,21 @@
       </div>
     </div>
   </div>
+
+  <Teleport to="body">
+    <p
+      v-if="userToast"
+      class="admin-toast is-visible"
+      role="status"
+      aria-live="polite"
+    >
+      {{ userToast }}
+    </p>
+  </Teleport>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useTenant } from '@/composables/useTenant';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
@@ -293,13 +394,6 @@ const { isPlatformAdmin } = usePlatformAdmin();
 const { memberRole } = useTenantAccess();
 const { meta } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
-const isOwner = computed(() => !ownerUid.value || ownerUid.value === user.value?.uid);
-const canManageUsers = computed(() => isPlatformAdmin.value || isOwner.value);
-const roleLabel = computed(() => {
-  if (memberRole.value === 'platform_admin') return 'Super Admin';
-  if (memberRole.value === 'reception') return '現場接待';
-  return '後台管理員';
-});
 const {
   members,
   loading: usersLoading,
@@ -307,9 +401,22 @@ const {
   loadMembers,
   createMember,
   removeMember,
+  updateMemberRole,
+  updateMemberDisplayName,
   ensureSelfProfile,
   updateSelfDisplayName,
 } = useTenantUsers();
+const isOwner = computed(() => {
+  const self = members.value.find((m) => m.isSelf);
+  if (self?.role === 'owner') return true;
+  return !!ownerUid.value && ownerUid.value === user.value?.uid;
+});
+const canManageUsers = computed(() => isPlatformAdmin.value || isOwner.value);
+const roleLabel = computed(() => {
+  if (memberRole.value === 'platform_admin') return 'Super Admin';
+  if (memberRole.value === 'reception') return '現場接待';
+  return '後台管理員';
+});
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
 const quota = computed(() => getMemberQuota(members.value, ownerUid.value));
@@ -356,6 +463,129 @@ const addingUser = ref(false);
 const addUserMsg = ref('');
 const addUserMsgOk = ref(false);
 const removingUid = ref('');
+const roleChangingUid = ref('');
+const nameSavingUid = ref('');
+const openMenuUid = ref(null);
+const memberEditPanel = ref(null);
+const userToast = ref('');
+let userToastTimer = null;
+
+function showUserToast(message, ms = 2500) {
+  userToast.value = message;
+  clearTimeout(userToastTimer);
+  userToastTimer = setTimeout(() => {
+    userToast.value = '';
+  }, ms);
+}
+
+onUnmounted(() => {
+  clearTimeout(userToastTimer);
+});
+
+function memberRoleLabel(role) {
+  if (role === 'owner') return 'Owner';
+  if (role === 'reception') return '現場接待';
+  if (role === 'admin') return '後台管理員';
+  return '—';
+}
+
+function canSelectRole(member, targetRole) {
+  if (member.role === targetRole) return true;
+  if (isPlatformAdmin.value) return true;
+
+  let admin = 0;
+  let reception = 0;
+  members.value.forEach((m) => {
+    if (m.role === 'owner' || m.uid === member.uid) return;
+    if (m.role === 'admin') admin += 1;
+    else if (m.role === 'reception') reception += 1;
+  });
+
+  if (targetRole === 'admin') return admin < quota.value.limits.admin;
+  if (targetRole === 'reception') return reception < quota.value.limits.reception;
+  return false;
+}
+
+function canChangeMemberRole(member) {
+  return !member.isSelf && member.role !== 'owner';
+}
+
+function canRemoveMember(member) {
+  return !member.isSelf && member.role !== 'owner';
+}
+
+function toggleMemberMenu(uid) {
+  openMenuUid.value = openMenuUid.value === uid ? null : uid;
+}
+
+function closeMemberMenu() {
+  openMenuUid.value = null;
+}
+
+function openNameEditor(member) {
+  closeMemberMenu();
+  memberEditPanel.value = {
+    uid: member.uid,
+    email: member.email || member.uid,
+    displayName: member.displayName || '',
+  };
+}
+
+function closeMemberEdit() {
+  memberEditPanel.value = null;
+}
+
+async function submitMemberNameEdit() {
+  if (!memberEditPanel.value) return;
+  const { uid, email, displayName } = memberEditPanel.value;
+  const raw = String(displayName || '').trim();
+  const member = members.value.find((m) => m.uid === uid);
+  const prev = member?.displayName || '';
+  if (raw === prev) {
+    closeMemberEdit();
+    return;
+  }
+  if (raw.length > 40) {
+    addUserMsgOk.value = false;
+    addUserMsg.value = '顯示名稱太長（最多 40 字）';
+    return;
+  }
+
+  nameSavingUid.value = uid;
+  addUserMsg.value = '';
+  try {
+    await updateMemberDisplayName(uid, raw);
+    closeMemberEdit();
+    showUserToast(`已更新「${email}」的顯示名稱`);
+  } catch (e) {
+    addUserMsgOk.value = false;
+    addUserMsg.value = e?.message || '更新顯示名稱失敗';
+  } finally {
+    nameSavingUid.value = '';
+  }
+}
+
+async function pickMemberRole(member, role) {
+  closeMemberMenu();
+  if (member.role === role) return;
+
+  roleChangingUid.value = member.uid;
+  addUserMsg.value = '';
+  try {
+    await updateMemberRole(member.uid, role);
+    showUserToast(`已將「${member.email || member.uid}」改為${memberRoleLabel(role)}`);
+  } catch (e) {
+    addUserMsgOk.value = false;
+    addUserMsg.value = e?.message || '變更角色失敗';
+  } finally {
+    roleChangingUid.value = '';
+  }
+}
+
+function removeFromMenu(member) {
+  closeMemberMenu();
+  confirmRemove(member);
+}
 
 watch(
   () => props.open,
@@ -366,6 +596,10 @@ watch(
     nameMsg.value = '';
     addUserMsg.value = '';
     editingName.value = false;
+    userToast.value = '';
+    clearTimeout(userToastTimer);
+    closeMemberMenu();
+    closeMemberEdit();
     try {
       await ensureSelfProfile();
       await loadMembers();
@@ -709,70 +943,159 @@ async function confirmRemove(member) {
   color: #d97706;
   font-weight: 600;
 }
-.member-list {
-  list-style: none;
+.member-table-wrap {
   margin: 0 0 1rem;
-  padding: 0;
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
-  overflow: hidden;
+  overflow: visible;
 }
-.member-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.55rem 0.65rem;
+.member-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 0.8rem;
-  border-bottom: 1px solid #f3f4f6;
 }
-.member-item:last-child {
+.member-table th,
+.member-table td {
+  border-bottom: 1px solid #f3f4f6;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  vertical-align: middle;
+}
+.member-table tr:last-child td {
   border-bottom: none;
 }
-.member-main {
-  min-width: 0;
-  flex: 1;
-}
-.member-email {
-  display: block;
+.member-table th {
+  font-size: 0.7rem;
   font-weight: 700;
+  color: #6b7280;
+  background: #f9fafb;
+}
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.member-name-cell {
+  font-weight: 600;
   color: #111827;
+}
+.member-self-tag {
+  margin-left: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #b91c1c;
+}
+.member-email-cell {
+  color: #374151;
   word-break: break-all;
 }
-.member-name {
-  display: block;
-  font-size: 0.7rem;
-  color: #6b7280;
-}
-.member-self {
-  font-size: 0.7rem;
-  color: #b91c1c;
-  font-weight: 700;
-}
-.member-owner {
-  font-size: 0.7rem;
-  color: #1d4ed8;
-  font-weight: 800;
-}
-.member-role {
-  font-size: 0.7rem;
+.role-label {
+  font-size: 0.75rem;
+  font-weight: 600;
   color: #374151;
-  font-weight: 700;
 }
-.btn-remove {
-  flex-shrink: 0;
-  padding: 0.25rem 0.5rem;
+.actions-cell {
+  position: relative;
+  text-align: center;
+}
+.actions-wrap {
+  position: relative;
+  display: inline-block;
+}
+.btn-member-edit {
+  padding: 0.2rem 0.55rem;
   font-size: 0.7rem;
   font-weight: 700;
-  color: #dc2626;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  color: #374151;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 0.35rem;
   cursor: pointer;
 }
-.btn-remove:disabled {
-  opacity: 0.6;
-  cursor: wait;
+.btn-member-edit:hover,
+.btn-member-edit.open {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.member-actions-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 20;
+  min-width: 9.5rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+.member-actions-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.member-actions-menu button:hover:not(:disabled) {
+  background: #f8fafc;
+}
+.member-actions-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.member-actions-menu .danger {
+  color: #dc2626;
+  border-top: 1px solid #f1f5f9;
+}
+.member-actions-menu .danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+.member-edit-panel {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+}
+.member-edit-label {
+  margin: 0 0 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #374151;
+}
+.member-edit-email {
+  margin-left: 0.35rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+.member-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.member-edit-input {
+  width: 9rem;
+  max-width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.75rem;
+}
+.member-edit-input:focus {
+  outline: none;
+  border-color: #b91c1c;
+  box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.12);
+}
+.actions-col {
+  width: 4.5rem;
+  text-align: center;
 }
 .quota-summary {
   margin-bottom: 0.75rem;

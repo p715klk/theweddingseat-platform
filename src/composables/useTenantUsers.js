@@ -5,7 +5,18 @@ import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
-import { assertCanAddMember, getMemberQuota } from '@/lib/tenantMemberLimits';
+import { assertCanAddMember, assertCanChangeMemberRole, getMemberQuota } from '@/lib/tenantMemberLimits';
+
+const ROLE_SORT_ORDER = { owner: 0, admin: 1, reception: 2 };
+
+function sortMembers(list) {
+  return [...list].sort((a, b) => {
+    const ra = ROLE_SORT_ORDER[a.role] ?? 9;
+    const rb = ROLE_SORT_ORDER[b.role] ?? 9;
+    if (ra !== rb) return ra - rb;
+    return String(a.email || a.uid).localeCompare(String(b.email || b.uid), 'zh-Hant');
+  });
+}
 
 export function useTenantUsers() {
   const { tenantId, tenantRef, meta } = useTenant();
@@ -52,7 +63,7 @@ export function useTenantUsers() {
       const profiles = profilesSnap.val() || {};
       const uids = Object.keys(memberMap).filter((uid) => normalizeMemberRole(memberMap[uid]));
 
-      members.value = uids.map((uid) => ({
+      members.value = sortMembers(uids.map((uid) => ({
         uid,
         role: normalizeMemberRole(memberMap[uid]),
         email: profiles[uid]?.email || '',
@@ -60,7 +71,7 @@ export function useTenantUsers() {
         createdAt: profiles[uid]?.created_at || null,
         createdByEmail: profiles[uid]?.created_by_email || '',
         isSelf: uid === user.value?.uid,
-      }));
+      })));
     } catch (e) {
       error.value = e?.message || '載入用戶清單失敗';
       members.value = [];
@@ -127,6 +138,29 @@ export function useTenantUsers() {
     return result;
   }
 
+  async function updateMemberRole(uid, role) {
+    if (!tenantId.value) throw new Error('專案未就緒');
+    if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
+    if (!uid) throw new Error('無效的用戶');
+    if (uid === user.value?.uid) throw new Error('不能變更自己的角色');
+
+    await loadMembers();
+    const target = members.value.find((m) => m.uid === uid);
+    if (!target) throw new Error('找不到用戶');
+    if (target.role === 'owner') throw new Error('不能變更 Owner 角色');
+    if (target.role === role) return;
+
+    if (!isPlatformAdmin.value && !isCurrentOwner()) {
+      throw new Error('只有 owner 可以變更角色');
+    }
+    assertCanChangeMemberRole(members.value, meta.value?.owner_uid || '', uid, role, {
+      bypassLimits: isPlatformAdmin.value,
+    });
+
+    await callUpsertTenantMember({ tenantId: tenantId.value, uid, role });
+    await loadMembers();
+  }
+
   async function ensureSelfProfile() {
     if (!tenantId.value || !user.value?.uid || !user.value.email) return;
     const profileRef = tenantRef(`user_profiles/${user.value.uid}`);
@@ -142,28 +176,37 @@ export function useTenantUsers() {
     });
   }
 
-  async function updateSelfDisplayName(displayName) {
+  async function updateMemberDisplayName(uid, displayName) {
     if (!tenantId.value) throw new Error('專案未就緒');
-    if (!user.value?.uid || !user.value.email) throw new Error('未登入');
+    if (!uid) throw new Error('無效的用戶');
     const name = String(displayName || '').trim();
     if (name.length > 40) throw new Error('顯示名稱太長（最多 40 字）');
 
-    const profileRef = tenantRef(`user_profiles/${user.value.uid}`);
+    if (uid !== user.value?.uid && !isPlatformAdmin.value && !isCurrentOwner()) {
+      throw new Error('只有 owner 可以修改用戶顯示名稱');
+    }
+
+    const profileRef = tenantRef(`user_profiles/${uid}`);
     const snap = await get(profileRef);
     const current = snap.exists() ? snap.val() : null;
     const editor = editorInfo();
 
     const next = {
-      email: current?.email || user.value.email,
+      email: current?.email || (uid === user.value?.uid ? user.value.email : '') || '',
       display_name: name,
       created_at: current?.created_at || Date.now(),
-      created_by_uid: current?.created_by_uid || editor?.uid || user.value.uid,
-      created_by_email: current?.created_by_email || editor?.email || user.value.email,
+      created_by_uid: current?.created_by_uid || editor?.uid || user.value?.uid || '',
+      created_by_email: current?.created_by_email || editor?.email || user.value?.email || '',
       ...(current?.initial_password != null ? { initial_password: current.initial_password } : {}),
     };
 
-    await set(profileRef, next);
+    await callUpdateMemberProfile({ tenantId: tenantId.value, uid, profile: next });
     await loadMembers();
+  }
+
+  async function updateSelfDisplayName(displayName) {
+    if (!user.value?.uid || !user.value.email) throw new Error('未登入');
+    await updateMemberDisplayName(user.value.uid, displayName);
   }
 
   function memberQuota() {
@@ -177,6 +220,8 @@ export function useTenantUsers() {
     loadMembers,
     createMember,
     removeMember,
+    updateMemberRole,
+    updateMemberDisplayName,
     ensureSelfProfile,
     updateSelfDisplayName,
     memberQuota,
