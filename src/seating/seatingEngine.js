@@ -1636,18 +1636,27 @@ function bindTablePlateDrag(el, tableNum) {
 }
 
 function bindSeatSlot(el, tableNum, seatIndex, guest) {
-    if (!el || el.dataset.seatBound === '1') return;
-    el.dataset.seatBound = '1';
-    el.addEventListener('dragover', allowDrop);
-    el.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, seatIndex));
+    if (!el) return;
+    if (el.dataset.seatBound !== '1') {
+        el.dataset.seatBound = '1';
+        el.addEventListener('dragover', allowDrop);
+        el.addEventListener('drop', (e) => handleDropOnSpecificSeat(e, tableNum, seatIndex));
+    }
     if (!guest) return;
     ensureGuestHasId(guest);
-    const getDragData = () => ({
-        id: guest.id,
-        fromTable: String(tableNum),
-        seatIndex,
-        name: guest.name,
-    });
+    const getDragData = () => {
+        const current = resolveGuestAtTable(tableNum, seatIndex, guest);
+        if (!current) {
+            return { fromTable: String(tableNum), seatIndex, name: '' };
+        }
+        ensureGuestHasId(current);
+        return {
+            id: current.id,
+            fromTable: String(tableNum),
+            seatIndex,
+            name: current.name,
+        };
+    };
     if (IS_TOUCH_DEVICE) {
         setupTouchDrag(el, getDragData, { documentTouchDrag: true });
     } else {
@@ -2400,14 +2409,31 @@ function allowCanvasDrop(e) {
     }
 }
 
+function resolveGuestAtTable(tableNum, seatIdx, guestHint = null) {
+    const tableIdx = parseInt(tableNum, 10);
+    if (!Number.isFinite(tableIdx) || tableIdx < 1) return guestHint || null;
+    const foundIdx = findGuestIndexAtTable(tableIdx, {
+        seatIdx,
+        guestId: guestHint?.id,
+        guestName: guestHint?.name,
+    });
+    if (foundIdx === -1) return guestHint || null;
+    const list = allGuests[tableIdx] || allGuests[String(tableIdx)];
+    return list?.[foundIdx] || guestHint || null;
+}
+
 function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
     const fromPool = poolIndex != null;
-    selectedGuestContext = { guest, tableNum, seatIdx, poolIndex, fromPool };
+    const resolved = fromPool
+        ? (unassignedPool[poolIndex] || guest)
+        : resolveGuestAtTable(tableNum, seatIdx, guest);
+    if (!resolved) return;
+    selectedGuestContext = { guest: resolved, tableNum, seatIdx, poolIndex, fromPool };
     uiHooks.onGuestModalChange?.({
         open: true,
-        name: guest.name || '',
-        side: guest.side === '女方' ? '女方' : '男方',
-        group: normalizeGuestTags(guest.group),
+        name: resolved.name || '',
+        side: resolved.side === '女方' ? '女方' : '男方',
+        group: normalizeGuestTags(resolved.group),
         seatLabel: fromPool ? '未安排' : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`,
         fromPool,
     });
@@ -2439,7 +2465,10 @@ function saveGuestChangesAction(payload) {
         localGuestRevision++;
         return persistMetaLabelColumns()
             .then(() => persistGuestState(getTableSettingKeys(), true))
-            .then(() => closeGuestModal())
+            .then(() => {
+                applyGuestMoveUI([], { poolChanged: true, poolSides: [newSide] });
+                closeGuestModal();
+            })
             .catch((err) => {
                 console.error('賓客儲存失敗:', err);
                 alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
@@ -2464,7 +2493,10 @@ function saveGuestChangesAction(payload) {
 
     return persistMetaLabelColumns()
         .then(() => persistGuestState([String(tableIdx)], false))
-        .then(() => closeGuestModal())
+        .then(() => {
+            applyGuestMoveUI([String(tableIdx)], { poolChanged: false });
+            closeGuestModal();
+        })
         .catch((err) => {
             console.error('賓客儲存失敗:', err);
             alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
@@ -2645,6 +2677,8 @@ function saveTableSettingsAction(payload) {
             max_seats: newMax,
             label: newLabel,
         }).then(() => {
+            notifyCanvasTablesChange([oldNum]);
+            refreshFindTableMenu();
             scheduleFloorLayoutSync();
             closeSettingsModal();
         });
@@ -2673,6 +2707,8 @@ function saveTableSettingsAction(payload) {
     return tenantRef().update(updates).then(() => persistTableSettings())
         .then(() => forceFloorLayoutSync())
         .then(() => {
+            notifyCanvasTablesChange();
+            refreshFindTableMenu();
             runRender();
             closeSettingsModal();
         })

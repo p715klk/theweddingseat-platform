@@ -583,7 +583,7 @@ function mountEngine() {
             return;
           }
           const updates = Object.fromEntries(tables.map((t) => [t.num, t]));
-          canvasTables.value = canvasTables.value.map((t) => updates[t.num] || t);
+          canvasTables.value = canvasTables.value.map((t) => updates[t.num] ? { ...updates[t.num] } : t);
         },
         onCanvasTablePositionChange({ tableNum, baseX, baseY }) {
           const table = canvasTables.value.find((t) => t.num === String(tableNum));
