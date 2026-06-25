@@ -1,7 +1,13 @@
 import { ref } from 'vue';
-import { onValue, set } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { getMaxSeatsForTable, serializeGroupForFirebase } from '@/lib/adminGuestModel';
+import {
+  getTenantDataBundle,
+  setGuestStatusField,
+  addWeddingGuestAtTable,
+  subscribeTenantData,
+  subscribeTenantDataByTenantId,
+} from '@/lib/pb/tenantData';
 import {
   buildCheckInFloorPlan,
   parseArrivedStatus,
@@ -16,7 +22,7 @@ export const TABLE_RING_BASE =
   'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
 
 export function useCheckIn() {
-  const { tenantRef } = useTenant();
+  const { tenantId } = useTenant();
   const weddingGuests = ref({});
   const guestStatus = ref({});
   const floorLayout = ref({ items: [], bounds: null });
@@ -24,29 +30,46 @@ export function useCheckIn() {
   const searchKeyword = ref('');
   const unsubscribers = [];
   let tableSettingsCache = {};
+  let dataRecordId = '';
+
+  function applyDataBundle(bundle) {
+    weddingGuests.value = bundle.wedding_guests || {};
+    guestStatus.value = bundle.guest_status || {};
+    tableSettingsCache = bundle.table_settings || {};
+    refreshFloorLayout();
+  }
 
   function refreshFloorLayout() {
     floorLayout.value = buildCheckInFloorPlan(weddingGuests.value, tableSettingsCache);
   }
 
+  async function refreshFromServer() {
+    const tid = tenantId.value;
+    if (!tid) return;
+    const bundle = await getTenantDataBundle(tid);
+    applyDataBundle(bundle);
+    if (bundle.recordId) dataRecordId = bundle.recordId;
+  }
+
   function startSync() {
     stopSync();
-    ['wedding_guests', 'guest_status', 'table_settings'].forEach((path) => {
-      const off = onValue(tenantRef(path), (snap) => {
-        const emptyObj = path !== 'wedding_guests';
-        const val = snap.val() ?? (emptyObj ? {} : {});
-        if (path === 'wedding_guests') {
-          weddingGuests.value = val || {};
-          refreshFloorLayout();
-        }
-        if (path === 'guest_status') guestStatus.value = val || {};
-        if (path === 'table_settings') {
-          tableSettingsCache = val || {};
-          refreshFloorLayout();
-        }
+    const tid = tenantId.value;
+    if (!tid) return;
+
+    const recordId = dataRecordId;
+    if (recordId) {
+      const unsub = subscribeTenantData(recordId, () => {
+        refreshFromServer().catch((e) => console.error('CheckIn 即時同步失敗:', e));
       });
-      unsubscribers.push(off);
-    });
+      unsubscribers.push(unsub);
+      refreshFromServer().catch((e) => console.error('CheckIn 載入失敗:', e));
+      return;
+    }
+
+    subscribeTenantDataByTenantId(tid, (bundle) => {
+      applyDataBundle(bundle);
+      if (bundle.recordId) dataRecordId = bundle.recordId;
+    }).then((unsub) => unsubscribers.push(unsub));
   }
 
   function stopSync() {
@@ -87,13 +110,17 @@ export function useCheckIn() {
   async function cycleArrived(table, name, current) {
     const flow = { 未到: '已到', 已到: '取消', 取消: '未到' };
     const next = flow[current] || '未到';
-    await set(tenantRef(`guest_status/${table}_${name}/arrived`), next);
+    const tid = tenantId.value;
+    if (!tid) return;
+    await setGuestStatusField(tid, `${table}_${name}`, 'arrived', next);
   }
 
   async function cycleGift(table, name, current) {
     const stages = ['未交', '人情', '送金器', '電子人情'];
     const next = stages[(stages.indexOf(current) + 1) % stages.length];
-    await set(tenantRef(`guest_status/${table}_${name}/gift`), next);
+    const tid = tenantId.value;
+    if (!tid) return;
+    await setGuestStatusField(tid, `${table}_${name}`, 'gift', next);
   }
 
   function floorStyle(bounds) {
@@ -154,10 +181,10 @@ export function useCheckIn() {
   async function addWalkInGuest(tableNum, { name, side, group }) {
     const trimmed = String(name || '').trim();
     if (!trimmed) throw new Error('請輸入姓名');
-    const currentGuests = weddingGuests.value[tableNum] || [];
-    const nextIndex = currentGuests.length;
+    const tid = tenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     const nextSeat = getNextSeatForTable(tableNum);
-    await set(tenantRef(`wedding_guests/${tableNum}/${nextIndex}`), {
+    await addWeddingGuestAtTable(tid, tableNum, {
       name: trimmed,
       side: side === '女方' ? '女方' : '男方',
       group: serializeGroupForFirebase(group || '現場加座'),
@@ -213,8 +240,8 @@ export function useCheckIn() {
     searchResults,
     getTableOccupancy,
     addWalkInGuest,
-    parseArrivedStatus,
     guestStatusKey,
+    parseArrivedStatus,
     normalizeTags,
     guestMatchesKeyword,
   };

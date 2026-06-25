@@ -1,17 +1,26 @@
-import { ref as dbRef, get, set, update } from '@/rtdb';
-import { database } from '@/firebase';
 import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
+import getPocketBase from '@/lib/pocketbaseClient';
 import {
   assertPlatformAdmin,
   createAuthUserForEmail,
   buildUserProfile,
-  buildMemberProvisionUpdates,
   normalizeEmail,
   normalizePassword,
   assertPassword,
 } from '@/lib/superAdminProvisioning';
 import { DEFAULT_TENANT_FEATURES } from '@/lib/tenantFeatures';
 import { callRemoveTenantMember, callSetUserPassword, callTransferTenantOwner, callUpsertTenantMember, callCreateTenant, isTwsHooksMissingError } from '@/lib/twsApi';
+import {
+  listAllTenants,
+  getTenantBySlug as pbGetTenantBySlug,
+  updateTenantMeta as pbUpdateTenantMeta,
+  renameTenantSlug as pbRenameTenantSlug,
+  deleteTenantRecord,
+  findTenantBySlug,
+  metaToRecordFields,
+} from '@/lib/pb/tenant';
+import { getMemberProfile, getMembersMap } from '@/lib/pb/members';
+import { getTenantDataBundle } from '@/lib/pb/tenantData';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -92,84 +101,32 @@ export function getSlugInputState(rawInput) {
 }
 
 export async function listTenants() {
-  const slugsSnap = await get(dbRef(database, 'slugs'));
-  const slugs = slugsSnap.val() || {};
-  const entries = await Promise.all(
-    Object.entries(slugs).map(async ([slug, tenantId]) => {
-      const id = String(tenantId);
-      const metaSnap = await get(dbRef(database, `tenants/${id}/meta`));
-      const membersSnap = await get(dbRef(database, `tenants/${id}/members`));
-      return {
-        tenantId: id,
-        slug,
-        meta: metaSnap.val() || {},
-        members: membersSnap.val() || {},
-      };
-    }),
-  );
-  return entries.sort((a, b) => {
-    const da = a.meta.wedding_date || '';
-    const db = b.meta.wedding_date || '';
-    return db.localeCompare(da);
-  });
+  return listAllTenants();
 }
 
 export async function getTenantBySlug(slug) {
-  const slugSnap = await get(dbRef(database, `slugs/${slug}`));
-  if (!slugSnap.exists()) return null;
-  const tenantId = String(slugSnap.val());
-  const [metaSnap, membersSnap] = await Promise.all([
-    get(dbRef(database, `tenants/${tenantId}/meta`)),
-    get(dbRef(database, `tenants/${tenantId}/members`)),
-  ]);
-  if (!metaSnap.exists()) return null;
-  return {
-    tenantId,
-    slug,
-    meta: metaSnap.val() || {},
-    members: membersSnap.val() || {},
-  };
+  return pbGetTenantBySlug(slug);
 }
 
 export async function getTenantOwnerProfile(tenantId, ownerUid) {
   const id = String(tenantId || '').trim();
   const uid = String(ownerUid || '').trim();
   if (!id || !uid) return null;
-  const snap = await get(dbRef(database, `tenants/${id}/user_profiles/${uid}`));
-  return snap.val() || null;
+  return getMemberProfile(id, uid);
 }
-
-const TENANT_DATA_PATHS = [
-  'wedding_guests',
-  'unassigned_guests',
-  'guest_status',
-  'table_settings',
-  'floor_layout',
-  'meta_label_columns',
-];
 
 export async function getTenantFullData(tenantId) {
   const id = String(tenantId || '').trim();
   if (!id) throw new Error('缺少 tenantId');
-  const snaps = await Promise.all(
-    TENANT_DATA_PATHS.map((path) => get(dbRef(database, `tenants/${id}/${path}`))),
-  );
-  const [
-    weddingGuestsSnap,
-    unassignedSnap,
-    guestStatusSnap,
-    tableSettingsSnap,
-    floorLayoutSnap,
-    labelColumnsSnap,
-  ] = snaps;
+  const bundle = await getTenantDataBundle(id);
   const defaultTableSettings = buildDefaultTableSettings();
   return {
-    wedding_guests: weddingGuestsSnap.val() ?? {},
-    unassigned_guests: unassignedSnap.val() ?? [],
-    guest_status: guestStatusSnap.val() ?? {},
-    table_settings: tableSettingsSnap.val() ?? defaultTableSettings,
-    floor_layout: floorLayoutSnap.val() ?? buildFloorPlanFromTableSettings(defaultTableSettings),
-    meta_label_columns: labelColumnsSnap.val() ?? DEFAULT_LABEL_COLUMNS,
+    wedding_guests: bundle.wedding_guests ?? {},
+    unassigned_guests: bundle.unassigned_guests ?? [],
+    guest_status: bundle.guest_status ?? {},
+    table_settings: bundle.table_settings ?? defaultTableSettings,
+    floor_layout: bundle.floor_layout ?? buildFloorPlanFromTableSettings(defaultTableSettings),
+    meta_label_columns: bundle.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
   };
 }
 
@@ -188,12 +145,8 @@ export async function suggestCloneSlug(sourceSlug) {
 }
 
 export async function updateTenantMeta(tenantId, patch, editor = null) {
-  const ref = dbRef(database, `tenants/${tenantId}/meta`);
-  const current = (await get(ref)).val() || {};
-  await set(ref, {
-    ...current,
+  await pbUpdateTenantMeta(tenantId, {
     ...patch,
-    slug: patch.slug ?? current.slug ?? tenantId,
     ...auditFields(editor),
   });
 }
@@ -219,10 +172,9 @@ export async function transferTenantOwner(tenantId, newOwnerUid, editor = null) 
   if (!id || !uid) throw new Error('請選擇新 Owner');
   await assertPlatformAdmin(editor);
 
-  const membersSnap = await get(dbRef(database, `tenants/${id}/members`));
-  const members = membersSnap.val() || {};
-  const metaSnap = await get(dbRef(database, `tenants/${id}/meta`));
-  const meta = metaSnap.val() || {};
+  const members = await getMembersMap(id);
+  const { getTenantMeta } = await import('@/lib/pb/tenant');
+  const meta = (await getTenantMeta(id)) || {};
 
   if (normalizeMemberRole(members[uid]) !== 'admin') {
     throw new Error('只能將 Owner 轉移給後台管理員');
@@ -239,15 +191,11 @@ export async function transferTenantOwner(tenantId, newOwnerUid, editor = null) 
     if (!isTwsHooksMissingError(err)) throw err;
   }
 
-  const updates = {
-    [`tenants/${id}/members/${uid}`]: 'owner',
-    [`tenants/${id}/meta/owner_uid`]: uid,
-    ...auditFields(editor),
-  };
+  await callUpsertTenantMember({ tenantId: id, uid, role: 'owner' });
   if (currentOwnerUid && currentOwnerUid !== uid) {
-    updates[`tenants/${id}/members/${currentOwnerUid}`] = 'admin';
+    await callUpsertTenantMember({ tenantId: id, uid: currentOwnerUid, role: 'admin' });
   }
-  await update(dbRef(database), updates);
+  await pbUpdateTenantMeta(id, { owner_uid: uid, ...auditFields(editor) });
   return {
     tenantId: id,
     ownerUid: uid,
@@ -266,26 +214,15 @@ export async function renameTenantSlug(tenantId, oldSlug, newSlugInput, editor =
     throw new Error(`Slug「${newSlug}」已被使用`);
   }
 
-  const metaRef = dbRef(database, `tenants/${tenantId}/meta`);
-  const current = (await get(metaRef)).val() || {};
-
-  await update(dbRef(database), {
-    [`slugs/${newSlug}`]: tenantId,
-    [`slugs/${oldSlug}`]: null,
-  });
-  await set(metaRef, {
-    ...current,
-    slug: newSlug,
-    ...auditFields(editor),
-  });
-
+  await pbRenameTenantSlug(tenantId, oldSlug, newSlug);
+  await pbUpdateTenantMeta(tenantId, { slug: newSlug, ...auditFields(editor) });
   return newSlug;
 }
 
 export async function addTenantMember(tenantId, uid, editor = null) {
   const trimmed = uid?.trim();
   if (!trimmed) throw new Error('請輸入 UID');
-  await set(dbRef(database, `tenants/${tenantId}/members/${trimmed}`), true);
+  await callUpsertTenantMember({ tenantId, uid: trimmed, role: 'admin' });
   if (editor) {
     await updateTenantMeta(tenantId, {}, editor);
   }
@@ -316,32 +253,41 @@ export async function createTenantMemberUser({
     editor,
     now,
   });
-  await update(dbRef(database), buildMemberProvisionUpdates({ tenantId: id, uid, profile, editor, now }));
+  await callUpsertTenantMember({
+    tenantId: id,
+    uid,
+    role: 'admin',
+    display_name: profile.display_name || '',
+  });
   return { uid, email: trimmedEmail };
 }
 
 export async function getTenantUserProfiles(tenantId) {
   const id = String(tenantId || '').trim();
   if (!id) throw new Error('缺少 tenantId');
-  const snap = await get(dbRef(database, `tenants/${id}/user_profiles`));
-  return snap.val() || {};
+  const { getProfilesMap } = await import('@/lib/pb/members');
+  return getProfilesMap(id);
 }
 
 export async function setTenantMemberProfile(tenantId, uid, patch, editor = null) {
   const id = String(tenantId || '').trim();
   const u = String(uid || '').trim();
   if (!id || !u) throw new Error('缺少 tenantId 或 uid');
-  const now = Date.now();
-  const current = (await get(dbRef(database, `tenants/${id}/user_profiles/${u}`))).val() || {};
-  await set(dbRef(database, `tenants/${id}/user_profiles/${u}`), {
-    ...current,
-    ...patch,
-    ...(current.created_at ? {} : { created_at: now }),
-    ...(current.created_by_uid ? {} : { created_by_uid: editor?.uid || '' }),
-    ...(current.created_by_email ? {} : { created_by_email: editor?.email || '' }),
+  const { callUpdateMemberProfile } = await import('@/lib/twsApi');
+  const current = (await getMemberProfile(id, u)) || {};
+  await callUpdateMemberProfile({
+    tenantId: id,
+    uid: u,
+    profile: {
+      ...current,
+      ...patch,
+      ...(current.created_at ? {} : { created_at: Date.now() }),
+      ...(current.created_by_uid ? {} : { created_by_uid: editor?.uid || '' }),
+      ...(current.created_by_email ? {} : { created_by_email: editor?.email || '' }),
+    },
   });
   if (editor?.uid) {
-    await update(dbRef(database, `tenants/${id}/meta`), auditFields(editor));
+    await updateTenantMeta(id, {}, editor);
   }
 }
 
@@ -353,8 +299,8 @@ export async function removeTenantMember(tenantId, uid) {
 }
 
 export async function isSlugTaken(slug) {
-  const snap = await get(dbRef(database, `slugs/${slug}`));
-  return snap.exists();
+  const hit = await findTenantBySlug(slug);
+  return !!hit;
 }
 
 async function provisionTenantOwner({
@@ -429,20 +375,24 @@ async function createTenantViaClient({
     const resolvedOwnerUid = created.uid;
     if (!resolvedOwnerUid) throw new Error('建立帳號失敗（缺少 uid）');
 
-    const tenantBase = `tenants/${tenantId}`;
-    await update(dbRef(database), {
-      [`${tenantBase}/meta`]: {
-        ...meta,
-        owner_uid: resolvedOwnerUid,
-      },
-      [`${tenantBase}/wedding_guests`]: tenantData.wedding_guests ?? {},
-      [`${tenantBase}/unassigned_guests`]: tenantData.unassigned_guests ?? [],
-      [`${tenantBase}/guest_status`]: tenantData.guest_status ?? {},
-      [`${tenantBase}/table_settings`]: tenantData.table_settings ?? buildDefaultTableSettings(),
-      [`${tenantBase}/floor_layout`]: tenantData.floor_layout ?? buildFloorPlanFromTableSettings(buildDefaultTableSettings()),
-      [`${tenantBase}/meta_label_columns`]: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
-    });
+    const pb = getPocketBase();
+    const tenantFields = metaToRecordFields(
+      { ...meta, owner_uid: resolvedOwnerUid },
+      normalized,
+      tenantId,
+    );
+    await pb.collection('tenants').create(tenantFields);
     tenantWritten = true;
+
+    const { updateTenantData } = await import('@/lib/pb/tenantData');
+    await updateTenantData(tenantId, {
+      wedding_guests: tenantData.wedding_guests ?? {},
+      unassigned_guests: tenantData.unassigned_guests ?? [],
+      guest_status: tenantData.guest_status ?? {},
+      table_settings: tenantData.table_settings ?? buildDefaultTableSettings(),
+      floor_layout: tenantData.floor_layout ?? buildFloorPlanFromTableSettings(buildDefaultTableSettings()),
+      meta_label_columns: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
+    });
 
     await provisionTenantOwner({
       tenantId,
@@ -689,10 +639,10 @@ export async function setTenantFeatures(tenantId, features, editor = null) {
   );
 }
 
-/** 永久刪除 tenant（含 slug 對應、成員、及無其他專案嘅 Owner 登入帳號） */
+/** 永久刪除 tenant（含成員、資料、及無其他專案嘅 orphan 帳號） */
 export async function deleteTenant(slug, tenantId) {
   const trimmedSlug = String(slug || '').trim();
   const id = String(tenantId || '').trim();
   if (!trimmedSlug || !id) throw new Error('缺少 slug 或 tenantId');
-  await set(dbRef(database, `tenants/${id}`), null);
+  await deleteTenantRecord(id);
 }

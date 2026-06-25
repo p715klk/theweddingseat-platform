@@ -1,15 +1,17 @@
 import { createCompatTenantRef } from './compatTenantRef.js';
-import { get } from '@/rtdb';
+import { tenantDataDbRef } from '@/lib/pb/dataRef';
+import { saveGuestSeatingState, updateTenantData } from '@/lib/pb/tenantData';
 import { serializeGroupForFirebase } from '@/lib/adminGuestModel';
 
 let tenantRefFn = null;
+let activeTenantId = '';
 function tenantRef(subPath) {
     if (!tenantRefFn) throw new Error('Seating engine not initialized');
     return tenantRefFn(subPath == null || subPath === '' ? '' : subPath);
 }
 let tenantSlug = '';
 const cleanupFns = [];
-let firebaseUnsubs = [];
+let dataUnsubs = [];
 let engineInitialized = false;
 let rawTenantRef = null;
 let cachedMetaLabelColumns = null;
@@ -197,11 +199,14 @@ function getGuestsUsingTagInSeating(tag) {
 }
 
 function persistMetaLabelColumns() {
-    return tenantRef('meta_label_columns').update({
+    const labelColumns = {
         keys: [PRIMARY_TAG_KEY],
         names: ['標籤 (可多選)'],
-        categories: categoriesByColumn
-    });
+        categories: categoriesByColumn,
+    };
+    cachedMetaLabelColumns = labelColumns;
+    if (!activeTenantId) return Promise.reject(new Error('專案未就緒'));
+    return updateTenantData(activeTenantId, { meta_label_columns: labelColumns });
 }
 
 const IS_TOUCH_DEVICE = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -1322,10 +1327,29 @@ function createDragGhost(name, x, y) {
 }
 
 function findGuestBySeat(tableIdx, seatIndex) {
-    const guests = allGuests[tableIdx];
+    const guests = allGuests[tableIdx] || allGuests[String(tableIdx)];
     if (!guests) return -1;
     const target = seatIndex + 1;
     return guests.findIndex(g => g && Number(g.sort) === target);
+}
+
+function findGuestIndexAtTable(tableIdx, { seatIdx, guestId, guestName } = {}) {
+    const guests = allGuests[tableIdx] || allGuests[String(tableIdx)];
+    if (!Array.isArray(guests)) return -1;
+    const id = String(guestId || '').trim();
+    if (id) {
+        const byId = guests.findIndex((g) => g?.id && String(g.id) === id);
+        if (byId !== -1) return byId;
+    }
+    if (seatIdx != null && Number.isFinite(seatIdx)) {
+        const bySeat = findGuestBySeat(tableIdx, seatIdx);
+        if (bySeat !== -1) return bySeat;
+    }
+    const name = String(guestName || '').trim();
+    if (name) {
+        return guests.findIndex((g) => g?.name && String(g.name).trim() === name);
+    }
+    return -1;
 }
 
 function sortGuestArraysBySeat() {
@@ -1451,29 +1475,40 @@ function serializeGuestRowForPersist(guest) {
     };
 }
 
+function buildWeddingGuestsMapForPersist() {
+    const wedding = {};
+    const assignTable = (idx, list) => {
+        const tableNum = parseInt(idx, 10);
+        if (!tableNum || tableNum < 1 || !Array.isArray(list)) return;
+        const rows = list.map(serializeGuestRowForPersist).filter(Boolean);
+        if (rows.length) wedding[String(tableNum)] = rows;
+    };
+    if (Array.isArray(allGuests)) {
+        allGuests.forEach((list, idx) => assignTable(idx, list));
+    } else if (allGuests && typeof allGuests === 'object') {
+        Object.entries(allGuests).forEach(([idx, list]) => assignTable(idx, list));
+    }
+    return wedding;
+}
+
+function buildUnassignedGuestsForPersist() {
+    return unassignedPool.map(serializeGuestRowForPersist).filter(Boolean);
+}
+
 function persistGuestState(affectedTableNums, poolDirty = false) {
+    void affectedTableNums;
+    void poolDirty;
     sanitizeGuestStateBeforePersist();
     sortGuestArraysBySeat();
-    const updates = {};
-    if (poolDirty) {
-        updates.unassigned_guests = unassignedPool
-            .map(serializeGuestRowForPersist)
-            .filter(Boolean);
+    if (!activeTenantId) {
+        return Promise.reject(new Error('專案未就緒'));
     }
-    const nums = affectedTableNums?.length
-        ? [...new Set(affectedTableNums.map(String))]
-        : getTableSettingKeys();
-    nums.forEach(num => {
-        const idx = parseInt(num, 10);
-        if (!idx) return;
-        const list = allGuests[idx];
-        updates[`wedding_guests/${idx}`] = list && list.length
-            ? list.map(serializeGuestRowForPersist).filter(Boolean)
-            : null;
-    });
 
     suppressGuestRemoteRenderCount = poolDirty ? 2 : 1;
-    return tenantRef().update(updates).then(() => {
+    return saveGuestSeatingState(activeTenantId, {
+        wedding: buildWeddingGuestsMapForPersist(),
+        unassigned: buildUnassignedGuestsForPersist(),
+    }).then(() => {
         lastPersistedGuestRevision = localGuestRevision;
     }).catch(err => {
         suppressGuestRemoteRenderCount = 0;
@@ -2074,7 +2109,7 @@ function markSeatingPartialReady(key) {
 function startSeatingRealtimeSync() {
     setGlobalStatsMessage('連線中...');
 
-    firebaseUnsubs.push(tenantRef('wedding_guests').on('value', (snapshot) => {
+    dataUnsubs.push(tenantRef('wedding_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
             allGuests = snapshot.val() || {};
             if (!guestIdMigrationDone && ensureIdsInGuestState()) {
@@ -2098,7 +2133,7 @@ function startSeatingRealtimeSync() {
         setGlobalStatsMessage('賓客資料讀取失敗');
     }));
 
-    firebaseUnsubs.push(tenantRef('unassigned_guests').on('value', (snapshot) => {
+    dataUnsubs.push(tenantRef('unassigned_guests').on('value', (snapshot) => {
         if (shouldApplyRemoteGuestState()) {
             unassignedPool = normalizeUnassignedPool(snapshot.val());
             if (!guestIdMigrationDone && ensureIdsInGuestState()) {
@@ -2119,13 +2154,13 @@ function startSeatingRealtimeSync() {
         runRender();
     }, err => console.error('unassigned_guests 讀取失敗:', err)));
 
-    firebaseUnsubs.push(tenantRef('meta_label_columns').on('value', (snapshot) => {
+    dataUnsubs.push(tenantRef('meta_label_columns').on('value', (snapshot) => {
         cachedMetaLabelColumns = snapshot.val();
         applyMetaLabelColumns(cachedMetaLabelColumns);
         markSeatingPartialReady('meta');
     }, err => console.error('meta_label_columns 讀取失敗:', err)));
 
-    firebaseUnsubs.push(tenantRef('table_settings').on('value', (snapshot) => {
+    dataUnsubs.push(tenantRef('table_settings').on('value', (snapshot) => {
         if (isDraggingTable) return;
         const incoming = loadTableSettings(snapshot.val());
         if (suppressTableSettingsRemoteRenderCount > 0) {
@@ -2165,10 +2200,10 @@ async function bootstrapSeatingFromFetch() {
     if (!rawTenantRef) return;
     try {
         const [guestsSnap, poolSnap, metaSnap, tablesSnap] = await Promise.all([
-            get(rawTenantRef('wedding_guests')),
-            get(rawTenantRef('unassigned_guests')),
-            get(rawTenantRef('meta_label_columns')),
-            get(rawTenantRef('table_settings')),
+            rawTenantRef('wedding_guests').once('value'),
+            rawTenantRef('unassigned_guests').once('value'),
+            rawTenantRef('meta_label_columns').once('value'),
+            rawTenantRef('table_settings').once('value'),
         ]);
         cachedMetaLabelColumns = metaSnap.val();
         handleSeatingDataRoot({
@@ -2385,7 +2420,7 @@ function closeGuestModal() {
 
 function saveGuestChangesAction(payload) {
     if (!selectedGuestContext) return Promise.resolve();
-    const { tableNum, seatIdx, poolIndex, fromPool } = selectedGuestContext;
+    const { guest, tableNum, seatIdx, poolIndex, fromPool } = selectedGuestContext;
 
     const newName = String(payload?.name ?? '').trim();
     const newGroup = normalizeGuestTags(payload?.group);
@@ -2401,35 +2436,40 @@ function saveGuestChangesAction(payload) {
         unassignedPool[poolIndex].name = newName;
         unassignedPool[poolIndex].group = newGroup;
         unassignedPool[poolIndex].side = newSide;
-        return Promise.all([
-            tenantRef('unassigned_guests').set(
-                unassignedPool.map(serializeGuestRowForPersist).filter(Boolean),
-            ),
-            persistMetaLabelColumns(),
-        ]).then(() => closeGuestModal()).catch((err) => {
+        localGuestRevision++;
+        return persistMetaLabelColumns()
+            .then(() => persistGuestState(getTableSettingKeys(), true))
+            .then(() => closeGuestModal())
+            .catch((err) => {
+                console.error('賓客儲存失敗:', err);
+                alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
+                throw err;
+            });
+    }
+
+    const tableIdx = parseInt(tableNum, 10);
+    const foundIdx = findGuestIndexAtTable(tableIdx, {
+        seatIdx,
+        guestId: guest?.id,
+        guestName: guest?.name,
+    });
+    if (foundIdx === -1) {
+        alert('❌ 找不到該座位上的賓客，請關閉視窗後重試。');
+        return Promise.reject(new Error('guest not found at seat'));
+    }
+    allGuests[tableIdx][foundIdx].name = newName;
+    allGuests[tableIdx][foundIdx].group = newGroup;
+    allGuests[tableIdx][foundIdx].side = newSide;
+    localGuestRevision++;
+
+    return persistMetaLabelColumns()
+        .then(() => persistGuestState([String(tableIdx)], false))
+        .then(() => closeGuestModal())
+        .catch((err) => {
             console.error('賓客儲存失敗:', err);
             alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
             throw err;
         });
-    }
-
-    const tableIdx = parseInt(tableNum, 10);
-    const foundIdx = findGuestBySeat(tableIdx, seatIdx);
-    if (foundIdx === -1) return Promise.resolve();
-    allGuests[tableIdx][foundIdx].name = newName;
-    allGuests[tableIdx][foundIdx].group = newGroup;
-    allGuests[tableIdx][foundIdx].side = newSide;
-
-    return Promise.all([
-        tenantRef(`wedding_guests/${tableIdx}`).set(
-            allGuests[tableIdx].map(serializeGuestRowForPersist).filter(Boolean),
-        ),
-        persistMetaLabelColumns(),
-    ]).then(() => closeGuestModal()).catch((err) => {
-        console.error('賓客儲存失敗:', err);
-        alert('❌ 賓客儲存失敗，請確認已登入並具備名單寫入權限。');
-        throw err;
-    });
 }
 
 function removeGuestFromSeatAction() {
@@ -2443,7 +2483,9 @@ function removeGuestFromSeatAction() {
         allGuests[tableIdx].splice(foundIdx, 1);
         guestObj.sort = 99;
         unassignedPool = normalizeUnassignedPool(unassignedPool);
-        if (!unassignedPool.some(g => g?.name === guestObj.name)) {
+        ensureGuestHasId(guestObj);
+        const guestId = String(guestObj.id || '').trim();
+        if (guestId && !unassignedPool.some(g => g?.id && String(g.id) === guestId)) {
             unassignedPool.push(guestObj);
         }
 
@@ -2654,15 +2696,19 @@ function deleteTableAction() {
             unassignedPool.push(g);
         }
     });
-    if (Array.isArray(allGuests)) allGuests[idx] = [];
+    if (Array.isArray(allGuests)) {
+        allGuests[idx] = [];
+    } else if (allGuests && typeof allGuests === 'object') {
+        delete allGuests[idx];
+        delete allGuests[String(idx)];
+    }
 
     delete tableSettings[tableNum];
+    localGuestRevision++;
 
-    return Promise.all([
-        persistTableSettings(),
-        tenantRef(`wedding_guests/${idx}`).set(null),
-        tenantRef('unassigned_guests').set(unassignedPool),
-    ]).then(() => forceFloorLayoutSync())
+    return persistTableSettings()
+        .then(() => persistGuestState([tableNum], true))
+        .then(() => forceFloorLayoutSync())
         .then(() => {
             runRender();
             closeSettingsModal();
@@ -2744,10 +2790,14 @@ function resetEngineState() {
     nativePrintSnapshot = null;
 }
 
-export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
+export function initSeatingEngine({ tenantId, tenantRef: tenantRefProp, slug, hooks = {} }) {
     if (engineInitialized) destroySeatingEngine();
-    rawTenantRef = tenantRef;
-    tenantRefFn = createCompatTenantRef(tenantRef);
+    const tid = String(tenantId || '').trim();
+    if (!tid) throw new Error('Seating engine: missing tenantId');
+    activeTenantId = tid;
+    const refFn = tenantRefProp || ((subPath) => tenantDataDbRef(tid, subPath));
+    rawTenantRef = refFn;
+    tenantRefFn = createCompatTenantRef(refFn);
     tenantSlug = slug || 'default';
     uiHooks = {
         onFindTableItemsChange: hooks.onFindTableItemsChange || null,
@@ -2787,8 +2837,8 @@ export function initSeatingEngine({ tenantRef, slug, hooks = {} }) {
 }
 
 export function destroySeatingEngine() {
-    firebaseUnsubs.forEach((u) => { try { u(); } catch (_) { /* ignore */ } });
-    firebaseUnsubs = [];
+    dataUnsubs.forEach((u) => { try { u(); } catch (_) { /* ignore */ } });
+    dataUnsubs = [];
     cleanupFns.forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
     cleanupFns.length = 0;
     restoreNativePrintLayout();
@@ -2796,6 +2846,7 @@ export function destroySeatingEngine() {
     engineInitialized = false;
     rawTenantRef = null;
     tenantRefFn = null;
+    activeTenantId = '';
     resetEngineState();
 }
 

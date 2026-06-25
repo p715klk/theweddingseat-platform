@@ -1,9 +1,8 @@
 import { computed, ref, toValue } from 'vue';
-import { get, set, ref as dbRef } from '@/rtdb';
-import { database } from '@/firebase';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
+import { getMembersMap, getProfilesMap, getMemberProfile } from '@/lib/pb/members';
 import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember, callSwapTenantMemberRoles } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, assertCanChangeMemberRole, getMemberQuota } from '@/lib/tenantMemberLimits';
@@ -37,12 +36,6 @@ export function useTenantUsers(options = {}) {
     return globalTenant.meta.value?.owner_uid || '';
   });
 
-  function tenantRef(subPath = '') {
-    const id = effectiveTenantId.value;
-    const base = `tenants/${id}`;
-    return dbRef(database, subPath ? `${base}/${subPath}` : base);
-  }
-
   const members = ref([]);
   const loading = ref(false);
   const error = ref('');
@@ -71,16 +64,15 @@ export function useTenantUsers(options = {}) {
   }
 
   async function loadMembers() {
-    if (!effectiveTenantId.value) return;
+    const tid = effectiveTenantId.value;
+    if (!tid) return;
     loading.value = true;
     error.value = '';
     try {
-      const [memberSnap, profilesSnap] = await Promise.all([
-        get(tenantRef('members')),
-        get(tenantRef('user_profiles')),
+      const [memberMap, profiles] = await Promise.all([
+        getMembersMap(tid),
+        getProfilesMap(tid),
       ]);
-      const memberMap = memberSnap.val() || {};
-      const profiles = profilesSnap.val() || {};
       const uids = Object.keys(memberMap).filter((uid) => normalizeMemberRole(memberMap[uid]));
 
       members.value = sortMembers(uids.map((uid) => ({
@@ -101,7 +93,8 @@ export function useTenantUsers(options = {}) {
   }
 
   async function createMember({ email, password, displayName = '', role = 'admin', reuseExisting = false }) {
-    if (!effectiveTenantId.value) throw new Error('專案未就緒');
+    const tid = effectiveTenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
     const trimmedEmail = email?.trim();
     if (!trimmedEmail) throw new Error('請輸入 Email');
@@ -124,11 +117,11 @@ export function useTenantUsers(options = {}) {
         display_name: displayName.trim(),
         initial_password: password,
       },
-      { tenantId: effectiveTenantId.value },
+      { tenantId: tid },
     );
 
     await callUpsertTenantMember({
-      tenantId: effectiveTenantId.value,
+      tenantId: tid,
       uid,
       role,
       display_name: displayName.trim(),
@@ -139,23 +132,22 @@ export function useTenantUsers(options = {}) {
   }
 
   async function removeMember(uid) {
-    if (!effectiveTenantId.value) throw new Error('專案未就緒');
+    const tid = effectiveTenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     if (!uid) throw new Error('無效的用戶');
     if (uid === user.value?.uid) throw new Error('不能移除自己的帳號');
     if (!isPlatformAdmin.value && !isCurrentOwner()) {
       throw new Error('只有 owner 可以移除用戶');
     }
 
-    const result = await callRemoveTenantMember({
-      tenantId: effectiveTenantId.value,
-      uid,
-    });
+    const result = await callRemoveTenantMember({ tenantId: tid, uid });
     await loadMembers();
     return result;
   }
 
   async function updateMemberRole(uid, role) {
-    if (!effectiveTenantId.value) throw new Error('專案未就緒');
+    const tid = effectiveTenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     if (role !== 'admin' && role !== 'reception') throw new Error('無效的角色');
     if (!uid) throw new Error('無效的用戶');
     if (uid === user.value?.uid) throw new Error('不能變更自己的角色');
@@ -173,38 +165,44 @@ export function useTenantUsers(options = {}) {
       bypassLimits: isPlatformAdmin.value,
     });
 
-    await callUpsertTenantMember({ tenantId: effectiveTenantId.value, uid, role });
+    await callUpsertTenantMember({ tenantId: tid, uid, role });
     await loadMembers();
   }
 
   async function swapMemberRoles(uidA, uidB) {
-    if (!effectiveTenantId.value) throw new Error('專案未就緒');
+    const tid = effectiveTenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     if (!uidA || !uidB) throw new Error('無效的用戶');
     if (uidA === uidB) throw new Error('無效的用戶');
     if (!isPlatformAdmin.value && !isCurrentOwner()) {
       throw new Error('只有 owner 可以變更角色');
     }
-    await callSwapTenantMemberRoles({ tenantId: effectiveTenantId.value, uidA, uidB });
+    await callSwapTenantMemberRoles({ tenantId: tid, uidA, uidB });
     await loadMembers();
   }
 
   async function ensureSelfProfile() {
-    if (!effectiveTenantId.value || !user.value?.uid || !user.value.email) return;
-    const profileRef = tenantRef(`user_profiles/${user.value.uid}`);
-    const snap = await get(profileRef);
-    if (snap.exists()) return;
+    const tid = effectiveTenantId.value;
+    if (!tid || !user.value?.uid || !user.value.email) return;
+    const existing = await getMemberProfile(tid, user.value.uid);
+    if (existing) return;
 
-    await set(profileRef, {
-      email: user.value.email,
-      display_name: '',
-      created_at: Date.now(),
-      created_by_uid: user.value.uid,
-      created_by_email: user.value.email,
+    await callUpdateMemberProfile({
+      tenantId: tid,
+      uid: user.value.uid,
+      profile: {
+        email: user.value.email,
+        display_name: '',
+        created_at: Date.now(),
+        created_by_uid: user.value.uid,
+        created_by_email: user.value.email,
+      },
     });
   }
 
   async function updateMemberDisplayName(uid, displayName) {
-    if (!effectiveTenantId.value) throw new Error('專案未就緒');
+    const tid = effectiveTenantId.value;
+    if (!tid) throw new Error('專案未就緒');
     if (!uid) throw new Error('無效的用戶');
     const name = String(displayName || '').trim();
     if (name.length > 40) throw new Error('顯示名稱太長（最多 40 字）');
@@ -213,21 +211,19 @@ export function useTenantUsers(options = {}) {
       throw new Error('只有 owner 可以修改用戶顯示名稱');
     }
 
-    const profileRef = tenantRef(`user_profiles/${uid}`);
-    const snap = await get(profileRef);
-    const current = snap.exists() ? snap.val() : null;
+    const current = (await getMemberProfile(tid, uid)) || {};
     const editor = editorInfo();
 
     const next = {
-      email: current?.email || (uid === user.value?.uid ? user.value.email : '') || '',
+      email: current.email || (uid === user.value?.uid ? user.value.email : '') || '',
       display_name: name,
-      created_at: current?.created_at || Date.now(),
-      created_by_uid: current?.created_by_uid || editor?.uid || user.value?.uid || '',
-      created_by_email: current?.created_by_email || editor?.email || user.value?.email || '',
-      ...(current?.initial_password != null ? { initial_password: current.initial_password } : {}),
+      created_at: current.created_at || Date.now(),
+      created_by_uid: current.created_by_uid || editor?.uid || user.value?.uid || '',
+      created_by_email: current.created_by_email || editor?.email || user.value?.email || '',
+      ...(current.initial_password != null ? { initial_password: current.initial_password } : {}),
     };
 
-    await callUpdateMemberProfile({ tenantId: effectiveTenantId.value, uid, profile: next });
+    await callUpdateMemberProfile({ tenantId: tid, uid, profile: next });
     await loadMembers();
   }
 

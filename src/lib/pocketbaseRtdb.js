@@ -841,13 +841,26 @@ export class DbRef {
   }
 
   update(values) {
+    const entries = Object.entries(values || {});
+    if (!entries.length) return Promise.resolve();
+
     if (!this._path) {
       return (async () => {
-        for (const [p, v] of Object.entries(values)) {
+        for (const [p, v] of entries) {
           await writePath(p, v);
         }
       })();
     }
+
+    const hasNestedKeys = entries.some(([key]) => key.includes('/'));
+    if (hasNestedKeys) {
+      return (async () => {
+        for (const [rel, v] of entries) {
+          await writePath(`${this._path}/${rel}`, v);
+        }
+      })();
+    }
+
     return readPath(this._path).then(async (current) => {
       const base = current && typeof current === 'object' ? current : {};
       const merged = { ...base, ...values };

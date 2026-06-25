@@ -273,7 +273,7 @@ const props = defineProps({
 
 const emit = defineEmits(['logout']);
 
-const { tenantRef, tenantId } = useTenant();
+const { tenantId } = useTenant();
 const viewportRef = ref(null);
 let detachViewportGestures = null;
 const initError = ref('');
@@ -466,13 +466,26 @@ function onGuestModalRemove() {
 }
 
 async function onGuestAddCategory(name) {
-  await addSeatingCategory(name);
+  try {
+    const ok = await addSeatingCategory(name);
+    if (!ok) {
+      window.alert('此標籤已存在或名稱無效');
+    }
+  } catch (e) {
+    window.alert(`❌ 儲存標籤失敗：${e?.message || e}`);
+  }
 }
 
 async function onGuestRemoveCategory(tag) {
-  const ok = await removeSeatingCategory(tag);
-  if (ok) {
-    window.alert(`✅ 已刪除標籤「${tag}」`);
+  try {
+    const ok = await removeSeatingCategory(tag);
+    if (ok) {
+      window.alert(`✅ 已刪除標籤「${tag}」`);
+      return;
+    }
+    window.alert('未能刪除：可能仍有賓客使用此標籤');
+  } catch (e) {
+    window.alert(`❌ 刪除標籤失敗：${e?.message || e}`);
   }
 }
 
@@ -507,7 +520,7 @@ function mountEngine() {
   initError.value = '';
   try {
     initSeatingEngine({
-      tenantRef,
+      tenantId: tenantId.value,
       slug: props.slug,
       hooks: {
         onFindTableItemsChange(items) {

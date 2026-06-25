@@ -1,25 +1,24 @@
-import { get, onValue, remove, set, update } from '@/rtdb';
-
-/** 將 Vue composable 的 tenantRef 包成 legacy seating.js 相容的 .on / .set API */
+/** 將 tenantRef(path) 包成 legacy seating.js 相容的 .on / .set API（底層 PocketBase DbRef） */
 export function createCompatTenantRef(tenantRefFn) {
   function compatRef(dbRef) {
     return {
       set(val) {
-        if (val === null) return remove(dbRef);
-        return set(dbRef, val);
+        return dbRef.set(val);
       },
       update(val) {
-        return update(dbRef, val);
+        return dbRef.update(val);
       },
       remove() {
-        return remove(dbRef);
+        return dbRef.remove();
       },
       once() {
-        return get(dbRef).then((snap) => ({ val: () => snap.val() }));
+        return dbRef.once('value').then((snap) => ({ val: () => snap.val() }));
       },
       on(event, callback, onError) {
         if (event !== 'value') throw new Error(`Unsupported event: ${event}`);
-        return onValue(dbRef, (snap) => callback({ val: () => snap.val() }), onError);
+        const handler = (snapshot) => callback({ val: () => snapshot.val() });
+        dbRef.on('value', handler, onError);
+        return () => dbRef.off('value', handler);
       },
     };
   }

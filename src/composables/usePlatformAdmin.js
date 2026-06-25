@@ -1,7 +1,5 @@
 import { ref, watch } from 'vue';
 import getPocketBase, { isPocketBaseConfigured } from '@/lib/pocketbaseClient';
-import { get, ref as dbRef } from '@/rtdb';
-import { database } from '@/firebase';
 import { useAuth } from '@/composables/useAuth';
 
 const isPlatformAdmin = ref(false);
@@ -16,18 +14,18 @@ async function refreshPlatformAdmin(uid) {
     checkedUid = null;
     return;
   }
+  if (!isPocketBaseConfigured()) {
+    platformAdminReady.value = true;
+    checkedUid = uid;
+    return;
+  }
   try {
-    if (isPocketBaseConfigured()) {
-      const pb = getPocketBase();
-      let record = pb.authStore.record;
-      if (!record || record.id !== uid) {
-        record = await pb.collection('users').getOne(uid);
-      }
-      isPlatformAdmin.value = record?.is_platform_admin === true;
-    } else {
-      const snap = await get(dbRef(database, `platform_admins/${uid}`));
-      isPlatformAdmin.value = snap.val() === true;
+    const pb = getPocketBase();
+    let record = pb.authStore.record;
+    if (!record || record.id !== uid) {
+      record = await pb.collection('users').getOne(uid);
     }
+    isPlatformAdmin.value = record?.is_platform_admin === true;
     checkedUid = uid;
   } catch (e) {
     console.error('platform admin 讀取失敗:', e);

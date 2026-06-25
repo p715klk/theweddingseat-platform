@@ -1,6 +1,5 @@
 import { ref, watch } from 'vue';
-import { get, ref as dbRef } from '@/rtdb';
-import { database } from '@/firebase';
+import { getMemberRole } from '@/lib/pb/members';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenant } from '@/composables/useTenant';
@@ -15,10 +14,10 @@ function accessCacheKey(uid, tenantId, isPlatformAdmin) {
   return `${uid || ''}:${tenantId || ''}:${isPlatformAdmin ? '1' : '0'}`;
 }
 
-async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
-  const cacheKey = accessCacheKey(uid, tenantId, isPlatformAdmin);
+async function refreshTenantAccess(uid, tid, ownerUid, isPlatformAdmin) {
+  const cacheKey = accessCacheKey(uid, tid, isPlatformAdmin);
 
-  if (!uid || !tenantId) {
+  if (!uid || !tid) {
     canAccessAdmin.value = false;
     canAddWalkInGuest.value = false;
     memberRole.value = '';
@@ -44,13 +43,7 @@ async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
   }
 
   try {
-    const [memberSnap, metaSnap] = await Promise.all([
-      get(dbRef(database, `tenants/${tenantId}/members/${uid}`)),
-      get(dbRef(database, `tenants/${tenantId}/meta/owner_uid`)),
-    ]);
-    const rawRole = memberSnap.val();
-    let role = rawRole === true ? 'admin' : String(rawRole || '');
-    if (!role && metaSnap.val() === uid) role = 'owner';
+    const role = await getMemberRole(tid, uid, ownerUid);
     const isOwner = role === 'owner';
     const isAdmin = isOwner || role === 'admin';
     const isReception = role === 'reception';
@@ -72,16 +65,15 @@ async function refreshTenantAccess(uid, tenantId, isPlatformAdmin) {
 export function useTenantAccess() {
   const { user, authReady } = useAuth();
   const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
-  const { tenantId } = useTenant();
+  const { tenantId, meta } = useTenant();
 
   watch(
-    [user, authReady, tenantId, isPlatformAdmin, platformAdminReady],
-    ([u, authOk, tid, platformAdmin, platformOk]) => {
+    [user, authReady, tenantId, meta, isPlatformAdmin, platformAdminReady],
+    ([u, authOk, tid, m, platformAdmin, platformOk]) => {
       if (!authOk) return;
       const uid = u?.uid || null;
-      // platform admin 檢查進行中時先當非 platform admin，避免因 platformAdminReady=false 而 skip refresh 並卡住 UI
       const effectivePlatformAdmin = platformOk && platformAdmin;
-      refreshTenantAccess(uid, tid, effectivePlatformAdmin);
+      refreshTenantAccess(uid, tid, m?.owner_uid || '', effectivePlatformAdmin);
     },
     { immediate: true },
   );

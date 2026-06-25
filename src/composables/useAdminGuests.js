@@ -1,11 +1,16 @@
 import { ref } from 'vue';
-import { get, set, onValue } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
+import { ensureOwnerMemberRecord } from '@/lib/pb/members';
+import {
+  getTenantDataBundle,
+  saveAdminGuestBundle,
+  subscribeTenantData,
+  subscribeTenantDataByTenantId,
+} from '@/lib/pb/tenantData';
 import {
   processFirebaseGuests,
   serializeGuestsForSave,
-  syncWeddingGuestsForSave,
   normalizeGuestForList,
   reassignSeatsForTables,
   onGuestTableChange,
@@ -23,7 +28,7 @@ import {
 const DEFAULT_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
 
 export function useAdminGuests() {
-  const { tenantRef, meta } = useTenant();
+  const { tenantId, tenantDataRecordId, meta } = useTenant();
   const { user } = useAuth();
 
   const guests = ref([]);
@@ -38,6 +43,7 @@ export function useAdminGuests() {
   let unsubscribers = [];
   let syncTimer = null;
   let csvImportInProgress = false;
+  let localDataRecordId = '';
 
   function showToast(message, ms = 2000) {
     toast.value = message;
@@ -47,51 +53,49 @@ export function useAdminGuests() {
     }, ms);
   }
 
-  async function ensureOwnerMemberRecord() {
+  async function ensureOwnerRecord() {
     const uid = user.value?.uid;
     const ownerUid = meta.value?.owner_uid;
-    if (!uid || !ownerUid || ownerUid !== uid) return;
+    const tid = tenantId.value;
+    if (!uid || !ownerUid || ownerUid !== uid || !tid) return;
     try {
-      const snap = await get(tenantRef(`members/${uid}`));
-      const role = snap.val();
-      if (role === true || role === 'admin' || role === 'owner') return;
-      await set(tenantRef(`members/${uid}`), 'owner');
+      await ensureOwnerMemberRecord(tid, uid);
     } catch (e) {
       console.warn('無法自動補寫 owner members 記錄（不影響賓客儲存）:', e);
     }
   }
 
   function formatSaveError(e) {
-    const code = String(e?.code || '');
+    const status = e?.status ?? e?.response?.status;
     const message = String(e?.message || '');
-    if (code === 'PERMISSION_DENIED' || /permission denied/i.test(message)) {
+    if (status === 403 || /permission|forbidden/i.test(message)) {
       return '權限不足：請確認你已登入 Owner 或後台管理員帳號。';
     }
     return message || '儲存失敗';
   }
 
   async function fetchBundle() {
-    const [metaSnap, guestsSnap, unassignedSnap, settingsSnap, statusSnap] = await Promise.all([
-      get(tenantRef('meta_label_columns')),
-      get(tenantRef('wedding_guests')),
-      get(tenantRef('unassigned_guests')),
-      get(tenantRef('table_settings')),
-      get(tenantRef('guest_status')),
-    ]);
+    const tid = tenantId.value;
+    if (!tid) throw new Error('專案未就緒');
+    const bundle = await getTenantDataBundle(tid);
+    if (bundle.recordId) {
+      localDataRecordId = bundle.recordId;
+      tenantDataRecordId.value = bundle.recordId;
+    }
     return {
-      meta: metaSnap.val(),
-      weddingGuests: guestsSnap.val() || {},
-      unassignedGuests: unassignedSnap.val() || [],
-      tableSettings: settingsSnap.val() || {},
-      guestStatus: statusSnap.val() || {},
+      meta: bundle.meta_label_columns,
+      weddingGuests: bundle.wedding_guests || {},
+      unassignedGuests: bundle.unassigned_guests || [],
+      tableSettings: bundle.table_settings || {},
+      guestStatus: bundle.guest_status || {},
     };
   }
 
   function applyBundle(bundle) {
     tableSettings.value = bundle.tableSettings || {};
-    const meta = bundle.meta;
-    if (meta?.categories?.group) {
-      categories.value = [...meta.categories.group];
+    const labelMeta = bundle.meta;
+    if (labelMeta?.categories?.group) {
+      categories.value = [...labelMeta.categories.group];
     }
     const list = processFirebaseGuests(
       bundle.weddingGuests,
@@ -109,7 +113,7 @@ export function useAdminGuests() {
     loading.value = true;
     loadError.value = '';
     try {
-      await ensureOwnerMemberRecord();
+      await ensureOwnerRecord();
       applyBundle(await fetchBundle());
     } catch (e) {
       loadError.value = e?.message || '載入失敗';
@@ -129,10 +133,24 @@ export function useAdminGuests() {
 
   function startSync() {
     stopSync();
-    ['wedding_guests', 'unassigned_guests', 'guest_status', 'meta_label_columns', 'table_settings'].forEach((path) => {
-      const unsub = onValue(tenantRef(path), scheduleRealtimeRefresh);
-      unsubscribers.push(unsub);
-    });
+    const tid = tenantId.value;
+    if (!tid) return;
+
+    const recordId = localDataRecordId || tenantDataRecordId.value;
+    if (recordId) {
+      unsubscribers.push(
+        subscribeTenantData(recordId, scheduleRealtimeRefresh),
+      );
+      return;
+    }
+
+    subscribeTenantDataByTenantId(tid, (bundle) => {
+      if (bundle.recordId) {
+        localDataRecordId = bundle.recordId;
+        tenantDataRecordId.value = bundle.recordId;
+      }
+      scheduleRealtimeRefresh();
+    }).then((unsub) => unsubscribers.push(unsub));
   }
 
   function stopSync() {
@@ -235,28 +253,28 @@ export function useAdminGuests() {
   async function save(options = {}) {
     if (!dirty.value) return;
     const { toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。' } = options;
+    const tid = tenantId.value;
+    if (!tid) throw new Error('專案未就緒');
+
+    const unnamed = guests.value.filter((g) => !g.name?.trim()).length;
+    if (unnamed > 0) {
+      throw new Error(`有 ${unnamed} 位賓客尚未填寫姓名，儲存時會被略過；請先補上姓名。`);
+    }
+
     saving.value = true;
     try {
-      await ensureOwnerMemberRecord();
+      await ensureOwnerRecord();
       const { wedding, unassigned } = serializeGuestsForSave(guests.value);
-      const results = await Promise.allSettled([
-        syncWeddingGuestsForSave(tenantRef, wedding),
-        set(tenantRef('unassigned_guests'), unassigned),
-        set(tenantRef('meta_label_columns'), {
-          keys: ['group'],
-          names: ['標籤 (可多選)'],
-          categories: { group: categories.value },
-        }),
-      ]);
-      const labels = ['wedding_guests', 'unassigned_guests', 'meta_label_columns'];
-      const failedIdx = results.findIndex((r) => r.status === 'rejected');
-      if (failedIdx !== -1) {
-        const reason = results[failedIdx].reason;
-        const path = labels[failedIdx];
-        const err = reason instanceof Error ? reason : new Error(String(reason));
-        err.message = `${path}: ${err.message || '寫入失敗'}`;
-        throw err;
-      }
+      const labelColumns = {
+        keys: ['group'],
+        names: ['標籤 (可多選)'],
+        categories: { group: categories.value },
+      };
+      await saveAdminGuestBundle(tid, {
+        wedding,
+        unassigned,
+        meta_label_columns: labelColumns,
+      });
 
       dirty.value = false;
       showToast(toastMessage, 2500);

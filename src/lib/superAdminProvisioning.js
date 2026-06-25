@@ -1,5 +1,3 @@
-import { ref as dbRef, get } from '@/rtdb';
-import { database } from '@/firebase';
 import { createAuthUserViaRest } from '@/lib/firebaseAuthRest';
 import getPocketBase, { isPocketBaseConfigured } from '@/lib/pocketbaseClient';
 
@@ -17,20 +15,16 @@ export function assertPassword(pw) {
 
 export async function assertPlatformAdmin(editor) {
   if (!editor?.uid) throw new Error('未登入（缺少 editor uid）');
-  if (isPocketBaseConfigured()) {
-    const pb = getPocketBase();
-    const auth = pb.authStore.record;
-    if (!auth || auth.id !== editor.uid) {
-      throw new Error('未登入或身分不符');
-    }
-    if (auth.is_platform_admin !== true) {
-      throw new Error('此帳號未設為 platform admin，無權進行此操作');
-    }
-    return;
+  if (!isPocketBaseConfigured()) {
+    throw new Error('未設定 PocketBase');
   }
-  const snap = await get(dbRef(database, `platform_admins/${editor.uid}`));
-  if (snap.val() !== true) {
-    throw new Error('此帳號未列入 platform_admins，無權進行此操作');
+  const pb = getPocketBase();
+  const auth = pb.authStore.record;
+  if (!auth || auth.id !== editor.uid) {
+    throw new Error('未登入或身分不符');
+  }
+  if (auth.is_platform_admin !== true) {
+    throw new Error('此帳號未設為 platform admin，無權進行此操作');
   }
 }
 

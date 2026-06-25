@@ -1,10 +1,12 @@
 import { ref, computed } from 'vue';
-import { ref as dbRef, get, child } from '@/rtdb';
-import { database } from '@/firebase';
+import { findTenantBySlug, getTenantMeta } from '@/lib/pb/tenant';
+import { tenantDataDbRef } from '@/lib/pb/dataRef';
 import { resolveTenantFeatures } from '@/lib/tenantFeatures';
 
 const slug = ref('');
 const tenantId = ref('');
+const tenantRecordId = ref('');
+const tenantDataRecordId = ref('');
 const meta = ref(null);
 const ready = ref(false);
 const error = ref(null);
@@ -24,33 +26,35 @@ function resolveSlugFromRoute(route) {
   return 'demo';
 }
 
-function tenantPath(subPath = '') {
-  const base = `tenants/${tenantId.value}`;
-  return subPath ? `${base}/${subPath}` : base;
-}
-
-function tenantRef(subPath = '') {
-  return dbRef(database, tenantPath(subPath));
-}
-
 async function initTenant(route, options = {}) {
   const { featureGate = null, allowWhenDisabled = false, allowExpired = false } = options;
   ready.value = false;
   error.value = null;
   isExpired.value = false;
+  tenantRecordId.value = '';
+  tenantDataRecordId.value = '';
 
   slug.value = resolveSlugFromRoute(route);
 
   try {
-    const slugSnap = await get(child(dbRef(database), `slugs/${slug.value}`));
-    tenantId.value = slugSnap.val() || slug.value;
+    const info = await findTenantBySlug(slug.value);
+    if (!info) {
+      error.value = `找不到專案「${slug.value}」`;
+      return;
+    }
 
-    const metaSnap = await get(tenantRef('meta'));
-    const metaVal = metaSnap.val();
+    tenantId.value = info.tenantId;
+    tenantRecordId.value = info.id;
+
+    const metaVal = await getTenantMeta(info.tenantId);
     if (!metaVal) {
       error.value = `找不到專案「${slug.value}」`;
       return;
     }
+
+    const { findTenantDataRecord } = await import('@/lib/pb/tenantData');
+    const dataRec = await findTenantDataRecord(info.tenantId);
+    if (dataRec?.id) tenantDataRecordId.value = dataRec.id;
 
     const resolved = resolveTenantFeatures(metaVal);
     features.value = resolved;
@@ -77,10 +81,22 @@ const venueLabel = computed(() => {
   return parts.length ? `${parts.join(' · ')} 現場即時點名` : '';
 });
 
+function tenantRef(subPath = '') {
+  return tenantDataDbRef(tenantId.value, subPath);
+}
+
+function tenantPath(subPath = '') {
+  const id = tenantId.value;
+  const base = `tenants/${id}`;
+  return subPath ? `${base}/${subPath}` : base;
+}
+
 export function useTenant() {
   return {
     slug,
     tenantId,
+    tenantRecordId,
+    tenantDataRecordId,
     meta,
     ready,
     error,
