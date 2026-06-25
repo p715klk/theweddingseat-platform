@@ -3,7 +3,7 @@ import { get, set, ref as dbRef } from '@/rtdb';
 import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
-import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember } from '@/lib/twsApi';
+import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember, callSwapTenantMemberRoles } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, assertCanChangeMemberRole, getMemberQuota } from '@/lib/tenantMemberLimits';
 
@@ -161,6 +161,17 @@ export function useTenantUsers() {
     await loadMembers();
   }
 
+  async function swapMemberRoles(uidA, uidB) {
+    if (!tenantId.value) throw new Error('專案未就緒');
+    if (!uidA || !uidB) throw new Error('無效的用戶');
+    if (uidA === uidB) throw new Error('無效的用戶');
+    if (!isPlatformAdmin.value && !isCurrentOwner()) {
+      throw new Error('只有 owner 可以變更角色');
+    }
+    await callSwapTenantMemberRoles({ tenantId: tenantId.value, uidA, uidB });
+    await loadMembers();
+  }
+
   async function ensureSelfProfile() {
     if (!tenantId.value || !user.value?.uid || !user.value.email) return;
     const profileRef = tenantRef(`user_profiles/${user.value.uid}`);
@@ -221,6 +232,7 @@ export function useTenantUsers() {
     createMember,
     removeMember,
     updateMemberRole,
+    swapMemberRoles,
     updateMemberDisplayName,
     ensureSelfProfile,
     updateSelfDisplayName,

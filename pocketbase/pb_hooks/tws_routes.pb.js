@@ -18,7 +18,7 @@ var twsUserAuthMiddleware = (function() {
 })();
 
 routerAdd("GET", "/tws/health", function(e) {
-  return e.json(200, { ok: true, service: "tws", version: 31, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
+  return e.json(200, { ok: true, service: "tws", version: 34, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
 });
 
 routerAdd("GET", "/tws/debug-auth", function(e) {
@@ -504,6 +504,48 @@ routerAdd("POST", "/tws/list-members", function(e) {
     }
     return n;
   };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return false;
@@ -938,6 +980,48 @@ routerAdd("POST", "/tws/create-user", function(e) {
     }
     return n;
   };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return false;
@@ -1354,6 +1438,48 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
     }
     return n;
   };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return false;
@@ -1412,17 +1538,484 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
   var tidEsc = escFilter(tenantId);
   var uidEsc = escFilter(targetUid);
   var existingMember = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tenantId, uid: targetUid })[0] || null;
+  var bypassQuota = isPlatformAdmin(caller);
   if (existingMember) {
+    var prevRole = normalizeMemberRole(recordStr(existingMember, "role"));
+    if (prevRole !== role) assertMemberQuotaForRoleChange(tenantId, prevRole, role, bypassQuota);
     setMemberFields(existingMember, tenantId, tenant, targetUid, role);
     try { twsSave(existingMember); } catch (errUpd) { throw new BadRequestError("更新成員失敗"); }
     return e.json(200, { tenantId: tenantId, uid: targetUid, created: false });
   }
+  assertMemberQuota(tenantId, role, "", bypassQuota);
   var membersCol = findCollection("tenant_members");
   var memberRec = new Record(membersCol);
   memberRec.set("created_at", Date.now());
   setMemberFields(memberRec, tenantId, tenant, targetUid, role);
   try { twsSave(memberRec); } catch (errIns) { throw new BadRequestError("新增成員失敗"); }
   return e.json(200, { tenantId: tenantId, uid: targetUid, created: true });
+
+}, twsUserAuthMiddleware);
+
+routerAdd("POST", "/tws/swap-member-roles", function(e) {
+  var escFilter = function(s) {
+    return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  };
+
+  var findByField = function(collection, field, value) {
+    var v = String(value || "").trim();
+    if (!v) return null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findFirstRecordByData === "function") {
+        return dao.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err) {}
+    try {
+      if (typeof $app.findFirstRecordByData === "function") {
+        return $app.findFirstRecordByData(collection, field, v) || null;
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var queryRecords = function(collection, filter, limit, bind) {
+    var lim = limit || 500;
+    var f = String(filter || "").trim();
+    var params = bind || null;
+    if (params) {
+      try {
+        var daoOld = $app.dao();
+        if (daoOld && typeof daoOld.findRecordsByFilter === "function") {
+          var rowsOld = daoOld.findRecordsByFilter(collection, f, params, lim, 0);
+          if (rowsOld && rowsOld.length) return rowsOld;
+        }
+      } catch (errOld) {}
+    }
+    try {
+      if (typeof $app.findRecordsByFilter === "function") {
+        var rowsApp = params
+          ? $app.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : $app.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsApp && rowsApp.length) return rowsApp;
+      }
+    } catch (errApp) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordsByFilter === "function") {
+        var rowsDao = params
+          ? dao.findRecordsByFilter(collection, f, "", lim, 0, params)
+          : dao.findRecordsByFilter(collection, f, "", lim, 0);
+        if (rowsDao && rowsDao.length) return rowsDao;
+      }
+    } catch (errDao) {}
+    if (lim === 1 && f) {
+      try {
+        if (typeof $app.findFirstRecordByFilter === "function") {
+          var one = $app.findFirstRecordByFilter(collection, f);
+          if (one) return [one];
+        }
+      } catch (errOne) {}
+      try {
+        var daoOne = $app.dao();
+        if (daoOne && typeof daoOne.findFirstRecordByFilter === "function") {
+          var one2 = daoOne.findFirstRecordByFilter(collection, f);
+          if (one2) return [one2];
+        }
+      } catch (errOne2) {}
+    }
+    return [];
+  };
+
+
+  var findCollection = function(name) {
+    try {
+      if (typeof $app.findCollectionByNameOrId === "function") {
+        return $app.findCollectionByNameOrId(name);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findCollectionByNameOrId === "function") {
+        return dao.findCollectionByNameOrId(name);
+      }
+    } catch (err2) {}
+    try {
+      var dao2 = $app.dao();
+      if (dao2 && typeof dao2.findCollectionByName === "function") {
+        return dao2.findCollectionByName(name);
+      }
+    } catch (err3) {}
+    throw new BadRequestError("找不到 collection: " + name);
+  };
+  var twsFindRecordById = function(collection, id) {
+    try {
+      if (typeof $app.findRecordById === "function") {
+        return $app.findRecordById(collection, id);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findRecordById === "function") {
+        return dao.findRecordById(collection, id);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsFindAuthByEmail = function(collection, email) {
+    try {
+      if (typeof $app.findAuthRecordByEmail === "function") {
+        return $app.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err) {}
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.findAuthRecordByEmail === "function") {
+        return dao.findAuthRecordByEmail(collection, email);
+      }
+    } catch (err2) {}
+    return null;
+  };
+  var twsSave = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.saveRecord === "function") {
+        dao.saveRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.save === "function") {
+        $app.save(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    try {
+      if (typeof $app.saveNoValidate === "function") {
+        $app.saveNoValidate(record);
+        return;
+      }
+    } catch (err2) { lastErr = err2; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "儲存失敗"));
+  };
+  var deriveUsername = function(email) {
+    var em = String(email || "").trim().toLowerCase();
+    return em.replace(/@/g, "_").replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 150) || "tws_user";
+  };
+  var applyAuthFields = function(record, email, password) {
+    var em = String(email || "").trim().toLowerCase();
+    var pw = String(password || "");
+    var uname = deriveUsername(em);
+    try {
+      if (typeof record.setEmail === "function") record.setEmail(em);
+      else record.set("email", em);
+    } catch (errE) { record.set("email", em); }
+    try {
+      if (typeof record.setUsername === "function") record.setUsername(uname);
+      else record.set("username", uname);
+    } catch (errU) { try { record.set("username", uname); } catch (errU2) {} }
+    try {
+      if (typeof record.setPassword === "function") record.setPassword(pw);
+      else record.set("password", pw);
+    } catch (errP) { record.set("password", pw); }
+    try {
+      if (typeof record.setVerified === "function") record.setVerified(true);
+      else record.set("verified", true);
+    } catch (errV) { try { record.set("verified", true); } catch (errV2) {} }
+  };
+  var twsDelete = function(record) {
+    var lastErr = null;
+    try {
+      var dao = $app.dao();
+      if (dao && typeof dao.deleteRecord === "function") {
+        dao.deleteRecord(record);
+        return;
+      }
+    } catch (errDao) { lastErr = errDao; }
+    try {
+      if (typeof $app.delete === "function") {
+        $app.delete(record);
+        return;
+      }
+    } catch (err) { lastErr = err; }
+    throw new BadRequestError(String((lastErr && lastErr.message) || lastErr || "刪除失敗"));
+  };
+
+  var resolveAuth = function(ev) {
+    if (ev && ev.auth) return ev.auth;
+    try {
+      var info = $apis.requestInfo(ev);
+      if (info && info.authRecord) return info.authRecord;
+    } catch (err) {}
+    try {
+      if (ev && typeof ev.get === "function") {
+        var ar = ev.get("authRecord");
+        if (ar) return ar;
+      }
+    } catch (err2) {}
+    try {
+      if (ev && typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        if (infoA && infoA.authRecord) return infoA.authRecord;
+      }
+    } catch (err3) {}
+    var token = "";
+    try {
+      var infoB = $apis.requestInfo(ev);
+      var authHdr = (infoB && infoB.headers && (infoB.headers.authorization || infoB.headers.Authorization)) || "";
+      if (authHdr) token = String(authHdr).replace(/^Bearer\s+/i, "").trim();
+    } catch (err4) {}
+    if (token) {
+      try {
+        if (typeof $app.findAuthRecordByToken === "function") {
+          var rec = $app.findAuthRecordByToken(token, "users");
+          if (rec) return rec;
+        }
+      } catch (err5) {}
+      try {
+        var dao = $app.dao();
+        if (dao && typeof dao.findAuthRecordByToken === "function") {
+          var rec2 = dao.findAuthRecordByToken(token, "users");
+          if (rec2) return rec2;
+        }
+      } catch (err6) {}
+    }
+    return null;
+  };
+  var loadCaller = function(ev) {
+    var auth = resolveAuth(ev);
+    if (!auth) throw new UnauthorizedError("需要登入");
+    try { return twsFindRecordById("users", auth.id); } catch (err) { return auth; }
+  };
+  var tryParseJson = function(val) {
+    if (val && typeof val === "object") return val;
+    if (typeof val === "string" && val.trim()) {
+      try { return JSON.parse(val); } catch (err) {}
+    }
+    return null;
+  };
+  var getJsonBody = function(ev) {
+    try {
+      var info = $apis.requestInfo(ev);
+      var parsed = tryParseJson(info && info.body) || tryParseJson(info && info.data);
+      if (parsed) return parsed;
+    } catch (err) {}
+    try {
+      if (typeof ev.requestInfo === "function") {
+        var infoA = ev.requestInfo();
+        var parsedA = tryParseJson(infoA && infoA.body) || tryParseJson(infoA && infoA.data);
+        if (parsedA) return parsedA;
+      }
+    } catch (err2) {}
+    try {
+      if (ev.request && ev.request.body && typeof $utils.readerToString === "function") {
+        var raw = $utils.readerToString(ev.request.body);
+        var parsedC = tryParseJson(raw);
+        if (parsedC) return parsedC;
+      }
+    } catch (err3) {}
+    return {};
+  };
+  var recordBool = function(record, name) {
+    try { return record.getBool(name) === true; } catch (err) {
+      try { return record.get(name) === true; } catch (err2) { return false; }
+    }
+  };
+  var recordStr = function(record, name) {
+    try { return record.getString(name) || ""; } catch (err) {
+      try { return String(record.get(name) || ""); } catch (err2) { return ""; }
+    }
+  };
+  var callerId = function(caller) {
+    if (!caller) return "";
+    if (caller.id) return String(caller.id);
+    try { return String(caller.get("id") || ""); } catch (err) { return ""; }
+  };
+  var normalizeMemberRole = function(val) {
+    if (val === "owner") return "owner";
+    if (val === true || val === "admin") return "admin";
+    if (val === "reception") return "reception";
+    return "";
+  };
+  var getMemberRow = function(tenantKey, uid) {
+    var tid = String(tenantKey || "").trim();
+    var id = String(uid || "").trim();
+    if (!tid || !id) return null;
+    var row = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tid, uid: id })[0];
+    if (row) return row;
+    row = findByField("tenant_members", "user_id", id);
+    if (row && recordStr(row, "tenant_id") === tid) return row;
+    return null;
+  };
+  var getMemberRole = function(tenantKey, uid) {
+    var row = getMemberRow(tenantKey, uid);
+    return row ? normalizeMemberRole(recordStr(row, "role")) : "";
+  };
+  var loadTenantByKey = function(key) {
+    var k = String(key || "").trim();
+    if (!k) return null;
+    var t = findByField("tenants", "tenant_id", k);
+    if (t) return t;
+    t = findByField("tenants", "slug", k);
+    if (t) return t;
+    var rows = queryRecords("tenants", "tenant_id = {:k}", 1, { k: k });
+    if (rows.length) return rows[0];
+    rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
+    return rows.length ? rows[0] : null;
+  };
+  var listOwnedTenants = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return [];
+    var rows = queryRecords("tenant_members", "user_id = {:uid} && role = 'owner'", 50, { uid: id });
+    var out = [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var tid = recordStr(rows[oi], "tenant_id");
+      var tenant = loadTenantByKey(tid);
+      out.push({
+        tenant_id: tid,
+        slug: tenant ? recordStr(tenant, "slug") : tid,
+        role: "owner",
+      });
+    }
+    return out;
+  };
+  var isPlatformAdmin = function(record) { return recordBool(record, "is_platform_admin"); };
+  var isTenantOwner = function(tenantId, uid) {
+    return getMemberRole(tenantId, uid) === "owner";
+  };
+  var callerCanManageUsers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return true;
+    return isTenantOwner(tenantId, callerId(caller));
+  };
+  var assertOwnerOrPlatformAdmin = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var tid = String(tenantId || "").trim();
+    if (!tid) throw new BadRequestError("缺少 tenantId");
+    if (!isTenantOwner(tid, callerId(caller))) {
+      throw new ForbiddenError("只有 owner 或平台管理員可以執行此操作");
+    }
+  };
+  var assertCanViewMembers = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var role = getMemberRole(tenantId, callerId(caller));
+    if (role === "owner" || role === "admin") return;
+    throw new ForbiddenError("無權查看成員清單");
+  };
+  var countAdmins = function(members) {
+    var n = 0;
+    for (var i = 0; i < members.length; i += 1) {
+      var r = normalizeMemberRole(recordStr(members[i], "role"));
+      if (r === "admin" || r === "owner") n += 1;
+    }
+    return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var shouldDeleteAuth = function(uid) {
+    var id = String(uid || "").trim();
+    if (!id) return false;
+    if (findByField("tenant_members", "user_id", id)) return false;
+    if (queryRecords("tenant_members", "user_id = {:uid}", 1, { uid: id }).length > 0) return false;
+    try {
+      var user = twsFindRecordById("users", uid);
+      if (user && recordBool(user, "is_platform_admin")) return false;
+    } catch (err) { return false; }
+    return true;
+  };
+  var mapSaveError = function(err, fallback) {
+    var msg = String((err && err.message) || err || fallback);
+    if (msg.indexOf("already in use") >= 0 || msg.indexOf("unique") >= 0) return "此 Email 已被使用";
+    return msg || fallback;
+  };
+  var setMemberFields = function(record, tenantKey, tenantRec, uid, role) {
+    record.set("tenant_id", tenantKey);
+    record.set("user_id", uid);
+    record.set("role", role);
+    try { record.set("user", uid); } catch (errU) {}
+    try {
+      var tid = tenantRec && tenantRec.id ? tenantRec.id : recordStr(tenantRec, "id");
+      if (tid) record.set("tenant", tid);
+    } catch (errT) {}
+  };
+  var saveAuthRecord = function(record) {
+    twsSave(record);
+  };
+  var setOptionalUserMeta = function(record, caller, extra) {
+    try {
+      record.set("is_platform_admin", false);
+      record.set("created_at", Date.now());
+      record.set("created_by_uid", callerId(caller));
+      record.set("created_by_email", recordStr(caller, "email"));
+      if (extra && extra.display_name) record.set("display_name", String(extra.display_name));
+      if (extra && extra.initial_password) record.set("initial_password", String(extra.initial_password));
+      twsSave(record);
+    } catch (err) { console.error("tws: optional user meta skipped:", err); }
+  };
+  var data = getJsonBody(e);
+  var caller = loadCaller(e);
+
+  var tenantId = String(data.tenantId || "").trim();
+  var uidA = String(data.uidA || "").trim();
+  var uidB = String(data.uidB || "").trim();
+  if (!tenantId || !uidA || !uidB) throw new BadRequestError("缺少 tenantId 或 uid");
+  if (uidA === uidB) throw new BadRequestError("無效的用戶");
+  assertOwnerOrPlatformAdmin(caller, tenantId);
+  var tenant = loadTenantByKey(tenantId);
+  if (!tenant) throw new NotFoundError("找不到專案");
+  var rowA = getMemberRow(tenantId, uidA);
+  var rowB = getMemberRow(tenantId, uidB);
+  if (!rowA || !rowB) throw new NotFoundError("找不到成員");
+  var roleA = normalizeMemberRole(recordStr(rowA, "role"));
+  var roleB = normalizeMemberRole(recordStr(rowB, "role"));
+  if (roleA === "owner" || roleB === "owner") throw new BadRequestError("不能變更 Owner 角色");
+  if (roleA === roleB) throw new BadRequestError("兩位用戶角色相同，無需交換");
+  if (!((roleA === "admin" && roleB === "reception") || (roleA === "reception" && roleB === "admin"))) {
+    throw new BadRequestError("只可在後台管理員與現場接待之間交換");
+  }
+  setMemberFields(rowA, tenantId, tenant, uidA, roleB);
+  setMemberFields(rowB, tenantId, tenant, uidB, roleA);
+  try { twsSave(rowA); } catch (errSwapA) { throw new BadRequestError("交換角色失敗"); }
+  try { twsSave(rowB); } catch (errSwapB) { throw new BadRequestError("交換角色失敗"); }
+  return e.json(200, { tenantId: tenantId, uidA: uidA, uidB: uidB, roleA: roleB, roleB: roleA });
 
 }, twsUserAuthMiddleware);
 
@@ -1777,6 +2370,48 @@ routerAdd("POST", "/tws/update-member-profile", function(e) {
       if (r === "admin" || r === "owner") n += 1;
     }
     return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
   };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
@@ -2189,6 +2824,48 @@ routerAdd("POST", "/tws/remove-member", function(e) {
       if (r === "admin" || r === "owner") n += 1;
     }
     return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
   };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
@@ -2615,6 +3292,48 @@ routerAdd("POST", "/tws/set-password", function(e) {
       if (r === "admin" || r === "owner") n += 1;
     }
     return n;
+  };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
   };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();

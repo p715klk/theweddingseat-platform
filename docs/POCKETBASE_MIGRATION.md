@@ -12,26 +12,20 @@ Owner / Super Admin 建帳、成員 CUD、移除成員等操作經 **`pb_hooks/`
 
 | 檔案 | 用途 |
 |------|------|
-| `00_health.pb.js` | health check（version 應為 **15+**） |
-| `tws_routes.pb.js` | HTTP routes（`create-user`、`upsert-member` 等；由 `npm run build:tws-hooks` 生成） |
+| `tws_routes.pb.js` | HTTP routes（`create-user`、`upsert-member`、`swap-member-roles` 等；由 `npm run build:tws-hooks` 生成） |
 | `tws.pb.js` | record hooks（刪 tenant cascade、auto-verify） |
 
-
+> **勿** 放 `00_health.pb.js` 等 stub 覆蓋 `tws_routes.pb.js` 內嘅 `/tws/health`。
 
 | 端點 | 用途 |
-
 |------|------|
-
-| `GET /tws/health` | 檢查 hooks 是否載入（version 應為 15+） |
-
+| `GET /tws/health` | 檢查 hooks 是否載入（version 應為 **34+**） |
 | `POST /tws/create-user` | Super Admin 或 Owner 建 Auth 帳號 |
-
-| `POST /tws/upsert-member` | Owner 新增／更新 `tenant_members` |
-
+| `POST /tws/list-members` | Owner / Admin 列出成員（含 email、display_name） |
+| `POST /tws/upsert-member` | 新增／更新 `tenant_members`（含配額檢查） |
+| `POST /tws/swap-member-roles` | 兩位成員 admin ↔ reception 交換角色（滿額時用） |
 | `POST /tws/update-member-profile` | Owner 改他人 profile；本人可改自己 |
-
 | `POST /tws/remove-member` | 移除成員 + 條件刪除 orphan `users` |
-
 | `POST /tws/set-password` | Super Admin 重設他人密碼 |
 
 
@@ -80,7 +74,36 @@ npm run setup:pocketbase
 
 **加／改成員：** `callUpsertTenantMember` → `POST /tws/upsert-member`。  
 
+**交換角色：** `callSwapTenantMemberRoles` → `POST /tws/swap-member-roles`。  
+
 **改 profile：** `callUpdateMemberProfile` → `POST /tws/update-member-profile`。
+
+### 成員配額（每個 project）
+
+| 角色 | 上限 | 說明 |
+|------|------|------|
+| Owner | 1 | 不可移除自己；角色不可經 UI 改動 |
+| 後台管理員（admin） | 3 | 可進 `/p/{slug}/admin` |
+| 現場接待（reception） | 6 | 只可點名頁 |
+| **合計** | **10** | 含 Owner |
+
+實作：`src/lib/tenantMemberLimits.js`；後端 `upsert-member` / `swap-member-roles` 強制檢查（`npm run build:tws-hooks` 生成）。
+
+| 操作者 | 配額行為 |
+|--------|----------|
+| **Owner** | 受上限約束；名額滿時**不可新增**；可改角色；若 admin 與 reception **兩邊都滿**，可用「**交換角色**」 |
+| **Super Admin** | **不受配額限制**（`is_platform_admin` bypass）；仍可新增／改角色 |
+
+**滿額時改角色（Owner）：**
+
+1. 若目標角色尚有名額 → 編輯選單「設為後台管理員／現場接待」
+2. 若 3 admin + 6 reception 全滿（單向改會超額）→ 編輯選單「與 XXX 交換角色」（admin ↔ reception，人數不變）
+3. 若曾超額（例如 4/3 admin）→ 將多餘 admin 改做 reception 修正
+
+UI：`src/components/admin/AdminSettingsDialog.vue`（用戶管理 tab — 表格 + 編輯選單）。
+
+修復舊資料 relation：`node scripts/repair-tenant-member-relations.mjs`  
+遷移 owner 至 join table：`node scripts/migrate-owner-to-members.mjs`
 
 
 
@@ -140,7 +163,7 @@ users                 → 登入身份 + 平台標記 + profile 備註
 
 tenants.owner_uid     → 邊個係 Owner（可轉讓）
 
-tenant_members        → 邊個 user 屬於邊個 project、role（admin / reception）
+tenant_members        → 邊個 user 屬於邊個 project、role（owner / admin / reception）
 
 ```
 
@@ -156,9 +179,9 @@ tenant_members        → 邊個 user 屬於邊個 project、role（admin / rece
 
 | 顯示名、初始密碼記錄 | `users.display_name`、`users.initial_password` |
 
-| Owner | `tenants.owner_uid` |
+| Owner | `tenant_members.role = 'owner'`（`tenants.owner_uid` 為 legacy／顯示用） |
 
-| Project admin / Reception | `tenant_members.role` |
+| Project admin / Reception | `tenant_members.role`（`admin` / `reception`） |
 
 
 

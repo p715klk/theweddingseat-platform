@@ -188,7 +188,9 @@ Phase 0f（之後）    正式 /p/{slug} URL + 買 domain + Super Admin 頁
 | 入 `/super` | — | — | — | 只有 `platform_admins` |
 | 入 `/p/{slug}/admin`、`/seating` | ✅ | ✅ | ❌ | `useTenantAccess` → `canAccessAdmin` |
 | 入 `/p/{slug}` 點名 | ✅ | ✅ | ✅ | 路由公開；`requireLogin` 後需 Auth |
-| 新增/移除 project 用戶 | ✅ | ❌ | ❌ | `useTenantUsers` + Rules `members/$uid.write` 限 `owner_uid` |
+| 新增/移除 project 用戶 | ✅ | ❌ | ❌ | `useTenantUsers` + `pb_hooks`（Owner）；見下 §0.5.1 配額 |
+| 改他人顯示名稱／角色 | ✅ | ❌ | ❌ | `AdminSettingsDialog` → `update-member-profile` / `upsert-member` |
+| 滿額時交換 admin ↔ reception | ✅ | ❌ | ❌ | `swap-member-roles`（Owner）；Super Admin 不受限 |
 | 寫 `wedding_guests`（完整 CRUD） | ✅ | ✅ | ❌ | Rules + `useAdminGuests` |
 | 寫 `guest_status`（點名／取消） | ✅ | ✅ | ✅ | Rules `guest_status/*/arrived` |
 | 現場加座（新增單一賓客） | ✅ | ✅ | ✅ | `useCheckIn.addWalkInGuest`；Rules 需允許 `reception` 寫 `wedding_guests/{table}/{idx}`（見下） |
@@ -204,6 +206,18 @@ Security Rules（概念）：
 - **Owner**：可寫自己 project 業務資料 + **`members` / `user_profiles`（用戶管理）**；`owner_uid` 路徑本身僅 super admin 可改
 - **Project admin**：可寫賓客、排位、標籤等後台資料；**不可寫 `members`**
 - **user**：只可讀點名所需資料；只可寫 `guest_status`；只可 **create** `wedding_guests/{table}/{idx}`（現場加座）；**不可入後台、不可寫 members**
+
+#### Project 成員配額與用戶管理 UI（2026-06-24，PocketBase）
+
+每個 project：**1 Owner + 3 後台管理員 + 6 現場接待 = 10 人**（`src/lib/tenantMemberLimits.js`）。
+
+| 操作者 | 新增用戶 | 改角色 | 滿額（10/10 且 3 admin + 6 reception） |
+|--------|----------|--------|----------------------------------------|
+| **Owner** | 有名額先可以 | 目標角色有名額先可以 | **交換角色**（admin ↔ reception）；唔使刪人 |
+| **Super Admin** | **不受限** | **不受限** | 同上，且可強制新增超額（緊急用） |
+
+後台 UI（設定 → 用戶管理）：表格顯示顯示名稱、Email、角色；**編輯**選單含修改顯示名稱、設角色、交換、移除。  
+後端：`POST /tws/upsert-member`（配額）、`POST /tws/swap-member-roles`（交換）；詳見 `docs/POCKETBASE_MIGRATION.md`。
 
 #### Project 功能開關（`meta.features`）— 2026-06-16 實作
 
@@ -650,6 +664,7 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 - [ ] Stripe 計費 + 自動開通
 - [x] RBAC 四角色（super admin / Owner / Project admin / user）— Rules + `useTenantAccess` + Owner 獨佔用戶管理
+- [x] Project 成員配額（1+3+6=10）+ 滿額交換角色 + Super Admin bypass（PocketBase hooks v34+）
 - [ ] 全面 `requireLogin = true`（點名頁強制登入）
 - [ ] 將 `members` 值 `'reception'` 改名為 `'user'`（optional，需 migration）
 - [ ] 酒店枱位模板庫
@@ -739,4 +754,4 @@ Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 c
 
 ---
 
-*最後更新：2026-06-19（§0.5 RBAC 四層角色、Owner 權限核查、user 現場加座 Rules、requireLogin 規劃）*
+*最後更新：2026-06-24（§0.5.1 成員配額、滿額交換角色、Super Admin bypass；PocketBase 用戶管理 UI）*

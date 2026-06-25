@@ -2,12 +2,12 @@
   <div class="panel">
     <h2>Members 管理</h2>
     <p class="hint-block">
-      顯示所有 Project 嘅 members（以 <code>tenants/*/members</code> + <code>user_profiles</code> 組合）。
-      可修改顯示名稱／初始密碼（只係你系統記錄，唔會改 Auth 密碼），或移除 members 權限；若該帳號無其他專案 membership，會一併刪除登入帳號。
+      顯示所有 Project 成員（<code>tenant_members</code> + <code>users</code>）。
+      可修改顯示名稱、重設登入密碼，或移除 admin／reception 成員；若該帳號無其他專案 membership，會一併刪除登入帳號。
     </p>
 
     <div class="toolbar">
-      <input v-model="q" type="text" class="search" placeholder="搜尋：email / slug / uid" />
+      <input v-model="q" type="text" class="search" placeholder="搜尋：email / slug / uid / 角色" />
       <button type="button" class="btn" :disabled="loading" @click="loadAll">
         {{ loading ? '載入中…' : '重新載入' }}
       </button>
@@ -23,55 +23,70 @@
         <div class="top">
           <div class="title">
             <strong>{{ row.email || row.uid }}</strong>
+            <span class="role-badge" :class="`role-${row.role}`">{{ row.roleLabel }}</span>
             <span class="sub">
               · Project: <code>{{ row.slug }}</code>
             </span>
           </div>
           <button
+            v-if="row.role !== 'owner'"
             type="button"
             class="btn danger"
-            :disabled="busyKey === row.key"
+            :disabled="busyKey.startsWith(row.key)"
             @click="remove(row)"
           >
-            {{ busyKey === row.key ? '移除中…' : '移除 members' }}
+            {{ busyKey === `${row.key}:remove` ? '移除中…' : '移除 members' }}
           </button>
+          <span v-else class="owner-hint">Owner 不可喺此移除</span>
         </div>
 
-        <div class="grid">
-          <div class="field">
+        <div class="body-grid">
+          <div class="field-row">
             <label>UID</label>
-            <input :value="row.uid" type="text" readonly />
+            <div class="readonly-value">{{ row.uid }}</div>
           </div>
-          <div class="field">
+          <div class="field-row">
             <label>Email</label>
-            <input :value="row.email || ''" type="text" readonly />
+            <div class="readonly-value">{{ row.email || '—' }}</div>
           </div>
-        </div>
-
-        <div class="grid">
-          <div class="field">
+          <div class="field-row">
             <label>顯示名稱</label>
-            <input v-model="row.editDisplayName" type="text" placeholder="(選填)" />
-          </div>
-          <div class="field">
-            <label>初始密碼（記錄）</label>
-            <div class="pw-row">
-              <input v-model="row.editInitialPassword" type="text" placeholder="(選填)" />
-              <button type="button" class="btn" @click="row.pwVisible = !row.pwVisible">
-                {{ row.pwVisible ? '隱藏' : '顯示' }}
+            <div class="field-control">
+              <input v-model="row.editDisplayName" type="text" class="input-compact" placeholder="(選填)" />
+              <button
+                type="button"
+                class="btn"
+                :disabled="busyKey === `${row.key}:save`"
+                @click="save(row)"
+              >
+                {{ busyKey === `${row.key}:save` ? '儲存中…' : '儲存名稱' }}
               </button>
+              <span v-if="row.msgKind === 'name' && row.msg" :class="row.msgOk ? 'ok' : 'error'">{{ row.msg }}</span>
             </div>
-            <p v-if="row.editInitialPassword" class="pw-preview">
-              目前：<code>{{ row.pwVisible ? row.editInitialPassword : '********' }}</code>
-            </p>
           </div>
-        </div>
-
-        <div class="actions">
-          <button type="button" class="btn primary" :disabled="busyKey === row.key" @click="save(row)">
-            {{ busyKey === row.key ? '儲存中…' : '儲存修改' }}
-          </button>
-          <span v-if="row.msg" :class="row.msgOk ? 'ok' : 'error'">{{ row.msg }}</span>
+          <div class="field-row">
+            <label>重設密碼</label>
+            <div class="field-control">
+              <input
+                v-model="row.resetPassword"
+                type="text"
+                class="input-compact"
+                minlength="6"
+                autocomplete="new-password"
+                placeholder="至少 6 個字元"
+              />
+              <button type="button" class="btn" @click="generatePassword(row)">隨機</button>
+              <button
+                type="button"
+                class="btn primary"
+                :disabled="busyKey === `${row.key}:reset`"
+                @click="resetPassword(row)"
+              >
+                {{ busyKey === `${row.key}:reset` ? '重設中…' : '重設' }}
+              </button>
+              <span v-if="row.msgKind === 'reset' && row.msg" :class="row.msgOk ? 'ok' : 'error'">{{ row.msg }}</span>
+            </div>
+          </div>
         </div>
       </li>
     </ul>
@@ -79,14 +94,15 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
-import { ref as dbRef, get } from '@/rtdb';
-import { database } from '@/firebase';
-import { useAuth } from '@/composables/useAuth';
+import { computed, onMounted, ref } from 'vue';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
-import { setTenantMemberProfile, removeTenantMember } from '@/composables/useSuperTenants';
+import {
+  listAllProjectMembers,
+  removeProjectMember,
+  resetProjectMemberPassword,
+  updateProjectMemberProfile,
+} from '@/composables/useSuperMembers';
 
-const { user } = useAuth();
 const { isPlatformAdmin } = usePlatformAdmin();
 
 const q = ref('');
@@ -95,54 +111,24 @@ const error = ref('');
 const busyKey = ref('');
 const rows = ref([]);
 
-function editorInfo() {
-  if (!user.value) return null;
-  return { uid: user.value.uid, email: user.value.email || '' };
-}
-
 async function loadAll() {
   error.value = '';
   rows.value = [];
   if (!isPlatformAdmin.value) {
-    error.value = '此帳號未列入 platform_admins';
+    error.value = '此帳號未設為 platform admin';
     return;
   }
   loading.value = true;
   try {
-    const slugsSnap = await get(dbRef(database, 'slugs'));
-    const slugs = slugsSnap.val() || {};
-
-    const out = [];
-    for (const [slug, tenantIdRaw] of Object.entries(slugs)) {
-      const tenantId = String(tenantIdRaw);
-      const [membersSnap, profilesSnap] = await Promise.all([
-        get(dbRef(database, `tenants/${tenantId}/members`)),
-        get(dbRef(database, `tenants/${tenantId}/user_profiles`)),
-      ]);
-      const members = membersSnap.val() || {};
-      const profiles = profilesSnap.val() || {};
-
-      Object.entries(members).forEach(([uid, roleVal]) => {
-        const role = roleVal === true ? 'admin' : roleVal;
-        if (role !== 'admin' && role !== 'reception') return;
-        const p = profiles?.[uid] || {};
-        out.push({
-          key: `${tenantId}:${uid}`,
-          tenantId,
-          slug,
-          uid,
-          email: p.email || '',
-          displayName: p.display_name || '',
-          initialPassword: p.initial_password || '',
-          editDisplayName: p.display_name || '',
-          editInitialPassword: p.initial_password || '',
-          pwVisible: false,
-          msg: '',
-          msgOk: true,
-        });
-      });
-    }
-    rows.value = out.sort((a, b) => (a.slug || '').localeCompare(b.slug || '') || (a.email || '').localeCompare(b.email || ''));
+    const list = await listAllProjectMembers();
+    rows.value = list.map((row) => ({
+      ...row,
+      editDisplayName: row.displayName || '',
+      resetPassword: '',
+      msg: '',
+      msgKind: '',
+      msgOk: true,
+    }));
   } catch (e) {
     error.value = e?.message || '載入失敗';
   } finally {
@@ -157,29 +143,62 @@ const filteredRows = computed(() => {
     return (
       String(r.slug || '').toLowerCase().includes(s) ||
       String(r.email || '').toLowerCase().includes(s) ||
-      String(r.uid || '').toLowerCase().includes(s)
+      String(r.uid || '').toLowerCase().includes(s) ||
+      String(r.role || '').toLowerCase().includes(s) ||
+      String(r.roleLabel || '').toLowerCase().includes(s)
     );
   });
 });
 
+function generatePassword(row) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let out = '';
+  for (let i = 0; i < 12; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  row.resetPassword = out;
+}
+
 async function save(row) {
   row.msg = '';
-  busyKey.value = row.key;
+  row.msgKind = 'name';
+  busyKey.value = `${row.key}:save`;
   try {
-    await setTenantMemberProfile(
-      row.tenantId,
-      row.uid,
-      {
-        display_name: row.editDisplayName || '',
-        initial_password: row.editInitialPassword || '',
-      },
-      editorInfo(),
-    );
+    await updateProjectMemberProfile(row.tenantId, row.uid, {
+      display_name: row.editDisplayName || '',
+    });
+    row.displayName = row.editDisplayName;
     row.msgOk = true;
     row.msg = '已儲存';
   } catch (e) {
     row.msgOk = false;
     row.msg = e?.message || '儲存失敗';
+  } finally {
+    busyKey.value = '';
+  }
+}
+
+async function resetPassword(row) {
+  const pw = String(row.resetPassword || '').trim();
+  if (pw.length < 6) {
+    row.msgKind = 'reset';
+    row.msgOk = false;
+    row.msg = '密碼至少需要 6 個字元';
+    return;
+  }
+  const ok = window.confirm(
+    `確定重設登入密碼？\n\nUser: ${row.email || row.uid}\nProject: ${row.slug}`,
+  );
+  if (!ok) return;
+
+  row.msg = '';
+  row.msgKind = 'reset';
+  busyKey.value = `${row.key}:reset`;
+  try {
+    await resetProjectMemberPassword(row.uid, pw);
+    row.msgOk = true;
+    row.msg = '已重設密碼';
+  } catch (e) {
+    row.msgOk = false;
+    row.msg = e?.message || '重設密碼失敗';
   } finally {
     busyKey.value = '';
   }
@@ -191,9 +210,10 @@ async function remove(row) {
   );
   if (!ok) return;
   row.msg = '';
-  busyKey.value = row.key;
+  row.msgKind = 'remove';
+  busyKey.value = `${row.key}:remove`;
   try {
-    const result = await removeTenantMember(row.tenantId, row.uid);
+    const result = await removeProjectMember(row.tenantId, row.uid);
     rows.value = rows.value.filter((r) => r.key !== row.key);
     if (result?.authDeleted) {
       row.msgOk = true;
@@ -207,7 +227,7 @@ async function remove(row) {
   }
 }
 
-loadAll();
+onMounted(loadAll);
 </script>
 
 <style scoped>
@@ -242,81 +262,130 @@ loadAll();
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 .item {
   border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  padding: 0.85rem;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.85rem;
 }
 .top {
   display: flex;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.65rem;
   align-items: center;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.55rem;
+}
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 .title strong {
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 .sub {
   color: #64748b;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
 }
-.grid {
+.role-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.role-owner {
+  background: #fef3c7;
+  color: #92400e;
+}
+.role-admin {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.role-reception {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+.owner-hint {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.body-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.65rem;
-  margin-top: 0.65rem;
+  gap: 0.5rem 0.85rem;
 }
-@media (max-width: 640px) {
-  .grid {
+@media (max-width: 768px) {
+  .body-grid {
     grid-template-columns: 1fr;
   }
 }
-.field label {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 700;
-  margin-bottom: 0.25rem;
-  color: #475569;
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
 }
-.field input {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  padding: 0.45rem 0.6rem;
+.field-row label {
+  flex: 0 0 4rem;
+  text-align: right;
   font-size: 0.875rem;
-}
-.pw-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-.pw-row input {
-  flex: 1;
-}
-.pw-preview {
-  margin: 0.35rem 0 0;
-  font-size: 0.75rem;
+  font-weight: 700;
   color: #64748b;
+  line-height: 1.3;
 }
-.actions {
-  margin-top: 0.75rem;
+.field-control,
+.field-row > .readonly-value {
+  flex: 1;
+  min-width: 0;
+}
+.field-control {
   display: flex;
-  gap: 0.5rem;
   align-items: center;
-  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.input-compact,
+.readonly-value {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.field-control .input-compact {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.readonly-value {
+  border-color: #e2e8f0;
+  color: #334155;
+  background: #f8fafc;
+  word-break: break-all;
+}
+.input-compact {
+  color: #1e293b;
+  background: #fff;
+}
+.input-compact::placeholder {
+  color: #94a3b8;
 }
 .btn {
-  padding: 0.45rem 0.75rem;
-  border-radius: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.375rem;
   border: 1px solid #cbd5e1;
   background: #f8fafc;
   color: #334155;
-  font-weight: 800;
-  font-size: 0.75rem;
+  font-weight: 700;
+  font-size: 0.8125rem;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .btn.primary {
   background: #2563eb;
@@ -327,6 +396,8 @@ loadAll();
   background: #fef2f2;
   color: #991b1b;
   border-color: #fecaca;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8125rem;
 }
 .btn:disabled {
   opacity: 0.7;
@@ -337,18 +408,19 @@ loadAll();
   font-weight: 700;
 }
 .ok {
+  font-size: 0.8125rem;
   color: #166534;
-  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 .error {
+  font-size: 0.8125rem;
   color: #dc2626;
-  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 code {
   font-size: 0.85em;
   background: #f1f5f9;
-  padding: 0.1rem 0.3rem;
+  padding: 0.05rem 0.25rem;
   border-radius: 0.2rem;
 }
 </style>
-

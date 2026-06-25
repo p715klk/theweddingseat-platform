@@ -4,7 +4,7 @@
     class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
-    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full border border-gray-100 max-h-[90vh] flex flex-col">
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full border border-gray-100 max-h-[90vh] flex flex-col">
       <div class="p-4 border-b border-gray-100 flex-shrink-0">
         <div class="flex items-center justify-between gap-2 mb-3">
           <h3 class="text-base font-bold text-gray-900">⚙ 設定</h3>
@@ -197,23 +197,36 @@
                         </button>
                         <template v-if="canChangeMemberRole(m)">
                           <button
-                            v-if="m.role !== 'admin'"
+                            v-if="m.role !== 'admin' && canSelectRole(m, 'admin')"
                             type="button"
                             role="menuitem"
-                            :disabled="!canSelectRole(m, 'admin') || roleChangingUid === m.uid"
+                            :disabled="roleChangingUid === m.uid"
                             @click="pickMemberRole(m, 'admin')"
                           >
                             設為後台管理員
                           </button>
                           <button
-                            v-if="m.role !== 'reception'"
+                            v-if="m.role !== 'reception' && canSelectRole(m, 'reception')"
                             type="button"
                             role="menuitem"
-                            :disabled="!canSelectRole(m, 'reception') || roleChangingUid === m.uid"
+                            :disabled="roleChangingUid === m.uid"
                             @click="pickMemberRole(m, 'reception')"
                           >
                             設為現場接待
                           </button>
+                          <template v-if="!memberHasRoleChangeOptions(m) && swapCandidates(m).length">
+                            <p class="member-menu-label">與以下用戶交換角色</p>
+                            <button
+                              v-for="p in swapCandidates(m)"
+                              :key="p.uid"
+                              type="button"
+                              role="menuitem"
+                              :disabled="roleChangingUid === m.uid"
+                              @click="swapRolesFromMenu(m, p)"
+                            >
+                              與 {{ partnerLabel(p) }} 交換
+                            </button>
+                          </template>
                         </template>
                         <button
                           v-if="canRemoveMember(m)"
@@ -273,14 +286,40 @@
             <div class="quota-summary">
               <p class="quota-title">帳戶配額</p>
               <ul class="quota-list">
-                <li>Owner：<strong>{{ quota.counts.owner }}/{{ quota.limits.owner }}</strong></li>
-                <li>後台管理員：<strong>{{ quota.counts.admin }}/{{ quota.limits.admin }}</strong></li>
-                <li>現場接待：<strong>{{ quota.counts.reception }}/{{ quota.limits.reception }}</strong></li>
-                <li>合計：<strong>{{ quota.counts.total }}/{{ quota.limits.total }}</strong></li>
+                <li>
+                  Owner：
+                  <strong :class="{ 'quota-over': quota.counts.owner > quota.limits.owner }">
+                    {{ quota.counts.owner }}/{{ quota.limits.owner }}
+                  </strong>
+                </li>
+                <li>
+                  後台管理員：
+                  <strong :class="{ 'quota-over': quota.counts.admin > quota.limits.admin }">
+                    {{ quota.counts.admin }}/{{ quota.limits.admin }}
+                  </strong>
+                </li>
+                <li>
+                  現場接待：
+                  <strong :class="{ 'quota-over': quota.counts.reception > quota.limits.reception }">
+                    {{ quota.counts.reception }}/{{ quota.limits.reception }}
+                  </strong>
+                </li>
+                <li>
+                  合計：
+                  <strong :class="{ 'quota-over': quota.counts.total > quota.limits.total }">
+                    {{ quota.counts.total }}/{{ quota.limits.total }}
+                  </strong>
+                </li>
               </ul>
+              <p
+                v-if="!isPlatformAdmin && quota.counts.admin > quota.limits.admin"
+                class="quota-hint warn"
+              >
+                後台管理員已超出上限，請移除多餘用戶或調整角色後再新增。
+              </p>
             </div>
 
-            <form class="add-user-form" @submit.prevent="submitAddUser">
+            <form v-if="isPlatformAdmin || hasAddableRole" class="add-user-form" @submit.prevent="submitAddUser">
               <h4 class="section-title">➕ 新增用戶</h4>
               <div class="field">
                 <label for="new-user-email">Email</label>
@@ -322,31 +361,22 @@
                   v-model="newUserRole"
                   class="w-full border border-gray-300 rounded-lg p-2 text-sm"
                 >
-                  <option
-                    value="admin"
-                    :disabled="!isPlatformAdmin && (quota.remaining.admin <= 0 || quota.remaining.total <= 0)"
-                  >
+                  <option v-if="canAddRole('admin')" value="admin">
                     後台管理員 — 可進入後台管理賓客、排位、CSV（剩餘 {{ quota.remaining.admin }} 個）
                   </option>
-                  <option
-                    value="reception"
-                    :disabled="!isPlatformAdmin && (quota.remaining.reception <= 0 || quota.remaining.total <= 0)"
-                  >
+                  <option v-if="canAddRole('reception')" value="reception">
                     現場接待 — 點名、取消賓客、現場加座，不能進入後台（剩餘 {{ quota.remaining.reception }} 個）
                   </option>
                 </select>
-                <p v-if="!isPlatformAdmin && quota.remaining.total <= 0" class="quota-hint warn">
-                  已達專案帳戶上限（{{ quota.limits.total }} 個），請先移除用戶再新增。
-                </p>
-                <p v-else-if="!isPlatformAdmin && selectedRoleFull" class="quota-hint warn">
-                  所選角色名額已滿，請選擇其他角色或先移除用戶。
-                </p>
               </div>
               <p v-if="addUserMsg" :class="addUserMsgOk ? 'msg-ok' : 'msg-error'">{{ addUserMsg }}</p>
               <button type="submit" class="btn-primary" :disabled="addingUser || !canSubmitAddUser">
                 {{ addingUser ? '建立中…' : '建立用戶' }}
               </button>
             </form>
+            <p v-else class="quota-hint warn">
+              合計名額已滿，無法新增用戶；仍可用「編輯」調整或交換現有成員角色。
+            </p>
           </template>
         </div>
       </div>
@@ -373,7 +403,7 @@ import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
-import { getMemberQuota } from '@/lib/tenantMemberLimits';
+import { canAddMemberRole, canChangeMemberToRole, getMemberQuota, getSwapRoleCandidates, hasAddableMemberRole, hasRoleChangeOptions } from '@/lib/tenantMemberLimits';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -402,6 +432,7 @@ const {
   createMember,
   removeMember,
   updateMemberRole,
+  swapMemberRoles,
   updateMemberDisplayName,
   ensureSelfProfile,
   updateSelfDisplayName,
@@ -421,22 +452,35 @@ const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
 const quota = computed(() => getMemberQuota(members.value, ownerUid.value));
 
-const selectedRoleFull = computed(() => {
-  if (isPlatformAdmin.value) return false;
-  if (quota.value.remaining.total <= 0) return true;
-  if (newUserRole.value === 'admin') return quota.value.remaining.admin <= 0;
-  if (newUserRole.value === 'reception') return quota.value.remaining.reception <= 0;
-  return false;
-});
+const hasAddableRole = computed(() => hasAddableMemberRole(
+  members.value,
+  ownerUid.value,
+  { bypassLimits: isPlatformAdmin.value },
+));
 
-const canSubmitAddUser = computed(() => isPlatformAdmin.value || !selectedRoleFull.value);
+function canAddRole(role) {
+  return canAddMemberRole(
+    members.value,
+    ownerUid.value,
+    role,
+    { bypassLimits: isPlatformAdmin.value },
+  );
+}
+
+const canSubmitAddUser = computed(() => canAddRole(newUserRole.value));
 
 watch(
-  () => [quota.value.remaining.admin, quota.value.remaining.reception, quota.value.remaining.total],
+  () => [
+    quota.value.remaining.admin,
+    quota.value.remaining.reception,
+    quota.value.remaining.total,
+    members.value.length,
+  ],
   () => {
-    if (selectedRoleFull.value) {
-      if (quota.value.remaining.admin > 0) newUserRole.value = 'admin';
-      else if (quota.value.remaining.reception > 0) newUserRole.value = 'reception';
+    if (isPlatformAdmin.value) return;
+    if (!canAddRole(newUserRole.value)) {
+      if (canAddRole('admin')) newUserRole.value = 'admin';
+      else if (canAddRole('reception')) newUserRole.value = 'reception';
     }
   },
 );
@@ -490,20 +534,46 @@ function memberRoleLabel(role) {
 }
 
 function canSelectRole(member, targetRole) {
-  if (member.role === targetRole) return true;
-  if (isPlatformAdmin.value) return true;
+  return canChangeMemberToRole(
+    members.value,
+    member.uid,
+    targetRole,
+    { bypassLimits: isPlatformAdmin.value },
+  );
+}
 
-  let admin = 0;
-  let reception = 0;
-  members.value.forEach((m) => {
-    if (m.role === 'owner' || m.uid === member.uid) return;
-    if (m.role === 'admin') admin += 1;
-    else if (m.role === 'reception') reception += 1;
-  });
+function memberHasRoleChangeOptions(member) {
+  return hasRoleChangeOptions(
+    members.value,
+    member.uid,
+    { bypassLimits: isPlatformAdmin.value },
+  );
+}
 
-  if (targetRole === 'admin') return admin < quota.value.limits.admin;
-  if (targetRole === 'reception') return reception < quota.value.limits.reception;
-  return false;
+function swapCandidates(member) {
+  return getSwapRoleCandidates(members.value, member.uid);
+}
+
+function partnerLabel(partner) {
+  const name = partner.displayName || partner.email || partner.uid;
+  return `${name}（${memberRoleLabel(partner.role)}）`;
+}
+
+async function swapRolesFromMenu(member, partner) {
+  closeMemberMenu();
+  roleChangingUid.value = member.uid;
+  addUserMsg.value = '';
+  try {
+    await swapMemberRoles(member.uid, partner.uid);
+    showUserToast(
+      `已將「${member.email || member.uid}」與「${partner.email || partner.uid}」交換角色`,
+    );
+  } catch (e) {
+    addUserMsgOk.value = false;
+    addUserMsg.value = e?.message || '交換角色失敗';
+  } finally {
+    roleChangingUid.value = '';
+  }
 }
 
 function canChangeMemberRole(member) {
@@ -708,9 +778,9 @@ async function submitAddUser() {
   }
   if (!canSubmitAddUser.value) {
     addUserMsgOk.value = false;
-    addUserMsg.value = selectedRoleFull.value && quota.value.remaining.total <= 0
-      ? `已達專案帳戶上限（最多 ${quota.value.limits.total} 個）`
-      : '所選角色名額已滿';
+    addUserMsg.value = !hasAddableRole.value
+      ? '所有可新增角色名額已滿，請先移除或調整現有用戶'
+      : '所選角色名額已滿，請選擇其他角色';
     return;
   }
   addingUser.value = true;
@@ -1056,6 +1126,16 @@ async function confirmRemove(member) {
 .member-actions-menu .danger:hover:not(:disabled) {
   background: #fef2f2;
 }
+.member-menu-label {
+  margin: 0;
+  padding: 0.35rem 0.65rem 0.15rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-top: 1px solid #f1f5f9;
+}
 .member-edit-panel {
   margin: 0 0 1rem;
   padding: 0.65rem 0.75rem;
@@ -1081,7 +1161,7 @@ async function confirmRemove(member) {
   flex-wrap: wrap;
 }
 .member-edit-input {
-  width: 9rem;
+  width: 10rem;
   max-width: 100%;
   border: 1px solid #d1d5db;
   border-radius: 0.375rem;
@@ -1124,6 +1204,9 @@ async function confirmRemove(member) {
 }
 .quota-list strong {
   color: #0f172a;
+}
+.quota-over {
+  color: #dc2626;
 }
 .quota-hint {
   margin: 0.35rem 0 0;

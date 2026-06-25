@@ -368,6 +368,48 @@ ${APP_LAYER}
     }
     return n;
   };
+  var countMemberSlotsForTenant = function(tenantKey, excludeUid) {
+    var tid = String(tenantKey || "").trim();
+    var ex = String(excludeUid || "").trim();
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tid });
+    var owner = 0, admin = 0, reception = 0;
+    for (var ci = 0; ci < rows.length; ci += 1) {
+      var rowUid = recordStr(rows[ci], "user_id");
+      if (ex && rowUid === ex) continue;
+      var r = normalizeMemberRole(recordStr(rows[ci], "role"));
+      if (r === "owner") owner += 1;
+      else if (r === "admin") admin += 1;
+      else if (r === "reception") reception += 1;
+    }
+    return { owner: owner, admin: admin, reception: reception, total: owner + admin + reception };
+  };
+  var assertMemberQuota = function(tenantKey, role, excludeUid, bypass) {
+    if (bypass) return;
+    var limits = { admin: 3, reception: 6, total: 10 };
+    var c = countMemberSlotsForTenant(tenantKey, excludeUid);
+    if (c.total >= limits.total) throw new BadRequestError("已達專案帳戶上限（最多 10 個）");
+    if (role === "admin" && c.admin >= limits.admin) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (role === "reception" && c.reception >= limits.reception) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
+  var assertMemberQuotaForRoleChange = function(tenantKey, fromRole, toRole, bypass) {
+    if (bypass || fromRole === toRole) return;
+    var rows = queryRecords("tenant_members", "tenant_id = {:tid}", 200, { tid: tenantKey });
+    var owner = 0, admin = 0, reception = 0;
+    for (var pi = 0; pi < rows.length; pi += 1) {
+      var pr = normalizeMemberRole(recordStr(rows[pi], "role"));
+      if (pr === "owner") owner += 1;
+      else if (pr === "admin") admin += 1;
+      else if (pr === "reception") reception += 1;
+    }
+    if (fromRole === "admin") admin -= 1;
+    else if (fromRole === "reception") reception -= 1;
+    else if (fromRole === "owner") owner -= 1;
+    if (toRole === "admin") admin += 1;
+    else if (toRole === "reception") reception += 1;
+    else if (toRole === "owner") owner += 1;
+    if (admin > 3) throw new BadRequestError("後台管理員已滿（最多 3 個）");
+    if (reception > 6) throw new BadRequestError("現場接待已滿（最多 6 個）");
+  };
   var shouldDeleteAuth = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return false;
@@ -495,17 +537,49 @@ const ROUTES = [
   var tidEsc = escFilter(tenantId);
   var uidEsc = escFilter(targetUid);
   var existingMember = queryRecords("tenant_members", "tenant_id = {:tid} && user_id = {:uid}", 1, { tid: tenantId, uid: targetUid })[0] || null;
+  var bypassQuota = isPlatformAdmin(caller);
   if (existingMember) {
+    var prevRole = normalizeMemberRole(recordStr(existingMember, "role"));
+    if (prevRole !== role) assertMemberQuotaForRoleChange(tenantId, prevRole, role, bypassQuota);
     setMemberFields(existingMember, tenantId, tenant, targetUid, role);
     try { twsSave(existingMember); } catch (errUpd) { throw new BadRequestError("更新成員失敗"); }
     return e.json(200, { tenantId: tenantId, uid: targetUid, created: false });
   }
+  assertMemberQuota(tenantId, role, "", bypassQuota);
   var membersCol = findCollection("tenant_members");
   var memberRec = new Record(membersCol);
   memberRec.set("created_at", Date.now());
   setMemberFields(memberRec, tenantId, tenant, targetUid, role);
   try { twsSave(memberRec); } catch (errIns) { throw new BadRequestError("新增成員失敗"); }
   return e.json(200, { tenantId: tenantId, uid: targetUid, created: true });
+`,
+  },
+  {
+    path: '/tws/swap-member-roles',
+    body: `
+  var tenantId = String(data.tenantId || "").trim();
+  var uidA = String(data.uidA || "").trim();
+  var uidB = String(data.uidB || "").trim();
+  if (!tenantId || !uidA || !uidB) throw new BadRequestError("缺少 tenantId 或 uid");
+  if (uidA === uidB) throw new BadRequestError("無效的用戶");
+  assertOwnerOrPlatformAdmin(caller, tenantId);
+  var tenant = loadTenantByKey(tenantId);
+  if (!tenant) throw new NotFoundError("找不到專案");
+  var rowA = getMemberRow(tenantId, uidA);
+  var rowB = getMemberRow(tenantId, uidB);
+  if (!rowA || !rowB) throw new NotFoundError("找不到成員");
+  var roleA = normalizeMemberRole(recordStr(rowA, "role"));
+  var roleB = normalizeMemberRole(recordStr(rowB, "role"));
+  if (roleA === "owner" || roleB === "owner") throw new BadRequestError("不能變更 Owner 角色");
+  if (roleA === roleB) throw new BadRequestError("兩位用戶角色相同，無需交換");
+  if (!((roleA === "admin" && roleB === "reception") || (roleA === "reception" && roleB === "admin"))) {
+    throw new BadRequestError("只可在後台管理員與現場接待之間交換");
+  }
+  setMemberFields(rowA, tenantId, tenant, uidA, roleB);
+  setMemberFields(rowB, tenantId, tenant, uidB, roleA);
+  try { twsSave(rowA); } catch (errSwapA) { throw new BadRequestError("交換角色失敗"); }
+  try { twsSave(rowB); } catch (errSwapB) { throw new BadRequestError("交換角色失敗"); }
+  return e.json(200, { tenantId: tenantId, uidA: uidA, uidB: uidB, roleA: roleB, roleB: roleA });
 `,
   },
   {
@@ -598,7 +672,7 @@ output += `var twsUserAuthMiddleware = (function() {
 `;
 
 output += `routerAdd("GET", "/tws/health", function(e) {
-  return e.json(200, { ok: true, service: "tws", version: 31, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
+  return e.json(200, { ok: true, service: "tws", version: 34, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
 });
 
 routerAdd("GET", "/tws/debug-auth", function(e) {

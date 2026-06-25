@@ -106,6 +106,10 @@ export async function callUpsertTenantMember({ tenantId, uid, role = 'admin' }) 
   return twsFetch('upsert-member', { tenantId, uid, role });
 }
 
+export async function callSwapTenantMemberRoles({ tenantId, uidA, uidB }) {
+  return twsFetch('swap-member-roles', { tenantId, uidA, uidB });
+}
+
 export async function callUpdateMemberProfile({ tenantId, uid, profile }) {
   return twsFetch('update-member-profile', {
     tenantId,
