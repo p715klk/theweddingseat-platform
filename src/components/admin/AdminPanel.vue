@@ -5,8 +5,8 @@
         <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0 flex-1 lg:flex-initial">
           <h1 class="text-xl font-bold text-red-700 shrink-0">📋 賓客名單管理後台</h1>
           <span v-if="coupleNames" class="text-sm font-bold text-gray-600 shrink-0">{{ coupleNames }}</span>
-          <span class="header-hint text-[11px] text-gray-500 font-normal leading-snug">
-            表頭「拖動」欄可切換鎖定；標籤欄支援多選(用＋加入標籤)；表頭欄位分界線可拖拉調整欄寬。修改後需儲存變更。
+          <span class="header-hint text-[11.3px] text-gray-700 font-normal leading-snug">
+            表單「🔒拖動」欄可切換鎖定；標籤欄支援多選(用＋加入標籤)；表頭欄位分界線可拖拉調整欄寬。修改後需儲存變更。
             <span v-if="dirty" class="text-amber-600 font-bold">（有未儲存改動）</span>
           </span>
         </div>
@@ -122,6 +122,37 @@
     </div>
 
     <div
+      v-if="dragUnlockDialogOpen"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+      @click.self="dragUnlockDialogOpen = false"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 border border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 mb-2">解鎖拖動排序？</h3>
+        <p class="text-xs text-gray-500 mb-3 leading-relaxed">按住 ☰ 可調整賓客順序。</p>
+        <p class="text-base font-bold text-red-600 leading-relaxed mb-3">
+          注意：若該桌未滿座，拖動時空位會造成向前移動。
+        </p>
+        <p class="text-xs text-gray-500 mb-4 leading-relaxed">儲存或離開頁面時會自動鎖定。</p>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold"
+            @click="dragUnlockDialogOpen = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shadow"
+            @click="confirmDragUnlock"
+          >
+            解鎖拖動
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="deleteTagOpen"
       class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
       @click.self="deleteTagOpen = false"
@@ -227,6 +258,7 @@ const navigatingTo = ref('');
 const deleteTagOpen = ref(false);
 const deleteTagSelected = ref('');
 const dragSortLocked = ref(true);
+const dragUnlockDialogOpen = ref(false);
 
 const checkInRoute = computed(() => `/p/${props.slug}`);
 const seatingRoute = computed(() => `/p/${props.slug}/seating`);
@@ -251,13 +283,11 @@ function toggleDragSortLock() {
     lockDragSort();
     return;
   }
-  const ok = window.confirm(
-    '解鎖拖動排序？\n\n'
-    + '按住 ☰ 可調整賓客順序。\n'
-    + '注意：若該桌未滿座，拖動時空位可能會向前移動。\n'
-    + '儲存或離開頁面時會自動鎖定。',
-  );
-  if (!ok) return;
+  dragUnlockDialogOpen.value = true;
+}
+
+function confirmDragUnlock() {
+  dragUnlockDialogOpen.value = false;
   dragSortLocked.value = false;
 }
 

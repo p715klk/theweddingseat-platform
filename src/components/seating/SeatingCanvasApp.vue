@@ -19,7 +19,7 @@
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
       <div class="flex items-center gap-3">
         <h1 class="text-base font-black tracking-wider text-slate-900 flex items-center gap-1.5">
-          <span class="text-xl">🦢</span> 可視化圓枱排位畫布
+          可視化圓枱排位畫布
         </h1>
         <div class="global-stats text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold">{{ globalStatsText }}</div>
       </div>
