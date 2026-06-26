@@ -22,6 +22,7 @@ let uiHooks = {
     onGuestModalChange: null,
     onCategoryPoolChange: null,
     onTableSettingsModalChange: null,
+    onNewTableModalChange: null,
     onGlobalStatsChange: null,
     onPrintPreviewChange: null,
     onCanvasTransformChange: null,
@@ -2571,14 +2572,46 @@ function handleDropTrash(e) {
     } catch (err) { console.error(err); }
 }
 
-function createNewTableAction() {
-    const newNum = prompt("請輸入全新圓枱桌號:");
-    if (!newNum || newNum.trim() === "") return;
-    const cleanNum = newNum.trim();
+function getNextSuggestedTableNum() {
+    const nums = getTableSettingKeys()
+        .map((n) => parseInt(n, 10))
+        .filter((n) => !Number.isNaN(n) && n >= 1);
+    if (!nums.length) return 1;
+    return Math.max(...nums) + 1;
+}
 
-    if (tableSettings[cleanNum]) { alert("❌ 此桌號已存在！"); return; }
-    const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
-    const cleanMax = parseInt(maxSeats) || 12;
+function createNewTableAction() {
+    uiHooks.onNewTableModalChange?.({
+        open: true,
+        tableNum: getNextSuggestedTableNum(),
+        maxSeats: 12,
+    });
+}
+
+function closeNewTableModal() {
+    uiHooks.onNewTableModalChange?.({ open: false });
+}
+
+function confirmCreateNewTableAction(payload) {
+    const newNumRaw = digitsOnly(String(payload?.tableNum ?? ''));
+    if (!newNumRaw) {
+        alert('❌ 請輸入桌號！');
+        return Promise.reject(new Error('empty table num'));
+    }
+    const tableNum = parseInt(newNumRaw, 10);
+    if (Number.isNaN(tableNum) || tableNum < 1 || tableNum > 99) {
+        alert('❌ 請輸入有效桌號（1–99 數字）！');
+        return Promise.reject(new Error('invalid table num'));
+    }
+    const cleanNum = String(tableNum);
+
+    if (tableSettings[cleanNum]) {
+        alert('❌ 此桌號已存在！');
+        return Promise.reject(new Error('duplicate table num'));
+    }
+
+    const maxRaw = digitsOnly(String(payload?.maxSeats ?? ''));
+    const cleanMax = Math.min(99, Math.max(1, parseInt(maxRaw, 10) || 12));
 
     const center = screenToCanvas(
         viewport.getBoundingClientRect().left + viewport.getBoundingClientRect().width / 2,
@@ -2593,8 +2626,11 @@ function createNewTableAction() {
     runRender();
     refreshFindTableMenu();
     suppressTableSettingsRemoteRenderCount = 1;
-    tenantRef(`table_settings/${cleanNum}`).set(newSettings)
+    return tenantRef(`table_settings/${cleanNum}`).set(newSettings)
         .then(() => syncFloorLayoutBestEffort())
+        .then(() => {
+            closeNewTableModal();
+        })
         .catch((err) => {
             suppressTableSettingsRemoteRenderCount = 0;
             delete tableSettings[cleanNum];
@@ -2602,7 +2638,12 @@ function createNewTableAction() {
             refreshFindTableMenu();
             console.error('新增圓枱失敗:', err);
             alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+            throw err;
         });
+}
+
+function digitsOnly(value) {
+    return String(value ?? '').replace(/\D/g, '');
 }
 
 function getMinAllowedMaxSeats(tableNum) {
@@ -2806,6 +2847,7 @@ function resetEngineState() {
         onGuestModalChange: null,
         onCategoryPoolChange: null,
         onTableSettingsModalChange: null,
+    onNewTableModalChange: null,
         onGlobalStatsChange: null,
         onPrintPreviewChange: null,
         onCanvasTransformChange: null,
@@ -2841,6 +2883,7 @@ export function initSeatingEngine({ tenantId, tenantRef: tenantRefProp, slug, ho
         onGuestModalChange: hooks.onGuestModalChange || null,
         onCategoryPoolChange: hooks.onCategoryPoolChange || null,
         onTableSettingsModalChange: hooks.onTableSettingsModalChange || null,
+        onNewTableModalChange: hooks.onNewTableModalChange || null,
         onGlobalStatsChange: hooks.onGlobalStatsChange || null,
         onPrintPreviewChange: hooks.onPrintPreviewChange || null,
         onCanvasTransformChange: hooks.onCanvasTransformChange || null,
@@ -2892,6 +2935,8 @@ export {
     refreshFindTableMenu,
     flyToTable,
     createNewTableAction,
+    closeNewTableModal,
+    confirmCreateNewTableAction,
     toggleTablePositionLock,
     printCanvasView,
     printGuestListView,

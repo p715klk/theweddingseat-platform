@@ -194,6 +194,15 @@
       @remove-category="onGuestRemoveCategory"
     />
 
+    <SeatingNewTableModal
+      :open="newTableModal.open"
+      :table-num="newTableModal.tableNum"
+      :max-seats="newTableModal.maxSeats"
+      :creating="newTableCreating"
+      @close="closeNewTableModal()"
+      @create="onNewTableCreate"
+    />
+
     <SeatingTableSettingsModal
       :open="tableSettingsModal.open"
       :original-table-num="tableSettingsModal.originalTableNum"
@@ -231,6 +240,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
 import { useSeatingViewportGestures } from '@/composables/useSeatingViewportGestures';
 import SeatingGuestEditModal from '@/components/seating/SeatingGuestEditModal.vue';
+import SeatingNewTableModal from '@/components/seating/SeatingNewTableModal.vue';
 import SeatingTableSettingsModal from '@/components/seating/SeatingTableSettingsModal.vue';
 import SeatingPrintPreview from '@/components/seating/SeatingPrintPreview.vue';
 import SeatingPoolSide from '@/components/seating/SeatingPoolSide.vue';
@@ -243,6 +253,8 @@ import {
   refreshFindTableMenu,
   flyToTable,
   createNewTableAction,
+  closeNewTableModal,
+  confirmCreateNewTableAction,
   toggleTablePositionLock,
   printCanvasView,
   printGuestListView,
@@ -297,6 +309,7 @@ const seatingCategories = ref([]);
 const guestModalSaving = ref(false);
 const tableSettingsSaving = ref(false);
 const tableSettingsDeleting = ref(false);
+const newTableCreating = ref(false);
 const guestModal = ref({
   open: false,
   name: '',
@@ -312,6 +325,11 @@ const tableSettingsModal = ref({
   label: '',
   maxSeats: 12,
   minMaxSeats: 1,
+});
+const newTableModal = ref({
+  open: false,
+  tableNum: '',
+  maxSeats: 12,
 });
 const printPreview = ref({
   open: false,
@@ -489,6 +507,17 @@ async function onGuestRemoveCategory(tag) {
   }
 }
 
+async function onNewTableCreate(payload) {
+  newTableCreating.value = true;
+  try {
+    await confirmCreateNewTableAction(payload);
+  } catch {
+    /* alert shown in engine */
+  } finally {
+    newTableCreating.value = false;
+  }
+}
+
 async function onTableSettingsSave(payload) {
   tableSettingsSaving.value = true;
   try {
@@ -558,6 +587,17 @@ function mountEngine() {
             label: state.label || '',
             maxSeats: state.maxSeats || 12,
             minMaxSeats: state.minMaxSeats || 1,
+          };
+        },
+        onNewTableModalChange(state) {
+          if (!state?.open) {
+            newTableModal.value = { ...newTableModal.value, open: false };
+            return;
+          }
+          newTableModal.value = {
+            open: true,
+            tableNum: String(state.tableNum ?? ''),
+            maxSeats: state.maxSeats || 12,
           };
         },
         onGlobalStatsChange(text) {
