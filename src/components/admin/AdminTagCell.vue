@@ -1,13 +1,20 @@
 <template>
-  <div class="row-multi-tags flex flex-wrap items-center gap-1" data-column-key="group">
+  <div
+    class="row-multi-tags flex flex-wrap items-center gap-1"
+    :class="{ 'row-multi-tags-disabled': disabled }"
+    data-column-key="group"
+  >
     <span
       v-for="tag in tags"
       :key="tag"
       class="tag-chip inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-bold"
-      :class="side === '女方' ? 'bg-rose-100 text-rose-800' : 'bg-blue-100 text-blue-800'"
+      :class="disabled
+        ? 'bg-gray-100 text-gray-400'
+        : (side === '女方' ? 'bg-rose-100 text-rose-800' : 'bg-blue-100 text-blue-800')"
     >
       {{ tag }}
       <button
+        v-if="!disabled"
         type="button"
         class="font-black leading-none"
         :class="side === '女方' ? 'text-rose-500 hover:text-rose-700' : 'text-blue-500 hover:text-blue-700'"
@@ -17,6 +24,7 @@
       </button>
     </span>
     <select
+      v-if="!disabled"
       :value="''"
       class="row-tag-add-select row-tag-add-select-group border rounded px-1 py-0.5 font-bold focus:bg-white shrink-0"
       :class="side === '女方' ? 'border-rose-200 bg-rose-50/20' : 'border-blue-200 bg-blue-50/20'"
@@ -38,6 +46,7 @@ const props = defineProps({
   tags: { type: Array, default: () => [] },
   categories: { type: Array, default: () => [] },
   side: { type: String, default: '男方' },
+  disabled: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:tags', 'add-category', 'request-delete-category']);
@@ -47,10 +56,12 @@ const availableCategories = computed(() =>
 );
 
 function removeTag(tag) {
+  if (props.disabled) return;
   emit('update:tags', normalizeTags(props.tags).filter((t) => t !== tag));
 }
 
 function onSelectChange(e) {
+  if (props.disabled) return;
   const val = e.target.value;
   e.target.value = '';
   if (!val) return;

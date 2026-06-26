@@ -6,7 +6,7 @@
           <h1 class="text-xl font-bold text-red-700 shrink-0">📋 賓客名單管理後台</h1>
           <span v-if="coupleNames" class="text-sm font-bold text-gray-600 shrink-0">{{ coupleNames }}</span>
           <span class="header-hint text-[11px] text-gray-500 font-normal leading-snug">
-            按住 ☰ 拖拉排序；標籤欄支援多選(用＋加入標籤)；表頭欄位分界線可拖拉調整欄寬。修改後需儲存變更。
+            表頭「拖動」欄可切換鎖定；標籤欄支援多選(用＋加入標籤)；表頭欄位分界線可拖拉調整欄寬。修改後需儲存變更。
             <span v-if="dirty" class="text-amber-600 font-bold">（有未儲存改動）</span>
           </span>
         </div>
@@ -77,9 +77,11 @@
           :categories="categories"
           :loading="loading"
           :load-error="loadError"
+          :drag-locked="dragSortLocked"
           :get-max-seats="getMaxSeats"
           @dirty="markDirty()"
           @reorder="(from, to) => reorderGuests(from, to)"
+          @toggle-drag-lock="toggleDragSortLock"
           @table-change="(g) => updateGuestTable(g)"
           @seat-change="(g, seat) => updateGuestSeat(g, seat)"
           @remove="(i) => removeGuest(i)"
@@ -224,6 +226,7 @@ const pendingLeave = ref(null);
 const navigatingTo = ref('');
 const deleteTagOpen = ref(false);
 const deleteTagSelected = ref('');
+const dragSortLocked = ref(true);
 
 const checkInRoute = computed(() => `/p/${props.slug}`);
 const seatingRoute = computed(() => `/p/${props.slug}/seating`);
@@ -238,6 +241,25 @@ const deleteTagHint = computed(() => {
 const canDeleteTag = computed(() =>
   deleteTagSelected.value && findGuestsUsingTag(guests.value, deleteTagSelected.value).length === 0,
 );
+
+function lockDragSort() {
+  dragSortLocked.value = true;
+}
+
+function toggleDragSortLock() {
+  if (!dragSortLocked.value) {
+    lockDragSort();
+    return;
+  }
+  const ok = window.confirm(
+    '解鎖拖動排序？\n\n'
+    + '按住 ☰ 可調整賓客順序。\n'
+    + '注意：若該桌未滿座，拖動時空位可能會向前移動。\n'
+    + '儲存或離開頁面時會自動鎖定。',
+  );
+  if (!ok) return;
+  dragSortLocked.value = false;
+}
 
 function openCsvPicker() {
   settingsDialogOpen.value = false;
@@ -283,19 +305,20 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  lockDragSort();
   stopSync();
 });
 
 async function handleSave() {
   try {
     await save();
+    lockDragSort();
   } catch (e) {
     window.alert(`❌ 儲存失敗: ${e.message}`);
   }
 }
 
 function handleAddGuest() {
-  guestTableRef.value?.tearDownSortable();
   addGuest();
   nextTick(() => {
     guestTableRef.value?.setupSortable({ scrollToBottom: true });
@@ -333,6 +356,7 @@ async function onCsvConfirm(plan) {
   try {
     await applyCSVImport(plan);
     csvDialogOpen.value = false;
+    lockDragSort();
   } catch (e) {
     window.alert(`❌ 匯入失敗: ${e.message}`);
   }
@@ -347,6 +371,7 @@ function confirmDeleteTag() {
 
 function requestLeave(path) {
   if (navigatingTo.value) return;
+  lockDragSort();
   if (!dirty.value) {
     void navigateTo(path);
     return;
@@ -358,6 +383,7 @@ function requestLeave(path) {
 async function leaveSaveAndGo() {
   try {
     await save();
+    lockDragSort();
     leaveDialog.value = false;
     if (pendingLeave.value) await navigateTo(pendingLeave.value);
   } catch (e) {
@@ -367,11 +393,13 @@ async function leaveSaveAndGo() {
 
 function leaveDiscard() {
   dirty.value = false;
+  lockDragSort();
   leaveDialog.value = false;
   if (pendingLeave.value) void navigateTo(pendingLeave.value);
 }
 
 onBeforeRouteLeave((to) => {
+  lockDragSort();
   if (!dirty.value) return true;
   pendingLeave.value = to.fullPath;
   leaveDialog.value = true;

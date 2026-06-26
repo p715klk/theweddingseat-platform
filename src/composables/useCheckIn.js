@@ -22,7 +22,7 @@ export const TABLE_RING_BASE =
   'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
 
 export function useCheckIn() {
-  const { tenantId } = useTenant();
+  const { tenantId, tenantDataRecordId } = useTenant();
   const weddingGuests = ref({});
   const guestStatus = ref({});
   const floorLayout = ref({ items: [], bounds: null });
@@ -51,12 +51,39 @@ export function useCheckIn() {
     if (bundle.recordId) dataRecordId = bundle.recordId;
   }
 
+  function patchGuestStatusField(statusKey, field, value) {
+    guestStatus.value = {
+      ...guestStatus.value,
+      [statusKey]: {
+        ...(guestStatus.value[statusKey] || {}),
+        [field]: value,
+      },
+    };
+  }
+
+  function patchWeddingGuestAtTable(tableNum, guest) {
+    const table = String(tableNum);
+    const next = { ...weddingGuests.value };
+    next[table] = [...(next[table] || []), guest];
+    weddingGuests.value = next;
+    refreshFloorLayout();
+  }
+
+  function revertWeddingGuestsForTable(tableNum, prevList) {
+    const table = String(tableNum);
+    const next = { ...weddingGuests.value };
+    if (prevList.length) next[table] = prevList;
+    else delete next[table];
+    weddingGuests.value = next;
+    refreshFloorLayout();
+  }
+
   function startSync() {
     stopSync();
     const tid = tenantId.value;
     if (!tid) return;
 
-    const recordId = dataRecordId;
+    const recordId = dataRecordId || tenantDataRecordId.value;
     if (recordId) {
       const unsub = subscribeTenantData(recordId, () => {
         refreshFromServer().catch((e) => console.error('CheckIn 即時同步失敗:', e));
@@ -112,7 +139,15 @@ export function useCheckIn() {
     const next = flow[current] || '未到';
     const tid = tenantId.value;
     if (!tid) return;
-    await setGuestStatusField(tid, `${table}_${name}`, 'arrived', next);
+    const statusKey = guestStatusKey(table, name);
+    const prev = guestStatus.value[statusKey]?.arrived;
+    patchGuestStatusField(statusKey, 'arrived', next);
+    try {
+      await setGuestStatusField(tid, statusKey, 'arrived', next);
+    } catch (e) {
+      patchGuestStatusField(statusKey, 'arrived', prev);
+      console.error('簽到狀態更新失敗:', e);
+    }
   }
 
   async function cycleGift(table, name, current) {
@@ -120,7 +155,15 @@ export function useCheckIn() {
     const next = stages[(stages.indexOf(current) + 1) % stages.length];
     const tid = tenantId.value;
     if (!tid) return;
-    await setGuestStatusField(tid, `${table}_${name}`, 'gift', next);
+    const statusKey = guestStatusKey(table, name);
+    const prev = guestStatus.value[statusKey]?.gift;
+    patchGuestStatusField(statusKey, 'gift', next);
+    try {
+      await setGuestStatusField(tid, statusKey, 'gift', next);
+    } catch (e) {
+      patchGuestStatusField(statusKey, 'gift', prev);
+      console.error('人情狀態更新失敗:', e);
+    }
   }
 
   function floorStyle(bounds) {
@@ -183,13 +226,22 @@ export function useCheckIn() {
     if (!trimmed) throw new Error('請輸入姓名');
     const tid = tenantId.value;
     if (!tid) throw new Error('專案未就緒');
+    const table = String(tableNum);
     const nextSeat = getNextSeatForTable(tableNum);
-    await addWeddingGuestAtTable(tid, tableNum, {
+    const guest = {
       name: trimmed,
       side: side === '女方' ? '女方' : '男方',
       group: serializeGroupForFirebase(group || '現場加座'),
       sort: Number(nextSeat),
-    });
+    };
+    const prevList = [...(weddingGuests.value[table] || [])];
+    patchWeddingGuestAtTable(tableNum, guest);
+    try {
+      await addWeddingGuestAtTable(tid, tableNum, guest);
+    } catch (e) {
+      revertWeddingGuestsForTable(tableNum, prevList);
+      throw e;
+    }
   }
 
   function sortedGuests(tableNum) {

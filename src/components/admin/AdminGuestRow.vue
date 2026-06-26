@@ -7,13 +7,13 @@
     <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">{{ index + 1 }}</td>
     <td
       class="py-2 px-1 text-center text-gray-400 text-base select-none row-drag-cell"
-      :class="guest.isCanceled ? '' : 'drag-handle cursor-row-resize'"
+      :class="dragCellClass"
+      :title="dragCellTitle"
     >
-      <span v-if="guest.isCanceled" class="text-gray-300 text-sm" title="已取消賓客不可拖動排序">🔒</span>
-      <template v-else>☰</template>
+      <template v-if="!guest.isCanceled">☰</template>
     </td>
     <td class="py-2 px-1 row-table-cell">
-      <div class="row-table-wrap">
+      <div class="row-table-wrap" :class="{ 'row-table-disabled': guest.isCanceled }">
         <input
           :value="guest.table === '' ? '' : guest.table"
           type="number"
@@ -21,9 +21,11 @@
           max="99"
           placeholder="—"
           class="row-table-input font-mono font-bold"
+          :disabled="guest.isCanceled"
+          :readonly="guest.isCanceled"
           @input="onTableInput"
         />
-        <div class="row-table-spin-btns">
+        <div v-if="!guest.isCanceled" class="row-table-spin-btns">
           <button type="button" tabindex="-1" class="row-table-spin-up" aria-label="增加" @click="stepTable(1)">▲</button>
           <button type="button" tabindex="-1" class="row-table-spin-down" aria-label="減少" @click="stepTable(-1)">▼</button>
         </div>
@@ -61,28 +63,31 @@
       </span>
     </td>
     <td class="py-2 px-2">
-      <div v-if="guest.isCanceled" class="flex flex-col gap-0.5">
+      <div class="flex flex-col gap-0.5">
         <input
           v-model="guest.name"
           type="text"
-          class="w-full border border-red-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input text-gray-500"
+          :placeholder="guest.isCanceled ? '' : '請輸入姓名'"
+          class="w-full border rounded p-1 font-bold row-name-input"
+          :class="guest.isCanceled ? 'row-field-disabled' : 'border-gray-200 bg-transparent focus:bg-white'"
+          :disabled="guest.isCanceled"
+          :readonly="guest.isCanceled"
           @input="emitDirty"
         />
-        <span class="row-cancel-badge text-[10px] font-bold text-red-600 leading-tight">❌ 已取消（簽到頁）</span>
+        <span
+          v-if="guest.isCanceled"
+          class="row-cancel-badge text-[10px] font-bold text-red-600 leading-tight"
+        >
+          ❌ 已取消（簽到頁）
+        </span>
       </div>
-      <input
-        v-else
-        v-model="guest.name"
-        type="text"
-        placeholder="請輸入姓名"
-        class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input"
-        @input="emitDirty"
-      />
     </td>
     <td class="py-2 px-1 row-side-cell">
       <select
         v-model="guest.side"
-        class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select"
+        class="w-full border rounded p-1 font-bold row-side-select"
+        :class="guest.isCanceled ? 'row-field-disabled' : 'border-gray-200 bg-transparent focus:bg-white'"
+        :disabled="guest.isCanceled"
         @change="emitDirty"
       >
         <option value="男方">男方</option>
@@ -94,6 +99,7 @@
         :tags="guest.group"
         :categories="categories"
         :side="guest.side"
+        :disabled="guest.isCanceled"
         @update:tags="onTagsUpdate"
         @add-category="(name) => emit('add-category', name)"
         @request-delete-category="emit('request-delete-category')"
@@ -118,11 +124,24 @@ import AdminTagCell from '@/components/admin/AdminTagCell.vue';
 const props = defineProps({
   guest: { type: Object, required: true },
   index: { type: Number, required: true },
+  dragEnabled: { type: Boolean, default: false },
   categories: { type: Array, default: () => [] },
   getMaxSeats: { type: Function, required: true },
 });
 
 const emit = defineEmits(['dirty', 'table-change', 'seat-change', 'remove', 'add-category', 'request-delete-category']);
+
+const dragCellClass = computed(() => {
+  if (props.guest.isCanceled) return 'text-gray-300';
+  if (props.dragEnabled) return 'drag-handle cursor-row-resize';
+  return 'drag-handle-locked cursor-not-allowed text-gray-300';
+});
+
+const dragCellTitle = computed(() => {
+  if (props.guest.isCanceled) return '';
+  if (props.dragEnabled) return '按住拖動調整順序';
+  return '拖動已鎖定，請先按表頭 🔒 解鎖';
+});
 
 const maxSeats = computed(() => {
   if (props.guest.table === '' || props.guest.table == null) return 99;
@@ -130,10 +149,12 @@ const maxSeats = computed(() => {
 });
 
 function emitDirty() {
+  if (props.guest.isCanceled) return;
   emit('dirty');
 }
 
 function onTableInput(e) {
+  if (props.guest.isCanceled) return;
   const raw = e.target.value.trim();
   props.guest.table = raw === '' ? '' : parseInt(raw, 10);
   if (raw !== '' && Number.isNaN(props.guest.table)) props.guest.table = '';
@@ -141,6 +162,7 @@ function onTableInput(e) {
 }
 
 function stepTable(delta) {
+  if (props.guest.isCanceled) return;
   const cur = parseInt(props.guest.table, 10);
   let v = Number.isNaN(cur) ? (delta > 0 ? 1 : 0) : cur + delta;
   if (v < 1) return;
@@ -149,10 +171,12 @@ function stepTable(delta) {
 }
 
 function onSeatInput(e) {
+  if (props.guest.isCanceled) return;
   emit('seat-change', props.guest, e.target.value);
 }
 
 function stepSeat(delta) {
+  if (props.guest.isCanceled) return;
   const min = 1;
   const max = maxSeats.value;
   let v = parseInt(props.guest.sort, 10);
@@ -163,6 +187,7 @@ function stepSeat(delta) {
 }
 
 function onTagsUpdate(tags) {
+  if (props.guest.isCanceled) return;
   props.guest.group = tags;
   emitDirty();
 }

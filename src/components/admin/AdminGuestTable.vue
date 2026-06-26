@@ -11,11 +11,27 @@
             順序
           </th>
           <th
-            class="py-2 px-2 text-center text-sm font-bold text-gray-500 border-b border-gray-200"
-            style="width:28px"
-            data-min-width="24"
+            class="py-2 px-1 text-center text-sm font-bold text-gray-500 border-b border-gray-200 row-drag-header"
+            style="width:36px"
+            data-min-width="36"
           >
-            拖動
+            <button
+              type="button"
+              class="drag-lock-toggle"
+              :class="{ 'is-unlocked': !dragLocked }"
+              :disabled="loading || !guests.length"
+              :title="dragLockTitle"
+              @click="emit('toggle-drag-lock')"
+            >
+              <img
+                :src="dragLocked ? lockIcon : unlockIcon"
+                class="drag-lock-img"
+                width="16"
+                height="16"
+                alt=""
+              />
+              <span class="drag-lock-label">拖動</span>
+            </button>
           </th>
           <th
             class="py-2 px-2 text-center text-sm font-bold text-gray-600 border-b border-gray-200"
@@ -83,6 +99,7 @@
             :key="guest._key"
             :guest="guest"
             :index="index"
+            :drag-enabled="!dragLocked"
             :categories="categories"
             :get-max-seats="getMaxSeats"
             @dirty="emit('dirty')"
@@ -99,10 +116,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
+import { ref, onUnmounted, watch, nextTick, computed } from 'vue';
 import Sortable from 'sortablejs';
 import AdminGuestRow from '@/components/admin/AdminGuestRow.vue';
 import { useAdminColumnResize } from '@/composables/useAdminColumnResize';
+import lockIcon from '@/assets/admin/lock.png';
+import unlockIcon from '@/assets/admin/unlock.png';
 
 const props = defineProps({
   guests: { type: Array, default: () => [] },
@@ -110,11 +129,13 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   loadError: { type: String, default: '' },
   getMaxSeats: { type: Function, required: true },
+  dragLocked: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
   'dirty',
   'reorder',
+  'toggle-drag-lock',
   'table-change',
   'seat-change',
   'remove',
@@ -127,6 +148,14 @@ const tbodyRef = ref(null);
 const theadRowRef = ref(null);
 const scrollContainer = ref(null);
 const tableReady = computed(() => !props.loading && !props.loadError);
+
+const dragLockTitle = computed(() => {
+  if (props.loading || !props.guests.length) return '載入名單後可切換拖動鎖定';
+  if (props.dragLocked) {
+    return '拖動已鎖定，按一下解鎖（未滿桌拖動可能令空位前移）';
+  }
+  return '拖動已解鎖，按一下鎖定';
+});
 
 useAdminColumnResize(theadRowRef, tableReady);
 
@@ -144,32 +173,42 @@ function scrollToEnd() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
-function setupSortable({ scrollToBottom = false } = {}) {
-  tearDownSortable();
-  if (!tbodyRef.value || props.loading || props.loadError || !props.guests.length) return;
+function syncSortable({ scrollToBottom = false } = {}) {
+  if (!tbodyRef.value || props.loading || props.loadError || !props.guests.length) {
+    tearDownSortable();
+    return;
+  }
 
-  sortable = Sortable.create(tbodyRef.value, {
-    handle: '.drag-handle',
-    filter: '.row-guest-canceled',
-    preventOnFilter: true,
-    animation: 150,
-    ghostClass: 'sortable-ghost',
-    onEnd(evt) {
-      if (evt.oldIndex == null || evt.newIndex == null) return;
-      emit('reorder', evt.oldIndex, evt.newIndex);
-    },
-  });
+  if (!sortable) {
+    sortable = Sortable.create(tbodyRef.value, {
+      handle: '.drag-handle',
+      filter: '.row-guest-canceled',
+      preventOnFilter: true,
+      animation: 150,
+      ghostClass: 'sortable-ghost',
+      disabled: props.dragLocked,
+      onEnd(evt) {
+        if (evt.oldIndex == null || evt.newIndex == null) return;
+        emit('reorder', evt.oldIndex, evt.newIndex);
+      },
+    });
+  } else {
+    sortable.option('disabled', props.dragLocked);
+  }
 
   if (scrollToBottom) {
     nextTick(scrollToEnd);
   }
 }
 
-onMounted(() => nextTick(() => setupSortable()));
+watch(
+  () => props.dragLocked,
+  () => nextTick(() => syncSortable()),
+);
 
 watch(
-  () => [props.loading, props.loadError],
-  () => nextTick(() => setupSortable()),
+  () => [props.loading, props.loadError, props.guests.length],
+  () => nextTick(() => syncSortable()),
 );
 
 onUnmounted(() => {
@@ -178,7 +217,7 @@ onUnmounted(() => {
 
 defineExpose({
   tearDownSortable,
-  setupSortable,
+  setupSortable: syncSortable,
   scrollToEnd,
 });
 </script>

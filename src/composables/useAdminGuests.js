@@ -194,11 +194,13 @@ export function useAdminGuests() {
   }
 
   function updateGuestTable(guest) {
+    if (guest.isCanceled) return;
     onGuestTableChange(guest, guests.value, tableSettings.value);
     markDirty();
   }
 
   function updateGuestSeat(guest, seat) {
+    if (guest.isCanceled) return;
     const n = parseInt(seat, 10);
     if (!Number.isNaN(n) && n >= 1) guest.sort = n;
     markDirty();

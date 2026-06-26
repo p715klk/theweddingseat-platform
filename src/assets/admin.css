@@ -19,6 +19,10 @@
 #excel-table thead th:last-child {
     border-right: 1px solid #e2e8f0;
 }
+#excel-table thead th.row-drag-header {
+    isolation: isolate;
+    z-index: 22;
+}
 #excel-table thead th:has(.col-resizer:hover),
 #excel-table thead th:has(.col-resizer.resizing) {
     z-index: 45;
@@ -76,6 +80,25 @@
     background: #fff;
     border-color: #d1d5db;
     box-shadow: 0 0 0 1px #e5e7eb;
+}
+.row-table-wrap.row-table-disabled {
+    background: #f3f4f6;
+    border-color: #e5e7eb;
+    cursor: not-allowed;
+}
+.row-table-wrap.row-table-disabled .row-table-input {
+    color: #9ca3af;
+    cursor: not-allowed;
+}
+.row-field-disabled,
+.row-field-disabled:disabled {
+    background: #f3f4f6 !important;
+    color: #9ca3af !important;
+    border-color: #e5e7eb !important;
+    cursor: not-allowed;
+}
+.row-multi-tags-disabled {
+    opacity: 0.75;
 }
 .row-table-input,
 .row-seat-input {
@@ -157,6 +180,63 @@
 
 .drag-handle:active {
     cursor: grabbing;
+}
+
+.drag-handle-locked {
+    cursor: not-allowed;
+}
+
+.drag-lock-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font: inherit;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    gap: 1px;
+}
+
+.drag-lock-toggle:disabled {
+    cursor: not-allowed;
+}
+
+.drag-lock-toggle:disabled .drag-lock-label {
+    opacity: 0.45;
+}
+
+.drag-lock-toggle:not(:disabled):hover {
+    color: #374151;
+}
+
+.drag-lock-toggle.is-unlocked:not(:disabled) {
+    color: #16a34a;
+}
+
+.drag-lock-toggle.is-unlocked:not(:disabled):hover {
+    color: #15803d;
+}
+
+.drag-lock-img {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    object-fit: contain;
+    display: block;
+}
+
+.drag-lock-label {
+    flex: 0 0 auto;
+    font-size: inherit;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 /* 新增賓客橫行時的閃爍高亮動畫 */

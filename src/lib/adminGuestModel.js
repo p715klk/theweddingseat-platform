@@ -180,6 +180,7 @@ export function getSmallestAvailableSeat(tableNum, guest, allGuests, tableSettin
 }
 
 export function onGuestTableChange(guest, allGuests, tableSettings) {
+  if (guest.isCanceled) return;
   const tableRaw = guest.table;
   const tableNum = parseInt(tableRaw, 10);
   if (tableRaw === '' || tableRaw == null || Number.isNaN(tableNum)) {
@@ -188,7 +189,6 @@ export function onGuestTableChange(guest, allGuests, tableSettings) {
     return;
   }
   guest.table = tableNum;
-  if (guest.isCanceled) return;
   guest.sort = getSmallestAvailableSeat(tableNum, guest, allGuests, tableSettings);
 }
 
