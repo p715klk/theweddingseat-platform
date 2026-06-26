@@ -148,7 +148,7 @@ async function pbDirectCheckMemberEmail({ email, tenantId = '' }) {
     }
     return {
       status: 'reuse',
-      message: '已有登入帳號，會加入本專案（密碼不變）',
+      message: '已有登入帳號，可加入本專案（密碼不變）',
       uid,
       projects: [],
     };
@@ -173,7 +173,7 @@ async function pbDirectCheckMemberEmail({ email, tenantId = '' }) {
   }
   return {
     status: 'reuse',
-    message: '已有登入帳號，會加入新 Project（密碼不變）',
+    message: '已有登入帳號，可加入新 Project（密碼不變）',
     uid,
     projects,
   };
