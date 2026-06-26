@@ -122,6 +122,23 @@
     </div>
 
     <div
+      v-if="unlockDragDialog"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+      @click.self="unlockDragDialog = false"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 mb-2">🔓 解鎖拖動排序？</h3>
+        <p class="text-sm text-gray-500 mb-2 leading-relaxed">按住 ☰ 可調整賓客順序。</p>
+        <p class="text-sm text-red-600 font-bold mb-2 leading-relaxed">注意：若該桌未滿座，拖動時空位可能會向前移動。</p>
+        <p class="text-sm text-gray-500 mb-4 leading-relaxed">儲存或離開頁面時會自動鎖定。</p>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold" @click="unlockDragDialog = false">取消</button>
+          <button type="button" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shadow" @click="confirmUnlockDrag">解鎖</button>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="deleteTagOpen"
       class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
       @click.self="deleteTagOpen = false"
@@ -227,6 +244,7 @@ const navigatingTo = ref('');
 const deleteTagOpen = ref(false);
 const deleteTagSelected = ref('');
 const dragSortLocked = ref(true);
+const unlockDragDialog = ref(false);
 
 const checkInRoute = computed(() => `/p/${props.slug}`);
 const seatingRoute = computed(() => `/p/${props.slug}/seating`);
@@ -251,14 +269,12 @@ function toggleDragSortLock() {
     lockDragSort();
     return;
   }
-  const ok = window.confirm(
-    '解鎖拖動排序？\n\n'
-    + '按住 ☰ 可調整賓客順序。\n'
-    + '注意：若該桌未滿座，拖動時空位可能會向前移動。\n'
-    + '儲存或離開頁面時會自動鎖定。',
-  );
-  if (!ok) return;
+  unlockDragDialog.value = true;
+}
+
+function confirmUnlockDrag() {
   dragSortLocked.value = false;
+  unlockDragDialog.value = false;
 }
 
 function openCsvPicker() {
