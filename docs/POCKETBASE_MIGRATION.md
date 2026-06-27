@@ -229,19 +229,24 @@ GitHub Pages 係 **HTTPS**，瀏覽器會 **封鎖** 對 `http://...` API 嘅請
 
 
 
-1. **俾 PocketBase 一個 HTTPS 網址**（揀其一）：
+1. **俾 PocketBase 一個 HTTPS 網址，且憑證必須受瀏覽器信任**（揀其一）：
 
-   - QNAP 反向代理 + Let's Encrypt 憑證
+   - QNAP 反向代理 + **受信任**憑證（Let's Encrypt / myQNAPcloud；**QNAP 自簽 cert 唔得**）
 
-   - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（免費，適合家用 NAS）
+   - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（**推薦**：免費、邊界用 Cloudflare 受信任 cert，NAS 可保持自簽／HTTP 8090）
 
-2. **PocketBase Admin → Settings → Application → Allowed origins** 加入：
+   > **自簽 cert 問題：** 你自己開 Admin 可以按「繼續」，但 `p715klk.github.io` 用 JavaScript `fetch` 連 API 時，瀏覽器會直接 `ERR_CERT_AUTHORITY_INVALID`，無法 bypass。
 
+2. **CORS（通常唔使改）**
+
+   PocketBase **預設允許所有 origin**（`*`），Admin UI **冇**「Allowed origins」欄位。  
+   只有啟動時加咗 `--origins=...` 先需要限制；若要允許 GitHub Pages，重啟時加：
+
+   ```bash
+   ./pocketbase serve --http=127.0.0.1:8090 --origins="https://p715klk.github.io"
    ```
 
-   https://p715klk.github.io
-
-   ```
+   （QNAP 反向代理 `8091 → 8090` 時，PocketBase 仍只需聽 localhost:8090。）
 
 3. **GitHub repo → Settings → Secrets → Actions** 設：
 
@@ -274,6 +279,19 @@ https://kin9310.myqnapcloud.com:443/pb  →  http://127.0.0.1:8090
 
 
 然後 `VITE_POCKETBASE_URL=https://kin9310.myqnapcloud.com/pb`（實際 path 視你 NAS 設定）。
+
+
+
+### Cloudflare Tunnel（QNAP 自簽 cert 時推薦）
+
+NAS 維持 `http://127.0.0.1:8090`，唔使改 QNAP 憑證；對外經 Tunnel 提供 **受信任 HTTPS**：
+
+1. 喺 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 開 Tunnel（或用 `cloudflared` CLI）
+2. Public hostname 指去 `http://localhost:8090`（例如 `pb.yourdomain.com`）
+3. GitHub Secret：`VITE_POCKETBASE_URL=https://pb.yourdomain.com`
+4. 重新 deploy GitHub Pages
+
+（亦可用 QNAP Container Station 跑 `cloudflare/cloudflared` image，長期開機。）
 
 
 
