@@ -97,7 +97,7 @@
             </span>
           </p>
           <div v-if="!ownerEmailReuse" class="field field-span-2">
-            <label>初始密碼 <span class="req">*</span></label>
+            <label>密碼 <span class="req">*</span></label>
             <div class="pw-row">
               <input
                 v-model="form.ownerPassword"
@@ -225,7 +225,7 @@ const submitBlockReason = computed(() => {
   if (ownerEmailBlocking.value) return ownerEmailHint.value || '此 Email 無法使用';
   if (!ownerEmailCanProceed.value) return '請輸入有效 Email 並等待檢查完成';
   if (!ownerEmailReuse.value && form.ownerPassword.trim().length < 6) {
-    return '請輸入至少 6 字元的初始密碼';
+    return '請輸入至少 6 字元的密碼';
   }
   return '';
 });

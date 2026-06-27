@@ -38,7 +38,7 @@
             <span v-if="row.createdByEmail">建立者：{{ row.createdByEmail }}</span>
           </div>
           <p v-if="row.initialPassword" class="pw-preview">
-            初始密碼（記錄）：
+            密碼（記錄）：
             <code>{{ row.pwVisible ? row.initialPassword : '********' }}</code>
             <button type="button" class="btn" @click="row.pwVisible = !row.pwVisible">
               {{ row.pwVisible ? '隱藏' : '顯示' }}
@@ -57,7 +57,7 @@
         <ul class="created-list">
           <li>Email：<code>{{ createdInfo.email }}</code></li>
           <li>
-            初始密碼：<code>{{ createdInfo.password }}</code>
+            密碼：<code>{{ createdInfo.password }}</code>
             <button type="button" class="btn-copy" @click="copy(createdInfo.password)">複製</button>
           </li>
         </ul>
@@ -77,7 +77,7 @@
             />
           </div>
           <div class="field">
-            <label>初始密碼 <span class="req">*</span></label>
+            <label>密碼 <span class="req">*</span></label>
             <div class="pw-row">
               <input
                 v-model="form.password"

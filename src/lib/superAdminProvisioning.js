@@ -10,7 +10,7 @@ export function normalizePassword(input) {
 }
 
 export function assertPassword(pw) {
-  if (!pw || pw.length < 6) throw new Error('初始密碼至少需要 6 個字元');
+  if (!pw || pw.length < 6) throw new Error('密碼至少需要 6 個字元');
 }
 
 export async function assertPlatformAdmin(editor) {

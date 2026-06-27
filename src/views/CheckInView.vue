@@ -34,6 +34,14 @@
         <p class="text-xs opacity-90 mt-1">{{ venueLabel || '載入中...' }}</p>
       </div>
       <div class="flex-1 flex justify-end items-center gap-2">
+        <button
+          v-if="user"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          @click="settingsDialogOpen = true"
+        >
+          ⚙ 設定
+        </button>
         <router-link
           v-if="canAccessAdmin"
           :to="adminRoute"
@@ -301,6 +309,60 @@
     </div>
     </div>
 
+    <input
+      ref="csvInputRef"
+      type="file"
+      accept=".csv"
+      class="hidden"
+      @change="onCsvSelected"
+    />
+
+    <AdminSettingsDialog
+      :open="settingsDialogOpen"
+      :profile-only="settingsProfileOnly"
+      @close="settingsDialogOpen = false"
+      @password-changed="onPasswordChanged"
+      @import-csv="openCsvPicker"
+      @export-csv="onExportCsv"
+      @empty-guests="confirmEmpty"
+    />
+
+    <AdminCsvImportDialog
+      v-if="canAccessAdmin"
+      :open="csvDialogOpen"
+      :file-name="csvFileName"
+      :imported-guests="csvImportedGuests"
+      :preview-fn="previewCSVImport"
+      :applying="adminSaving"
+      @cancel="csvDialogOpen = false"
+      @confirm="onCsvConfirm"
+    />
+
+    <div
+      v-if="adminToast"
+      class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10001] bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-lg max-w-[90vw] text-center"
+      role="status"
+      aria-live="polite"
+    >
+      {{ adminToast }}
+    </div>
+
+    <div
+      v-if="passwordChangedNotice"
+      class="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100 text-center">
+        <p class="text-sm font-bold text-green-700 leading-relaxed mb-4">{{ passwordChangedNotice }}</p>
+        <button
+          type="button"
+          class="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold"
+          @click="passwordChangedNotice = ''"
+        >
+          確定
+        </button>
+      </div>
+    </div>
+
     <div
       v-if="showLoginModal"
       class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
@@ -324,6 +386,9 @@ import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
+import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
+import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
+import { useAdminGuests } from '@/composables/useAdminGuests';
 
 const route = useRoute();
 const loading = ref(true);
@@ -357,8 +422,27 @@ const {
   guestMatchesKeyword,
 } = useCheckIn();
 
+const {
+  guests: adminGuests,
+  saving: adminSaving,
+  toast: adminToast,
+  load: loadAdminGuests,
+  save: saveAdminGuests,
+  emptyAllGuests,
+  exportCSV,
+  parseCSVFile,
+  previewCSVImport,
+  applyCSVImport,
+} = useAdminGuests();
+
 const showAddGuestForm = ref(false);
 const showLoginModal = ref(false);
+const settingsDialogOpen = ref(false);
+const passwordChangedNotice = ref('');
+const csvInputRef = ref(null);
+const csvDialogOpen = ref(false);
+const csvFileName = ref('');
+const csvImportedGuests = ref([]);
 const walkInName = ref('');
 const walkInSide = ref('男方');
 const walkInGroup = ref('現場加座');
@@ -366,6 +450,7 @@ const walkInError = ref('');
 const addingGuest = ref(false);
 
 const adminRoute = computed(() => `/p/${route.params.slug}/admin`);
+const settingsProfileOnly = computed(() => !canAccessAdmin.value);
 
 const tableOccupancy = computed(() => {
   if (!selectedTable.value) return { occupied: 0, max: 12, remaining: 0 };
@@ -373,6 +458,15 @@ const tableOccupancy = computed(() => {
 });
 
 const showFloorScrollHint = ref(false);
+
+watch(settingsDialogOpen, async (open) => {
+  if (!open || !canAccessAdmin.value) return;
+  try {
+    await loadAdminGuests(true);
+  } catch {
+    /* errors surfaced when using data actions */
+  }
+});
 
 watch(
   () => floorLayout.value.items.length,
@@ -438,6 +532,7 @@ watch(
 watch(
   user,
   (u) => {
+    if (u) passwordChangedNotice.value = '';
     if (!requireLogin) return;
     if (!u) {
       authGatePassed = false;
@@ -454,6 +549,81 @@ function onLoggedIn() {
 
 function onLoginSuccess() {
   showLoginModal.value = false;
+}
+
+function onPasswordChanged() {
+  settingsDialogOpen.value = false;
+  passwordChangedNotice.value = '密碼已更新，請重新登入';
+}
+
+function openCsvPicker() {
+  settingsDialogOpen.value = false;
+  if (csvInputRef.value) {
+    csvInputRef.value.value = '';
+    csvInputRef.value.click();
+  }
+}
+
+function onExportCsv() {
+  settingsDialogOpen.value = false;
+  void (async () => {
+    try {
+      await loadAdminGuests(true);
+      if (!adminGuests.value.length) {
+        window.alert('目前沒有賓客可匯出');
+        return;
+      }
+      exportCSV();
+    } catch (e) {
+      window.alert(`❌ 匯出失敗: ${e.message}`);
+    }
+  })();
+}
+
+async function confirmEmpty() {
+  settingsDialogOpen.value = false;
+  try {
+    await loadAdminGuests(true);
+    if (!adminGuests.value.length) {
+      window.alert('目前沒有賓客可清空');
+      return;
+    }
+    const ok = window.confirm(
+      `確定要清空所有賓客嗎？\n\n將移除 ${adminGuests.value.length} 位賓客並立即同步到伺服器。`,
+    );
+    if (!ok) return;
+    emptyAllGuests();
+    await saveAdminGuests();
+  } catch (e) {
+    window.alert(`❌ 清空失敗: ${e.message}`);
+  }
+}
+
+async function onCsvSelected(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    await loadAdminGuests(true);
+    const parsed = await parseCSVFile(file);
+    if (parsed.error) {
+      window.alert(parsed.error);
+      return;
+    }
+    csvFileName.value = file.name;
+    csvImportedGuests.value = parsed.importedGuests;
+    csvDialogOpen.value = true;
+  } catch {
+    window.alert('❌ 讀取 CSV 檔案失敗，請重試。');
+  }
+}
+
+async function onCsvConfirm(plan) {
+  try {
+    await applyCSVImport(plan);
+    csvDialogOpen.value = false;
+  } catch (e) {
+    window.alert(`❌ 匯入失敗: ${e.message}`);
+  }
 }
 
 async function handleLogout() {
