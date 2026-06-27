@@ -96,7 +96,6 @@
 
           <div>
             <h4 class="section-title">更改密碼</h4>
-            <p class="hint">更改前需輸入目前密碼以確認身份。</p>
             <form class="pw-form" @submit.prevent="submitPassword">
               <div class="field">
                 <label for="admin-current-pw">目前密碼</label>
@@ -105,6 +104,7 @@
                   v-model="currentPassword"
                   type="password"
                   required
+                  placeholder="更改前需輸入目前密碼以確認身份"
                   autocomplete="current-password"
                   v-on="passwordInputHandlers"
                 />
