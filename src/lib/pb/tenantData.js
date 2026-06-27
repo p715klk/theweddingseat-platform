@@ -161,6 +161,18 @@ export async function getTenantDataBundle(tenantId) {
   return recordToDataBundle(record);
 }
 
+/** 只拉 table_settings（比成條 tenant_data 細好多） */
+export async function getTenantTableSettings(tenantId) {
+  const key = String(tenantId || '').trim();
+  if (!key) return {};
+  const pb = getPocketBase();
+  const list = await pb.collection('tenant_data').getList(1, 1, {
+    filter: `tenant_id = ${pbFilterString(key)}`,
+    fields: 'table_settings',
+  });
+  return list.items[0]?.table_settings ?? {};
+}
+
 export async function updateTenantData(tenantId, patch) {
   return withTenantDataWriteLock(tenantId, async () => {
     const record = await ensureTenantDataRecord(tenantId);

@@ -128,12 +128,12 @@
           <li>Owner Email：<code>{{ createdInfo.ownerEmail }}</code></li>
           <li v-if="createdInfo.ownerUid" class="muted-uid">（技術用）UID：<code>{{ createdInfo.ownerUid }}</code></li>
           <li v-if="createdInfo.ownerTempPassword">
-            臨時密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
+            密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
             <button type="button" class="btn-copy" @click="copy(createdInfo.ownerTempPassword)">複製</button>
           </li>
           <li v-if="createdInfo.reusedNote">{{ createdInfo.reusedNote }}</li>
         </ul>
-        <p class="field-hint">建議客戶首次登入後即刻喺「設定 → 我的帳號」更改密碼。</p>
+        <p class="field-hint">建議客戶首次登入後即刻係「設定 → 我的帳號」更改密碼。</p>
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>

@@ -150,6 +150,7 @@
             :owner-uid="ownerUid"
             :hint="tenantMembersHint"
             id-prefix="admin-settings-members"
+            @updated="onMembersUpdated"
           />
         </div>
       </div>
@@ -227,15 +228,36 @@ watch(
     editingName.value = false;
     try {
       await ensureSelfProfile();
-      await loadMembers();
-      const self = members.value.find((m) => m.isSelf);
-      displayName.value = self?.displayName || '';
-      originalDisplayName.value = displayName.value;
+      await syncProfileDisplayName();
     } catch {
       /* errors shown in UI */
     }
   },
 );
+
+watch(activeTab, async (tab) => {
+  if (tab !== 'profile' || !props.open) return;
+  try {
+    await syncProfileDisplayName();
+  } catch {
+    /* errors shown in UI */
+  }
+});
+
+async function syncProfileDisplayName(sourceMembers) {
+  if (!sourceMembers) {
+    await loadMembers();
+  }
+  const list = sourceMembers || members.value;
+  const self = list.find((m) => m.isSelf);
+  if (!self || editingName.value) return;
+  displayName.value = self.displayName || '';
+  originalDisplayName.value = displayName.value;
+}
+
+function onMembersUpdated(updatedMembers) {
+  syncProfileDisplayName(updatedMembers);
+}
 
 function passwordErrorMessage(e) {
   const code = e?.code || '';
