@@ -640,6 +640,7 @@ defineExpose({ members, loadMembers });
   color: #64748b;
   margin: 0;
   line-height: 1.5;
+  white-space: pre-line;
 }
 .viewer-hint {
   color: #1d4ed8;

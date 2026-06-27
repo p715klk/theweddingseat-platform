@@ -148,7 +148,7 @@
             v-if="tenantId"
             :tenant-id="tenantId"
             :owner-uid="ownerUid"
-            hint="管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。"
+            :hint="tenantMembersHint"
             id-prefix="admin-settings-members"
           />
         </div>
@@ -179,6 +179,10 @@ const tabs = [
   { id: 'profile', label: '我的帳號' },
   { id: 'users', label: '用戶管理' },
 ];
+
+const tenantMembersHint =
+  '管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。\n'
+  + '如需重設用戶密碼請WhatsApp聯絡系統管理員。';
 
 const activeTab = ref('data');
 
