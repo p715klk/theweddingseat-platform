@@ -1,4 +1,3 @@
-import { onBeforeUnmount } from 'vue';
 import { canStartCanvasPanFromTarget, getCanvasTransform, setCanvasTransform, zoomAtViewportClientPoint } from '@/seating/seatingEngine';
 
 export function useSeatingViewportGestures(viewportRef) {
@@ -155,10 +154,6 @@ export function useSeatingViewportGestures(viewportRef) {
       unsubs.splice(0).forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
     };
   }
-
-  onBeforeUnmount(() => {
-    unsubs.splice(0).forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
-  });
 
   return { attach };
 }
