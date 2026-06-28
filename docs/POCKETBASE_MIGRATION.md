@@ -221,7 +221,7 @@ tenant_members        → 邊個 user 屬於邊個 project、role（owner / admi
 
 GitHub Pages 係 **HTTPS**，瀏覽器會 **封鎖** 對 `http://...` API 嘅請求（mixed content）。  
 
-本機 `http://localhost` 可以連 HTTP NAS，但 **p715klk.github.io 唔得**。
+本機 `http://localhost` 可以連 HTTP NAS，但 **welcome.theweddingseat.com（GitHub Pages HTTPS）唔得**。
 
 
 
@@ -235,15 +235,15 @@ GitHub Pages 係 **HTTPS**，瀏覽器會 **封鎖** 對 `http://...` API 嘅請
 
    - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（**推薦**：免費、邊界用 Cloudflare 受信任 cert，NAS 可保持自簽／HTTP 8090）
 
-   > **自簽 cert 問題：** 你自己開 Admin 可以按「繼續」，但 `p715klk.github.io` 用 JavaScript `fetch` 連 API 時，瀏覽器會直接 `ERR_CERT_AUTHORITY_INVALID`，無法 bypass。
+   > **自簽 cert 問題：** 你自己開 Admin 可以按「繼續」，但 `welcome.theweddingseat.com` 用 JavaScript `fetch` 連 API 時，瀏覽器會直接 `ERR_CERT_AUTHORITY_INVALID`，無法 bypass。
 
 2. **CORS（通常唔使改）**
 
    PocketBase **預設允許所有 origin**（`*`），Admin UI **冇**「Allowed origins」欄位。  
-   只有啟動時加咗 `--origins=...` 先需要限制；若要允許 GitHub Pages，重啟時加：
+   只有啟動時加咗 `--origins=...` 先需要限制；若要允許 GitHub Pages 自訂域名，重啟時加：
 
    ```bash
-   ./pocketbase serve --http=127.0.0.1:8090 --origins="https://p715klk.github.io"
+   ./pocketbase serve --http=127.0.0.1:8090 --origins="https://welcome.theweddingseat.com"
    ```
 
    （QNAP 反向代理 `8091 → 8090` 時，PocketBase 仍只需聽 localhost:8090。）
