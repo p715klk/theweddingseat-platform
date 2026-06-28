@@ -9,7 +9,9 @@ import {
 import { setPostLogoutNotice } from '@/lib/logoutNotices';
 
 /**
- * 登入後驗證是否為本 project 成員；非成員（或後台 scope 下嘅 reception）會強制登出。
+ * 登入後驗證是否為本 project 成員。
+ * - checkin：非成員強制登出
+ * - admin：非成員強制登出；reception 保留登入，由 TenantAccessDenied 引導去點名頁
  * @param {'checkin' | 'admin'} scope
  */
 export function useTenantLoginGuard(scope = 'checkin') {
@@ -18,6 +20,12 @@ export function useTenantLoginGuard(scope = 'checkin') {
   const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
   const loginGuardReady = ref(true);
   let checkSerial = 0;
+
+  function shouldForceLogout(result) {
+    if (result.ok) return false;
+    if (scope === 'admin' && result.code === 'reception_only') return false;
+    return true;
+  }
 
   async function enforce() {
     if (!authReady.value || !platformAdminReady.value || !ready.value) return;
@@ -39,7 +47,7 @@ export function useTenantLoginGuard(scope = 'checkin') {
         scope,
       );
       if (serial !== checkSerial) return;
-      if (!result.ok) {
+      if (shouldForceLogout(result)) {
         setPostLogoutNotice(tenantLoginRejectionMessage(result.code));
         await logout();
       }

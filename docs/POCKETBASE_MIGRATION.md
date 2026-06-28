@@ -103,9 +103,9 @@ npm run setup:pocketbase
 | 頁面 | 允許角色 |
 |------|----------|
 | 點名 `/p/{slug}` | owner、admin、reception |
-| 後台／畫布 | owner、admin |
+| 後台／畫布 | owner、admin（reception 登入後見「返回點名頁」提示，唔會被登出） |
 
-非本 project 成員登入後會**自動登出**並提示。實作：`src/composables/useTenantLoginGuard.js`。
+非本 project 成員登入後會**自動登出**並提示。reception 誤入後台／畫布時保留登入，顯示 `TenantAccessDenied` 及返回點名按鈕。實作：`src/composables/useTenantLoginGuard.js`。
 
 **建帳號：** `createAuthUserViaRest` → `POST /tws/create-user`（見 `src/lib/twsApi.js`）。  
 
