@@ -2,6 +2,7 @@
   <form class="login-card" @submit.prevent="submit">
     <h2>登入</h2>
     <p class="hint">{{ hint }}</p>
+    <p v-if="postLogoutNotice" class="notice">{{ postLogoutNotice }}</p>
     <label>Email</label>
     <input v-model="email" type="email" required autocomplete="username" />
     <label>密碼</label>
@@ -24,12 +25,13 @@ import { ref, computed } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { mapPocketBaseLoginError } from '@/lib/pocketbaseErrors';
+import { consumePostLogoutNotice } from '@/lib/logoutNotices';
 
 const emit = defineEmits(['success']);
 defineProps({
   hint: {
     type: String,
-    default: '此頁面需要登入先可查看。',
+    default: '請使用 Owner 為此婚宴專案建立的帳號登入。',
   },
 });
 const { login, authError } = useAuth();
@@ -39,6 +41,7 @@ const email = ref('');
 const password = ref('');
 const error = ref('');
 const loading = ref(false);
+const postLogoutNotice = ref(consumePostLogoutNotice());
 
 const configError = computed(() => authError.value);
 
@@ -77,6 +80,16 @@ async function submit() {
   font-size: 0.75rem;
   color: #6b7280;
   margin: 0 0 1rem;
+}
+.notice {
+  font-size: 0.75rem;
+  margin: -0.25rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.5rem;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  font-weight: 700;
 }
 label {
   display: block;

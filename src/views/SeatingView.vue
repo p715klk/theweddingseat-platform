@@ -14,10 +14,11 @@
       ⏳ 驗證登入狀態...
     </div>
     <div
-      v-else-if="!user"
+      v-else-if="!user || !loginGuardReady"
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center p-4"
     >
-      <AdminLoginForm @success="onLoggedIn" />
+      <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
+      <AdminLoginForm v-else @success="onLoggedIn" />
     </div>
     <div
       v-else-if="!tenantAccessReady"
@@ -45,6 +46,7 @@ import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
+import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
@@ -55,6 +57,7 @@ const { slug, ready, error, initTenant } = useTenant();
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, tenantAccessReady } = useTenantAccess();
+const { loginGuardReady } = useTenantLoginGuard('admin');
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);

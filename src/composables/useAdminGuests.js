@@ -139,7 +139,7 @@ export function useAdminGuests() {
     const recordId = localDataRecordId || tenantDataRecordId.value;
     if (recordId) {
       unsubscribers.push(
-        subscribeTenantData(recordId, scheduleRealtimeRefresh),
+        subscribeTenantData(recordId, scheduleRealtimeRefresh, tid),
       );
       return;
     }

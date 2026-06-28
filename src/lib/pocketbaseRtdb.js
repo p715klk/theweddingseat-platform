@@ -778,15 +778,20 @@ function ensureTenantSubscription(tenantId) {
   findTenantByIdOrSlug(tenantId).then((tenant) => {
     if (!tenant) return;
 
-    pb.collection('tenants').subscribe(tenant.id, () => {
-      refreshMeta();
-    }).then((fn) => unsubs.push(fn)).catch(() => {});
+    pb.collection('tenants').subscribe('*', (e) => {
+      if (e.record?.id === tenant.id) refreshMeta();
+    }).then((fn) => unsubs.push(fn)).catch((err) => {
+      console.warn('tenants realtime subscribe 失敗:', tenantId, err);
+    });
 
     findTenantDataRecord(tenantId).then((dataRec) => {
       if (!dataRec) return;
-      pb.collection('tenant_data').subscribe(dataRec.id, () => {
-        refreshData();
-      }).then((fn) => unsubs.push(fn)).catch(() => {});
+      // 單筆 subscribe(recordId) 用 viewRule（null = 只限 superuser）；改用 * + filter
+      pb.collection('tenant_data').subscribe('*', (e) => {
+        if (e.record?.tenant_id === tenantId) refreshData();
+      }).then((fn) => unsubs.push(fn)).catch((err) => {
+        console.warn('tenant_data realtime subscribe 失敗:', tenantId, err);
+      });
     });
 
     pb.collection('tenant_members').subscribe('*', (e) => {

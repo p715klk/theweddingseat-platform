@@ -118,7 +118,7 @@ export function useCheckIn() {
 
     const recordId = tenantDataRecordId.value;
     if (recordId) {
-      const unsub = subscribeTenantData(recordId, scheduleTableSettingsPull);
+      const unsub = subscribeTenantData(recordId, scheduleTableSettingsPull, tid);
       unsubscribers.push(unsub);
     }
 

@@ -166,7 +166,7 @@ const tenantsPublicBySlug = 'slug != ""';
 
 const tenantsApiRules = {
   listRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantsPublicBySlug}`,
-  viewRule: null,
+  viewRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantsPublicBySlug}`,
   createRule: platformAdmin,
   updateRule: `${platformAdmin} || ${tenantMemberManager}`,
   deleteRule: platformAdmin,
@@ -194,7 +194,7 @@ const tenantDataPublicByTenant =
 
 const tenantDataApiRulesTight = {
   listRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantDataPublicByTenant}`,
-  viewRule: null,
+  viewRule: `${platformAdmin} || ${tenantMemberAny} || ${tenantDataPublicByTenant}`,
   createRule: platformAdmin,
   updateRule: `${platformAdmin} || ${tenantMemberAny}`,
   deleteRule: platformAdmin,

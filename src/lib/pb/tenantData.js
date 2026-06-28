@@ -285,16 +285,32 @@ export async function patchTenantDataField(tenantId, field, mutator) {
   return next;
 }
 
-export function subscribeTenantData(recordId, callback) {
-  if (!recordId) return () => {};
+/**
+ * PocketBase 單筆 subscribe(recordId) 用 viewRule；tenant_data viewRule 為空時只有 superuser 收得到事件。
+ * 改用 collection 級 subscribe('*')（走 listRule）再 filter，跨裝置 realtime 先會生效。
+ */
+export function subscribeTenantData(recordId, callback, tenantId = '') {
+  if (!recordId && !tenantId) return () => {};
   const pb = getPocketBase();
+  const rid = String(recordId || '').trim();
+  const tid = String(tenantId || '').trim();
   let unsub = () => {};
   pb.collection('tenant_data')
-    .subscribe(recordId, () => callback())
+    .subscribe('*', (e) => {
+      const rec = e?.record;
+      if (!rec) return;
+      if (rid && rec.id === rid) {
+        callback(e);
+        return;
+      }
+      if (tid && rec.tenant_id === tid) callback(e);
+    })
     .then((fn) => {
       unsub = fn;
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn('tenant_data realtime subscribe 失敗:', err);
+    });
   return () => {
     try {
       unsub();
@@ -311,5 +327,5 @@ export async function subscribeTenantDataByTenantId(tenantId, callback) {
     callback(recordToDataBundle(latest));
   };
   await refresh();
-  return subscribeTenantData(record.id, refresh);
+  return subscribeTenantData(record.id, refresh, tenantId);
 }

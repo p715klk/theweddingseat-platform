@@ -8,10 +8,11 @@
     </div>
     <TenantErrorView v-if="error" :message="error" />
     <div
-      v-else-if="requireLogin && authReady && !user"
+      v-else-if="requireLogin && authReady && (!user || !loginGuardReady)"
       class="min-h-screen flex items-center justify-center bg-gray-100 p-4"
     >
-      <FrontendLoginForm @success="onLoggedIn" />
+      <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
+      <FrontendLoginForm v-else @success="onLoggedIn" />
     </div>
     <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
       ⏳ 載入中...
@@ -382,7 +383,8 @@
       @click.self="showLoginModal = false"
     >
       <FrontendLoginForm
-        hint="登入後可使用點名、現場加座等功能（視乎帳號角色）。"
+        :key="loginFormKey"
+        hint="登入後可使用點名、現場加座等功能（須為本專案成員）。"
         @success="onLoginSuccess"
       />
     </div>
@@ -396,6 +398,7 @@ import { useTenant } from '@/composables/useTenant';
 import { useCheckIn } from '@/composables/useCheckIn';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
+import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
@@ -410,6 +413,7 @@ const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').t
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, canAddWalkInGuest } = useTenantAccess();
+const { loginGuardReady } = useTenantLoginGuard('checkin');
 const { error, features, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
 const {
   floorLayout,
@@ -461,6 +465,7 @@ const walkInSide = ref('男方');
 const walkInGroup = ref('現場加座');
 const walkInError = ref('');
 const addingGuest = ref(false);
+const loginFormKey = ref(0);
 
 const adminRoute = computed(() => `/p/${route.params.slug}/admin`);
 const settingsProfileOnly = computed(() => !canAccessAdmin.value);
@@ -498,10 +503,12 @@ watch(
 );
 
 const checkInLocked = computed(
-  () => !features.value.checkin || (authReady.value && !user.value),
+  () => !features.value.checkin || !authReady.value || !user.value || !loginGuardReady.value,
 );
 
-const interactionLocked = computed(() => authReady.value && !user.value);
+const interactionLocked = computed(
+  () => !authReady.value || !user.value || !loginGuardReady.value,
+);
 
 function onCycleArrived(table, name, current) {
   if (checkInLocked.value) return;
@@ -548,8 +555,11 @@ watch(
 
 watch(
   user,
-  (u) => {
+  (u, prevU) => {
     if (u) passwordChangedNotice.value = '';
+    if (prevU && !u && showLoginModal.value) {
+      loginFormKey.value += 1;
+    }
     if (!requireLogin) return;
     if (!u) {
       authGatePassed = false;
@@ -558,6 +568,12 @@ watch(
   },
 );
 
+watch([user, loginGuardReady], ([u, ready]) => {
+  if (showLoginModal.value && u && ready) {
+    showLoginModal.value = false;
+  }
+});
+
 onUnmounted(stopSync);
 
 function onLoggedIn() {
@@ -565,7 +581,7 @@ function onLoggedIn() {
 }
 
 function onLoginSuccess() {
-  showLoginModal.value = false;
+  /* 等 useTenantLoginGuard 通過後先關 modal */
 }
 
 function onPasswordChanged() {

@@ -199,8 +199,10 @@ const {
 } = useTenantUsers();
 const roleLabel = computed(() => {
   if (memberRole.value === 'platform_admin') return 'Super Admin';
+  if (memberRole.value === 'owner') return 'Owner';
+  if (memberRole.value === 'admin') return '後台管理員';
   if (memberRole.value === 'reception') return '現場接待';
-  return '後台管理員';
+  return '未授權（非本專案成員）';
 });
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 

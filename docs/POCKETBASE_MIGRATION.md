@@ -67,9 +67,45 @@ npm run setup:pocketbase
 
 | `tenant_members` | Super Admin、本人、該 project Owner | **全部 Super Admin only**（Owner 經 `upsert-member` / `remove-member` hook） |
 
-| `tenant_data` | Super Admin、該 project 成員（`&&` 失敗時 fallback 為任何登入者） | create/delete：Super Admin；update：Super Admin 或成員 |
+| `tenant_data` | Super Admin、該 project 成員、持 slug 連結者（`&&` 失敗時 fallback 為任何登入者） | create/delete：Super Admin；update：Super Admin 或成員 |
 
+### 即時同步（Realtime / `/p/{slug}` 點名）
 
+PocketBase realtime 規則：
+
+| 訂閱方式 | 檢查嘅 rule |
+|----------|-------------|
+| `subscribe('*')` | **listRule** |
+| `subscribe('RECORD_ID')` | **viewRule** |
+
+舊版 `setup:pocketbase` 將 `tenants` / `tenant_data` 嘅 **viewRule 留空**（等同只限 superuser 讀單筆）。  
+前端若用 `subscribe(recordId)`，一般成員同點名頁 **收唔到** 簽到／派枱更新，要手動 refresh。
+
+**已修正（前端 + setup 腳本）：**
+
+1. 前端改用 `subscribe('*')` 再按 `tenant_id` filter（見 `src/lib/pb/tenantData.js`、`src/lib/pocketbaseRtdb.js`）
+2. 新版 `setup:pocketbase` 將 `tenants.viewRule`、`tenant_data.viewRule` 設成同 listRule 一樣
+
+**若 NAS 上仍無即時更新**，請重新跑一次：
+
+```bash
+npm run setup:pocketbase
+```
+
+或喺 PocketBase Admin → Collections → `tenant_data` → **View rule** 填同 **List rule** 一樣嘅 expression。
+
+**驗證：** 開兩部機 `/p/{slug}`，一部簽到 → 另一部應幾秒內更新（SSE `/api/realtime`）。F12 → Network 應見到長連線 `realtime`；若完全冇，檢查 NAS 反向代理有冇擋 SSE。
+
+### 登入限制（專案成員）
+
+`/p/{slug}`、`/admin`、`/seating` 登入後會驗證 `tenant_members`（Super Admin 除外）：
+
+| 頁面 | 允許角色 |
+|------|----------|
+| 點名 `/p/{slug}` | owner、admin、reception |
+| 後台／畫布 | owner、admin |
+
+非本 project 成員登入後會**自動登出**並提示。實作：`src/composables/useTenantLoginGuard.js`。
 
 **建帳號：** `createAuthUserViaRest` → `POST /tws/create-user`（見 `src/lib/twsApi.js`）。  
 
