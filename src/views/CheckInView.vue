@@ -68,6 +68,18 @@
       </div>
     </header>
 
+    <div
+      class="relative"
+      :class="{ 'pointer-events-none opacity-95': interactionLocked }"
+      :aria-hidden="interactionLocked ? 'true' : undefined"
+    >
+    <p
+      v-if="interactionLocked"
+      class="mx-4 mt-2 text-center text-xs font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg py-2 px-3"
+    >
+      請先按右上角「登入」以操作點名
+    </p>
+
     <div class="max-w-xl mx-auto mt-2 px-4">
       <div class="relative">
         <input
@@ -165,9 +177,10 @@
         ↔↕ 枱位較多，可左右／上下滑動查看
       </p>
     </div>
+    </div>
 
     <div
-      v-if="selectedTable"
+      v-if="selectedTable && !interactionLocked"
       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
       @click.self="closeTableModal"
     >
@@ -484,7 +497,11 @@ watch(
   { immediate: true },
 );
 
-const checkInLocked = computed(() => !features.value.checkin);
+const checkInLocked = computed(
+  () => !features.value.checkin || (authReady.value && !user.value),
+);
+
+const interactionLocked = computed(() => authReady.value && !user.value);
 
 function onCycleArrived(table, name, current) {
   if (checkInLocked.value) return;
@@ -636,6 +653,7 @@ async function handleLogout() {
 }
 
 function openTable(num) {
+  if (interactionLocked.value) return;
   selectedTable.value = String(num);
   searchKeyword.value = '';
   resetWalkInForm();
