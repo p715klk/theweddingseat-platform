@@ -421,6 +421,7 @@ import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
 import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
 import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
 import { useAdminGuests } from '@/composables/useAdminGuests';
+import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 
 const route = useRoute();
 const loading = ref(true);
@@ -430,7 +431,7 @@ const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, canAddWalkInGuest } = useTenantAccess();
 const { loginGuardReady } = useTenantLoginGuard('checkin');
-const { error, features, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
+const { error, features, themeColor, coupleNames, venueLabel, initTenant, tenantId } = useTenant();
 const {
   floorLayout,
   selectedTable,
@@ -501,6 +502,14 @@ watch(settingsDialogOpen, async (open) => {
     /* errors surfaced when using data actions */
   }
 });
+
+watch(
+  tenantId,
+  (tid) => {
+    if (tid) setAuditPageContext({ tenantId: tid, page: AUDIT_PAGES.CHECKIN });
+  },
+  { immediate: true },
+);
 
 watch(
   () => floorLayout.value.items.length,

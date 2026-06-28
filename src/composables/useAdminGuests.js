@@ -24,7 +24,7 @@ import {
   buildCSVImportPlan,
   buildCSVImportSuccessMessage,
 } from '@/lib/adminCsv';
-import { writeAuditLog } from '@/lib/auditLog';
+import { writeAuditLog, AUDIT_PAGES } from '@/lib/auditLog';
 
 const DEFAULT_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
 
@@ -174,11 +174,30 @@ export function useAdminGuests() {
       group: [],
     }));
     markDirty();
+    const tid = tenantId.value;
+    if (tid) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '新增賓客列',
+        detail: '待填寫姓名（待儲存）',
+      });
+    }
   }
 
   function removeGuest(index) {
+    const removed = guests.value[index];
     guests.value.splice(index, 1);
     markDirty();
+    const tid = tenantId.value;
+    if (tid && removed?.name) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '移除賓客',
+        detail: `${removed.name}（待儲存）`,
+      });
+    }
   }
 
   function reorderGuests(fromIndex, toIndex) {
@@ -192,12 +211,30 @@ export function useAdminGuests() {
     if (moved.table !== '' && moved.table != null) affected.push(moved.table);
     reassignSeatsForTables(guests.value, affected, tableSettings.value);
     markDirty();
+    const tid = tenantId.value;
+    if (tid) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '調整賓客順序',
+        detail: moved?.name ? `${moved.name}（待儲存）` : '（待儲存）',
+      });
+    }
   }
 
   function updateGuestTable(guest) {
     if (guest.isCanceled) return;
     onGuestTableChange(guest, guests.value, tableSettings.value);
     markDirty();
+    const tid = tenantId.value;
+    if (tid && guest?.name) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '更改賓客枱號',
+        detail: `${guest.name} → ${guest.table || '未派枱'}（待儲存）`,
+      });
+    }
   }
 
   function updateGuestSeat(guest, seat) {
@@ -205,6 +242,15 @@ export function useAdminGuests() {
     const n = parseInt(seat, 10);
     if (!Number.isNaN(n) && n >= 1) guest.sort = n;
     markDirty();
+    const tid = tenantId.value;
+    if (tid && guest?.name) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '更改賓客座位',
+        detail: `${guest.name} → 座位 ${n}（待儲存）`,
+      });
+    }
   }
 
   function addCategory(name) {
@@ -212,6 +258,15 @@ export function useAdminGuests() {
     if (!trimmed || categories.value.includes(trimmed)) return false;
     categories.value.push(trimmed);
     markDirty();
+    const tid = tenantId.value;
+    if (tid) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '新增標籤',
+        detail: trimmed,
+      });
+    }
     return true;
   }
 
@@ -219,6 +274,15 @@ export function useAdminGuests() {
     if (findGuestsUsingTag(guests.value, tag).length > 0) return false;
     categories.value = categories.value.filter((c) => c !== tag);
     markDirty();
+    const tid = tenantId.value;
+    if (tid) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.GUESTLIST,
+        action: '刪除標籤',
+        detail: tag,
+      });
+    }
     return true;
   }
 
@@ -230,7 +294,7 @@ export function useAdminGuests() {
     if (tid && removed > 0) {
       void writeAuditLog({
         tenantId: tid,
-        page: '設定',
+        page: AUDIT_PAGES.SETTINGS,
         action: '清空賓客',
         detail: `移除 ${removed} 位（待儲存）`,
       });
@@ -244,7 +308,7 @@ export function useAdminGuests() {
     if (tid) {
       void writeAuditLog({
         tenantId: tid,
-        page: '設定',
+        page: AUDIT_PAGES.SETTINGS,
         action: '匯出 CSV',
         detail: `${guests.value.length} 位賓客`,
       });
@@ -310,7 +374,7 @@ export function useAdminGuests() {
       showToast(toastMessage, 2500);
       void writeAuditLog({
         tenantId: tid,
-        page: '賓客名單',
+        page: AUDIT_PAGES.GUESTLIST,
         action: auditAction,
         detail: auditDetail || `${guests.value.length} 位賓客`,
       });

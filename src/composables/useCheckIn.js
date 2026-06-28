@@ -18,6 +18,7 @@ import {
   FLOOR_CANVAS_SCALE,
   FLOOR_TABLE_PX,
 } from '@/lib/guestUtils';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
 
 export const TABLE_RING_BASE =
   'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
@@ -173,6 +174,12 @@ export function useCheckIn() {
     patchGuestStatusField(statusKey, 'arrived', next);
     try {
       await setGuestStatusField(tid, statusKey, 'arrived', next);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '更新簽到狀態',
+        detail: `${name}（${table}桌）${current || '未到'} → ${next}`,
+      });
     } catch (e) {
       patchGuestStatusField(statusKey, 'arrived', prev);
       console.error('簽到狀態更新失敗:', e);
@@ -189,6 +196,12 @@ export function useCheckIn() {
     patchGuestStatusField(statusKey, 'gift', next);
     try {
       await setGuestStatusField(tid, statusKey, 'gift', next);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '更新人情狀態',
+        detail: `${name}（${table}桌）${current || '未交'} → ${next}`,
+      });
     } catch (e) {
       patchGuestStatusField(statusKey, 'gift', prev);
       console.error('人情狀態更新失敗:', e);
@@ -267,6 +280,12 @@ export function useCheckIn() {
     patchWeddingGuestAtTable(tableNum, guest);
     try {
       await addWeddingGuestAtTable(tid, tableNum, guest);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '現場加座',
+        detail: `${trimmed}（${table}桌，${guest.side}，${guest.group}）`,
+      });
     } catch (e) {
       revertWeddingGuestsForTable(tableNum, prevList);
       throw e;

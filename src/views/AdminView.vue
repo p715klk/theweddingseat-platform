@@ -47,13 +47,14 @@ import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
+import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import AdminPanel from '@/components/admin/AdminPanel.vue';
 
 const route = useRoute();
-const { slug, ready, error, coupleNames, initTenant } = useTenant();
+const { slug, ready, error, coupleNames, initTenant, tenantId } = useTenant();
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, tenantAccessReady } = useTenantAccess();
@@ -71,6 +72,14 @@ async function bootAdmin() {
 }
 
 watch([platformAdminReady, () => route.params.slug], bootAdmin, { immediate: true });
+
+watch(
+  tenantId,
+  (tid) => {
+    if (tid) setAuditPageContext({ tenantId: tid, page: AUDIT_PAGES.GUESTLIST });
+  },
+  { immediate: true },
+);
 
 function onLoggedIn() {
   /* auth state updates automatically */

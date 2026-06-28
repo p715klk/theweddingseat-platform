@@ -2,6 +2,17 @@ import { createCompatTenantRef } from './compatTenantRef.js';
 import { tenantDataDbRef } from '@/lib/pb/dataRef';
 import { saveGuestSeatingState, updateTenantData } from '@/lib/pb/tenantData';
 import { mergeCategoriesFromGuests, serializeGroupForFirebase } from '@/lib/adminGuestModel';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
+
+function logSeatingAudit(action, detail = '') {
+    if (!activeTenantId) return;
+    void writeAuditLog({
+        tenantId: activeTenantId,
+        page: AUDIT_PAGES.SEATING,
+        action,
+        detail,
+    });
+}
 
 let tenantRefFn = null;
 let activeTenantId = '';
@@ -1832,6 +1843,10 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         ]
         : null;
 
+    const guestName = movingGuestObj?.name || '（未知）';
+    const fromLabel = fromTable === 'POOL' ? '待派池' : `${fromTable}桌`;
+    logSeatingAudit('移動賓客', `${guestName}：${fromLabel} → ${toTableNum}桌 座位${targetSortNum}`);
+
     commitGuestStateChange(Array.from(affected), { poolChanged, poolSides });
 }
 
@@ -1873,6 +1888,8 @@ function moveGuestToPool(data) {
     if (!unassignedPool.some(g => g?.id && movingGuestObj.id && String(g.id) === String(movingGuestObj.id))) {
         unassignedPool.push(movingGuestObj);
     }
+
+    logSeatingAudit('移回待派池', `${movingGuestObj.name}（${fromTable}桌）`);
 
     commitGuestStateChange([String(fromTable)], {
         poolChanged: true,
@@ -2379,7 +2396,10 @@ function finishTableDrag() {
         if (moved) {
             suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
-                .then(() => syncFloorLayoutBestEffort())
+                .then(() => {
+                    logSeatingAudit('移動枱位置', `${tableNum}桌 → (${Math.round(bx)}, ${Math.round(by)})`);
+                    return syncFloorLayoutBestEffort();
+                })
                 .catch(err => {
                     suppressTableSettingsRemoteRenderCount = 0;
                     console.error('枱位同步失敗:', err);
@@ -2498,6 +2518,7 @@ function saveGuestChangesAction(payload) {
         return persistMetaLabelColumns()
             .then(() => persistGuestState(getTableSettingKeys(), true))
             .then(() => {
+                logSeatingAudit('編輯賓客（待派池）', newName);
                 applyGuestMoveUI([], { poolChanged: true, poolSides: [newSide] });
                 closeGuestModal();
             })
@@ -2526,6 +2547,7 @@ function saveGuestChangesAction(payload) {
     return persistMetaLabelColumns()
         .then(() => persistGuestState([String(tableIdx)], false))
         .then(() => {
+            logSeatingAudit('編輯賓客', `${newName}（${tableIdx}桌）`);
             applyGuestMoveUI([String(tableIdx)], { poolChanged: false });
             closeGuestModal();
         })
@@ -2552,6 +2574,8 @@ function removeGuestFromSeatAction() {
         if (guestId && !unassignedPool.some(g => g?.id && String(g.id) === guestId)) {
             unassignedPool.push(guestObj);
         }
+
+        logSeatingAudit('移除座位賓客', `${guestObj?.name || '（未知）'}（${tableNum}桌）→ 待派池`);
 
         commitGuestStateChange([String(tableNum)], {
             poolChanged: true,
@@ -2660,6 +2684,7 @@ function confirmCreateNewTableAction(payload) {
     return tenantRef(`table_settings/${cleanNum}`).set(newSettings)
         .then(() => syncFloorLayoutBestEffort())
         .then(() => {
+            logSeatingAudit('新增枱', `${cleanNum}桌（${cleanMax} 位）`);
             closeNewTableModal();
         })
         .catch((err) => {
@@ -2749,6 +2774,7 @@ function saveTableSettingsAction(payload) {
             max_seats: newMax,
             label: newLabel,
         }).then(() => {
+            logSeatingAudit('更改枱設定', `${oldNum}桌：上限 ${newMax}，標籤「${newLabel || '—'}」`);
             notifyCanvasTablesChange([oldNum]);
             refreshFindTableMenu();
             scheduleFloorLayoutSync();
@@ -2779,6 +2805,7 @@ function saveTableSettingsAction(payload) {
     return tenantRef().update(updates).then(() => persistTableSettings())
         .then(() => forceFloorLayoutSync())
         .then(() => {
+            logSeatingAudit('更改枱號', `${oldNum}桌 → ${newNum}桌`);
             notifyCanvasTablesChange();
             refreshFindTableMenu();
             runRender();
@@ -2818,6 +2845,7 @@ function deleteTableAction() {
         .then(() => persistGuestState([tableNum], true))
         .then(() => forceFloorLayoutSync())
         .then(() => {
+            logSeatingAudit('刪除枱', `${tableNum}桌（${guestsInTable.filter(g => g?.name).length} 位移入待派池）`);
             runRender();
             closeSettingsModal();
         })
@@ -2839,6 +2867,7 @@ function addSeatingCategory(name) {
     categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
+            logSeatingAudit('新增標籤', trimmed);
             notifyCategoryPoolChange();
             return true;
         });
@@ -2855,6 +2884,7 @@ function removeSeatingCategory(tag) {
     categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
+            logSeatingAudit('刪除標籤', trimmed);
             notifyCategoryPoolChange();
             return true;
         });

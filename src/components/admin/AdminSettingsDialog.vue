@@ -171,6 +171,7 @@ import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { setPostLogoutNotice } from '@/lib/logoutNotices';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
 import TenantMembersPanel from '@/components/admin/TenantMembersPanel.vue';
 import AuditLogPanel from '@/components/admin/AuditLogPanel.vue';
 
@@ -324,6 +325,13 @@ async function submitPassword() {
   changingPw.value = true;
   try {
     await changePassword(currentPassword.value, newPassword.value);
+    if (tenantId.value) {
+      void writeAuditLog({
+        tenantId: tenantId.value,
+        page: AUDIT_PAGES.SETTINGS,
+        action: '更改密碼',
+      });
+    }
     currentPassword.value = '';
     newPassword.value = '';
     confirmPassword.value = '';

@@ -7,6 +7,7 @@ import {
   tenantLoginRejectionMessage,
 } from '@/lib/tenantLoginAccess';
 import { setPostLogoutNotice } from '@/lib/logoutNotices';
+import { getAuditPageContext, logLoginOnce } from '@/lib/auditLog';
 
 /**
  * 登入後驗證是否為本 project 成員。
@@ -47,7 +48,16 @@ export function useTenantLoginGuard(scope = 'checkin') {
         scope,
       );
       if (serial !== checkSerial) return;
-      if (shouldForceLogout(result)) {
+      if (result.ok) {
+        const { page } = getAuditPageContext();
+        if (page) {
+          logLoginOnce({
+            tenantId: tenantId.value,
+            uid: user.value.uid,
+            page,
+          });
+        }
+      } else if (shouldForceLogout(result)) {
         setPostLogoutNotice(tenantLoginRejectionMessage(result.code));
         await logout();
       }
