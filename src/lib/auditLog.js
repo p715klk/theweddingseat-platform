@@ -12,7 +12,6 @@ export const AUDIT_PAGES = {
 };
 
 let auditContext = { tenantId: '', page: '' };
-let lastLoginAuditKey = '';
 
 export function setAuditPageContext({ tenantId, page }) {
   auditContext = {
@@ -25,20 +24,11 @@ export function getAuditPageContext() {
   return { ...auditContext };
 }
 
-export function clearLoginAuditKey() {
-  lastLoginAuditKey = '';
-}
-
-/** 登入成功後記一次（同一 tenant + user + page 唔重複） */
-export function logLoginOnce({ tenantId, uid, page }) {
-  const tid = String(tenantId || '').trim();
-  const id = String(uid || '').trim();
-  const pageName = String(page || auditContext.page || '').trim();
-  if (!tid || !id || !pageName) return;
-  const key = `${tid}:${id}:${pageName}`;
-  if (lastLoginAuditKey === key) return;
-  lastLoginAuditKey = key;
-  void writeAuditLog({ tenantId: tid, page: pageName, action: '登入' });
+/** 真正提交帳密登入成功時記錄（F5 / session 還原唔會觸發） */
+export function logLogin() {
+  const { tenantId, page } = auditContext;
+  if (!tenantId || !page) return;
+  void writeAuditLog({ tenantId, page, action: '登入' });
 }
 
 /** 登出前記錄（用 setAuditPageContext 設定嘅 tenant / page） */
@@ -46,7 +36,6 @@ export function logLogout() {
   const { tenantId, page } = auditContext;
   if (!tenantId || !page) return;
   void writeAuditLog({ tenantId, page, action: '登出' });
-  clearLoginAuditKey();
 }
 
 export function formatAuditTime(ts) {
