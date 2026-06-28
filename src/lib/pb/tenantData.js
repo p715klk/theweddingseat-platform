@@ -1,5 +1,10 @@
 import getPocketBase from '@/lib/pocketbaseClient';
 import { pbFilterString } from '@/lib/pb/filter';
+import {
+  buildDefaultTableSettings,
+  buildFloorPlanFromTableSettings,
+  buildDefaultStarterGuestsPayload,
+} from '@/lib/guestUtils';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -56,13 +61,15 @@ function isDuplicateRecordError(err) {
 }
 
 function defaultTenantDataPayload(tenantId) {
+  const tableSettings = buildDefaultTableSettings();
+  const starters = buildDefaultStarterGuestsPayload();
   return {
     tenant_id: tenantId,
-    wedding_guests: {},
-    unassigned_guests: [],
-    guest_status: {},
-    table_settings: {},
-    floor_layout: {},
+    wedding_guests: starters.wedding_guests,
+    unassigned_guests: starters.unassigned_guests,
+    guest_status: starters.guest_status,
+    table_settings: tableSettings,
+    floor_layout: buildFloorPlanFromTableSettings(tableSettings),
     meta_label_columns: DEFAULT_LABEL_COLUMNS,
   };
 }

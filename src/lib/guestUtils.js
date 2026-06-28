@@ -100,6 +100,27 @@ export function buildDefaultTableSettings(tableCount = DEFAULT_INITIAL_TABLE_COU
   return arr;
 }
 
+function newDefaultGuestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** 新 Project 預設賓客（Bride/Groom 示範列，方便匯出 CSV 後批次修改） */
+export function buildDefaultStarterGuestsPayload() {
+  return {
+    wedding_guests: {
+      1: [
+        { id: newDefaultGuestId(), name: 'Groom', side: '男方', group: '家人', sort: 1 },
+        { id: newDefaultGuestId(), name: 'Bride', side: '女方', group: '家人', sort: 2 },
+      ],
+    },
+    unassigned_guests: [],
+    guest_status: {},
+  };
+}
+
 function layoutItemsBounds(items) {
   if (!items.length) {
     return { mode: 'coords', tableSize: TABLE_DIM, items: [], bounds: null };

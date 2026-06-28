@@ -59,6 +59,19 @@ function buildDefaultTableSettings(tableCount = 1) {
     }
     return arr;
 }
+function buildDefaultStarterGuestsPayload() {
+    const mkId = () => `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    return {
+        wedding_guests: {
+            "1": [
+                { id: mkId(), name: "Groom", side: "男方", group: "家人", sort: 1 },
+                { id: mkId(), name: "Bride", side: "女方", group: "家人", sort: 2 },
+            ],
+        },
+        unassigned_guests: [],
+        guest_status: {},
+    };
+}
 const TABLE_DIM = 420;
 const FLOOR_PLAN_PADDING = 20;
 function normalizeTableSettings(raw) {
@@ -297,12 +310,13 @@ export const createTenant = onCall({ region: "asia-southeast1" }, async (req) =>
     };
     const tableSettings = buildDefaultTableSettings(1);
     const floorLayout = buildFloorPlanFromTableSettings(tableSettings);
+    const starterGuests = buildDefaultStarterGuestsPayload();
     const updates = {
         [`slugs/${normalized}`]: tenantId,
         [`${tenantBase}/meta`]: meta,
-        [`${tenantBase}/wedding_guests`]: {},
-        [`${tenantBase}/unassigned_guests`]: [],
-        [`${tenantBase}/guest_status`]: {},
+        [`${tenantBase}/wedding_guests`]: starterGuests.wedding_guests,
+        [`${tenantBase}/unassigned_guests`]: starterGuests.unassigned_guests,
+        [`${tenantBase}/guest_status`]: starterGuests.guest_status,
         [`${tenantBase}/table_settings`]: tableSettings,
         [`${tenantBase}/floor_layout`]: floorLayout,
         [`${tenantBase}/meta_label_columns`]: DEFAULT_LABEL_COLUMNS,

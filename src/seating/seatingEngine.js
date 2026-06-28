@@ -1,7 +1,7 @@
 import { createCompatTenantRef } from './compatTenantRef.js';
 import { tenantDataDbRef } from '@/lib/pb/dataRef';
 import { saveGuestSeatingState, updateTenantData } from '@/lib/pb/tenantData';
-import { serializeGroupForFirebase } from '@/lib/adminGuestModel';
+import { mergeCategoriesFromGuests, serializeGroupForFirebase } from '@/lib/adminGuestModel';
 
 let tenantRefFn = null;
 let activeTenantId = '';
@@ -113,9 +113,9 @@ function persistTableSettings() {
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
-let categoriesByColumn = {
-    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
-};
+const DEFAULT_TAG_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
+let savedCategoryPool = [...DEFAULT_TAG_CATEGORIES];
+let categoriesByColumn = { [PRIMARY_TAG_KEY]: [...DEFAULT_TAG_CATEGORIES] };
 let legacyLabelKeys = null;
 
 function normalizeGuestTags(val) {
@@ -140,19 +140,31 @@ function getPrimaryGroup(guest) {
     return tags[0] || '未分類';
 }
 
+function refreshCategoryPool() {
+    const guests = collectAllGuestsInSeating();
+    const merged = mergeCategoriesFromGuests(savedCategoryPool, guests);
+    categoriesByColumn = { [PRIMARY_TAG_KEY]: merged };
+    notifyCategoryPoolChange();
+}
+
 function applyMetaLabelColumns(meta) {
-    if (meta && meta.keys && meta.names) {
-        const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
-        meta.keys.forEach(k => {
-            (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
+    if (meta?.categories?.group) {
+        savedCategoryPool = [...meta.categories.group];
+        legacyLabelKeys = meta.keys?.length > 1 ? meta.keys : null;
+    } else if (meta?.keys && meta?.names) {
+        const pool = [];
+        meta.keys.forEach((k) => {
+            (meta.categories?.[k] || []).forEach((c) => {
+                if (!pool.includes(c)) pool.push(c);
+            });
         });
-        categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+        if (pool.length) savedCategoryPool = pool;
         legacyLabelKeys = meta.keys.length > 1 ? meta.keys : null;
-    } else if (meta && meta.categories) {
-        categoriesByColumn = meta.categories;
+    } else if (meta?.categories) {
+        savedCategoryPool = [...(meta.categories[PRIMARY_TAG_KEY] || DEFAULT_TAG_CATEGORIES)];
         legacyLabelKeys = null;
     }
-    notifyCategoryPoolChange();
+    refreshCategoryPool();
 }
 
 function notifyCategoryPoolChange() {
@@ -203,7 +215,7 @@ function persistMetaLabelColumns() {
     const labelColumns = {
         keys: [PRIMARY_TAG_KEY],
         names: ['標籤 (可多選)'],
-        categories: categoriesByColumn,
+        categories: { [PRIMARY_TAG_KEY]: savedCategoryPool },
     };
     cachedMetaLabelColumns = labelColumns;
     if (!activeTenantId) return Promise.reject(new Error('專案未就緒'));
@@ -2137,6 +2149,7 @@ function startSeatingRealtimeSync() {
             return;
         }
         if (!shouldApplyRemoteGuestState()) return;
+        refreshCategoryPool();
         runRender();
     }, err => {
         console.error('wedding_guests 讀取失敗:', err);
@@ -2161,6 +2174,7 @@ function startSeatingRealtimeSync() {
             return;
         }
         if (!shouldApplyRemoteGuestState()) return;
+        refreshCategoryPool();
         runRender();
     }, err => console.error('unassigned_guests 讀取失敗:', err)));
 
@@ -2803,10 +2817,9 @@ function getSeatingGuestsUsingTag(tag) {
 function addSeatingCategory(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed) return Promise.resolve(false);
-    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
-    if (pool.includes(trimmed)) return Promise.resolve(false);
-    pool.push(trimmed);
-    categoriesByColumn[PRIMARY_TAG_KEY] = pool;
+    if (savedCategoryPool.includes(trimmed)) return Promise.resolve(false);
+    savedCategoryPool.push(trimmed);
+    categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
             notifyCategoryPoolChange();
@@ -2819,10 +2832,10 @@ function removeSeatingCategory(tag) {
     if (!trimmed || getGuestsUsingTagInSeating(trimmed).length > 0) {
         return Promise.resolve(false);
     }
-    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
-    const idx = pool.indexOf(trimmed);
+    const idx = savedCategoryPool.indexOf(trimmed);
     if (idx === -1) return Promise.resolve(false);
-    pool.splice(idx, 1);
+    savedCategoryPool.splice(idx, 1);
+    categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
             notifyCategoryPoolChange();
@@ -2835,6 +2848,8 @@ function resetEngineState() {
     seatingDataReady = { guests: false, pool: false, tables: false, meta: false };
     tableSettingsMigrated = false;
     cachedMetaLabelColumns = null;
+    savedCategoryPool = [...DEFAULT_TAG_CATEGORIES];
+    categoriesByColumn = { [PRIMARY_TAG_KEY]: [...DEFAULT_TAG_CATEGORIES] };
     allGuests = {};
     unassignedPool = [];
     tableSettings = {};

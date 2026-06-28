@@ -14,6 +14,11 @@ import {
   getUserProfilesByIds,
 } from '@/lib/tenantUserLifecycle';
 import { broadcastTableSettingsChange } from '@/lib/tableSettingsSync';
+import {
+  buildDefaultTableSettings,
+  buildFloorPlanFromTableSettings,
+  buildDefaultStarterGuestsPayload,
+} from '@/lib/guestUtils';
 
 const TENANT_DATA_KEYS = new Set([
   'wedding_guests',
@@ -56,13 +61,15 @@ function isDuplicateRecordError(err) {
 }
 
 function defaultTenantDataPayload(tenantId) {
+  const tableSettings = buildDefaultTableSettings();
+  const starters = buildDefaultStarterGuestsPayload();
   return {
     tenant_id: tenantId,
-    wedding_guests: {},
-    unassigned_guests: [],
-    guest_status: {},
-    table_settings: {},
-    floor_layout: {},
+    wedding_guests: starters.wedding_guests,
+    unassigned_guests: starters.unassigned_guests,
+    guest_status: starters.guest_status,
+    table_settings: tableSettings,
+    floor_layout: buildFloorPlanFromTableSettings(tableSettings),
     meta_label_columns: DEFAULT_LABEL_COLUMNS,
   };
 }
