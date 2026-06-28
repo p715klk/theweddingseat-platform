@@ -355,10 +355,33 @@ const collectionDefs = [
       },
       { name: 'created_at', type: 'number', required: false },
       { name: 'display_name', type: 'text', required: false },
+      { name: 'created_by_uid', type: 'text', required: false },
+      { name: 'created_by_email', type: 'text', required: false },
     ],
     relationFields: ['user', 'tenant'],
     indexes: [
       'CREATE UNIQUE INDEX idx_tenant_members_pair ON tenant_members (tenant_id, user_id)',
+    ],
+  },
+  {
+    name: 'audit_logs',
+    type: 'base',
+    listRule: `${platformAdmin} || ${tenantMemberOwner}`,
+    viewRule: `${platformAdmin} || ${tenantMemberOwner}`,
+    createRule: null,
+    updateRule: null,
+    deleteRule: platformAdmin,
+    fields: [
+      { name: 'tenant_id', type: 'text', required: true },
+      { name: 'user_id', type: 'text', required: false },
+      { name: 'user_email', type: 'text', required: false },
+      { name: 'page', type: 'text', required: true },
+      { name: 'action', type: 'text', required: true },
+      { name: 'detail', type: 'text', required: false },
+      { name: 'created_at', type: 'number', required: true },
+    ],
+    indexes: [
+      'CREATE INDEX idx_audit_logs_tenant_time ON audit_logs (tenant_id, created_at)',
     ],
   },
 ];
@@ -417,9 +440,16 @@ async function ensureTenantMembersSchema(token, existing) {
     console.log('+ tenant_members.tenant relation → tenants');
   }
   if (!names.has('display_name')) {
-    schema.push({ name: 'display_name', type: 'text', required: false });
+    schema.push(normalizeField({ name: 'display_name', type: 'text', required: false }));
     changed = true;
     console.log('+ tenant_members.display_name（每個 project 獨立顯示名稱）');
+  }
+  for (const fieldName of ['created_by_uid', 'created_by_email']) {
+    if (!names.has(fieldName)) {
+      schema.push(normalizeField({ name: fieldName, type: 'text', required: false }));
+      changed = true;
+      console.log(`+ tenant_members.${fieldName}（加入專案時由誰邀請）`);
+    }
   }
 
   if (!changed) {
@@ -466,6 +496,42 @@ async function migrateMemberDisplayNames(token) {
   }
 }
 
+async function migrateMemberCreatedBy(token) {
+  let page = 1;
+  let migrated = 0;
+  for (;;) {
+    const data = await api(token, `/collections/tenant_members/records?page=${page}&perPage=100`);
+    const items = data.items || [];
+    if (!items.length) break;
+    for (const m of items) {
+      if (String(m.created_by_uid || '').trim() || String(m.created_by_email || '').trim()) continue;
+      const uid = String(m.user_id || '').trim();
+      if (!uid) continue;
+      try {
+        const u = await api(token, `/collections/users/records/${uid}`);
+        const byUid = String(u.created_by_uid || '').trim();
+        const byEmail = String(u.created_by_email || '').trim();
+        if (!byUid && !byEmail) continue;
+        await api(token, `/collections/tenant_members/records/${m.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            created_by_uid: byUid,
+            created_by_email: byEmail,
+          }),
+        });
+        migrated += 1;
+      } catch {
+        /* 略過無法讀寫嘅記錄 */
+      }
+    }
+    if (items.length < 100) break;
+    page += 1;
+  }
+  if (migrated > 0) {
+    console.log(`+ 已將 users.created_by 回填到 tenant_members（${migrated} 筆）`);
+  }
+}
+
 async function ensureCollection(token, existing, def) {
   const found = existing.find((c) => c.name === def.name);
   if (found) {
@@ -505,6 +571,7 @@ async function main() {
   existing = await listCollections(token);
   await ensureTenantMembersSchema(token, existing);
   await migrateMemberDisplayNames(token);
+  await migrateMemberCreatedBy(token);
   existing = await listCollections(token);
   await syncCollectionRules(token, existing, 'tenants', tenantsApiRules);
   await syncCollectionRules(token, existing, 'tenant_members', tenantMembersApiRules);

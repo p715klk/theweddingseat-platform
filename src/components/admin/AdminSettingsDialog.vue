@@ -153,6 +153,11 @@
             @updated="onMembersUpdated"
           />
         </div>
+
+        <!-- 操作記錄 -->
+        <div v-else-if="!profileOnly && activeTab === 'audit'" class="space-y-4">
+          <AuditLogPanel v-if="tenantId" :tenant-id="tenantId" />
+        </div>
       </div>
     </div>
   </div>
@@ -167,6 +172,7 @@ import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { setPostLogoutNotice } from '@/lib/logoutNotices';
 import TenantMembersPanel from '@/components/admin/TenantMembersPanel.vue';
+import AuditLogPanel from '@/components/admin/AuditLogPanel.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -175,11 +181,17 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'import-csv', 'export-csv', 'empty-guests', 'password-changed']);
 
-const tabs = [
-  { id: 'data', label: '資料管理' },
-  { id: 'profile', label: '我的帳號' },
-  { id: 'users', label: '用戶管理' },
-];
+const tabs = computed(() => {
+  const base = [
+    { id: 'data', label: '資料管理' },
+    { id: 'profile', label: '我的帳號' },
+    { id: 'users', label: '用戶管理' },
+  ];
+  if (canViewAuditLog.value) {
+    base.push({ id: 'audit', label: '操作記錄' });
+  }
+  return base;
+});
 
 const tenantMembersHint =
   '管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。\n'
@@ -191,6 +203,9 @@ const { user, changePassword, logout } = useAuth();
 const { memberRole } = useTenantAccess();
 const { meta, tenantId } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
+const canViewAuditLog = computed(
+  () => memberRole.value === 'platform_admin' || memberRole.value === 'owner',
+);
 const {
   members,
   loadMembers,
@@ -238,6 +253,10 @@ watch(
 );
 
 watch(activeTab, async (tab) => {
+  if (tab === 'audit' && !canViewAuditLog.value) {
+    activeTab.value = 'data';
+    return;
+  }
   if (tab !== 'profile' || !props.open) return;
   try {
     await syncProfileDisplayName();

@@ -116,6 +116,8 @@ async function pbDirectUpsertTenantMember({ tenantId, uid, role = 'admin', displ
     tenant: tenant.id,
     user: id,
     created_at: Date.now(),
+    created_by_uid: pb.authStore.record?.id || '',
+    created_by_email: pb.authStore.record?.email || '',
   });
   return { tenantId: tid, uid: id, created: true };
 }
@@ -317,6 +319,14 @@ export async function callUpdateMemberProfile({ tenantId, uid, profile }) {
     uid,
     display_name: profile?.display_name ?? '',
   });
+}
+
+export async function callListAuditLogs({ tenantId, page = 1, perPage = 30 }) {
+  return twsFetch('list-audit-logs', { tenantId, page, perPage });
+}
+
+export async function callWriteAuditLog({ tenantId, page, action, detail = '' }) {
+  return twsFetch('write-audit-log', { tenantId, page, action, detail });
 }
 
 /**

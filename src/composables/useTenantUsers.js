@@ -6,6 +6,7 @@ import { getMembersMap, getProfilesMap, getMemberProfile } from '@/lib/pb/member
 import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember, callSwapTenantMemberRoles } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, assertCanChangeMemberRole, getMemberQuota } from '@/lib/tenantMemberLimits';
+import { writeAuditLog } from '@/lib/auditLog';
 
 const ROLE_SORT_ORDER = { owner: 0, admin: 1, reception: 2 };
 
@@ -166,6 +167,12 @@ export function useTenantUsers(options = {}) {
     });
 
     await callUpsertTenantMember({ tenantId: tid, uid, role });
+    void writeAuditLog({
+      tenantId: tid,
+      page: '用戶管理',
+      action: '變更角色',
+      detail: `${target.email || uid} → ${role}`,
+    });
     await loadMembers();
   }
 
@@ -224,6 +231,12 @@ export function useTenantUsers(options = {}) {
     };
 
     await callUpdateMemberProfile({ tenantId: tid, uid, profile: next });
+    void writeAuditLog({
+      tenantId: tid,
+      page: '用戶管理',
+      action: uid === user.value?.uid ? '更新顯示名稱' : '更新成員顯示名稱',
+      detail: name,
+    });
     await loadMembers();
   }
 

@@ -367,6 +367,33 @@ ${APP_LAYER}
     if (role === "owner" || role === "admin") return;
     throw new ForbiddenError("無權查看成員清單");
   };
+  var assertCanViewAuditLogs = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var tid = String(tenantId || "").trim();
+    if (!tid) throw new BadRequestError("缺少 tenantId");
+    if (!isTenantOwner(tid, callerId(caller))) {
+      throw new ForbiddenError("只有 owner 或平台管理員可以查看操作記錄");
+    }
+  };
+  var assertTenantMember = function(caller, tenantId) {
+    if (isPlatformAdmin(caller)) return;
+    var role = getMemberRole(tenantId, callerId(caller));
+    if (!role) throw new ForbiddenError("無權限");
+  };
+  var writeAuditLogEntry = function(tenantId, caller, pageName, actionName, detailText) {
+    try {
+      var col = findCollection("audit_logs");
+      var rec = new Record(col);
+      rec.set("tenant_id", String(tenantId || "").trim());
+      rec.set("user_id", callerId(caller));
+      rec.set("user_email", recordEmail(caller));
+      rec.set("page", String(pageName || "").trim().slice(0, 80));
+      rec.set("action", String(actionName || "").trim().slice(0, 120));
+      rec.set("detail", detailText != null ? String(detailText || "").trim().slice(0, 500) : "");
+      rec.set("created_at", Date.now());
+      twsSave(rec);
+    } catch (errAl) { console.error("tws: audit log skipped:", errAl); }
+  };
   var countAdmins = function(members) {
     var n = 0;
     for (var i = 0; i < members.length; i += 1) {
@@ -443,6 +470,12 @@ ${APP_LAYER}
       if (tid) record.set("tenant", tid);
     } catch (errT) {}
   };
+  var setMemberCreatedBy = function(record, caller) {
+    try {
+      record.set("created_by_uid", callerId(caller));
+      record.set("created_by_email", recordEmail(caller));
+    } catch (errCb) {}
+  };
   var saveAuthRecord = function(record) {
     twsSave(record);
   };
@@ -488,8 +521,12 @@ const ROUTES = [
         try { createdAt = rows[i].get("created_at"); } catch (e0a) {
           try { createdAt = u.get("created_at"); } catch (e0b) { createdAt = null; }
         }
-        createdByEmail = recordStr(u, "created_by_email");
-        createdByUid = recordStr(u, "created_by_uid");
+        createdByEmail = recordStr(rows[i], "created_by_email");
+        createdByUid = recordStr(rows[i], "created_by_uid");
+        if (!createdByEmail && !createdByUid) {
+          createdByEmail = recordStr(u, "created_by_email");
+          createdByUid = recordStr(u, "created_by_uid");
+        }
       }
     } catch (errU) {}
     members.push({
@@ -707,6 +744,7 @@ const ROUTES = [
     var memberRec = new Record(membersCol);
     memberRec.set("created_at", now);
     setMemberFields(memberRec, slug, tenantRec, ownerUid, "owner");
+    setMemberCreatedBy(memberRec, caller);
     memberRec.set("display_name", displayName);
     twsSave(memberRec);
   } catch (errCreate) {
@@ -759,8 +797,10 @@ const ROUTES = [
   var memberRec = new Record(membersCol);
   memberRec.set("created_at", Date.now());
   setMemberFields(memberRec, tenantId, tenant, targetUid, role);
+  setMemberCreatedBy(memberRec, caller);
   if (memberDisplayName != null) memberRec.set("display_name", memberDisplayName);
   try { twsSave(memberRec); } catch (errIns) { throw new BadRequestError("新增成員失敗"); }
+  writeAuditLogEntry(tenantId, caller, "用戶管理", "新增成員", memberDisplayName || targetUid);
   return e.json(200, { tenantId: tenantId, uid: targetUid, created: true });
 `,
   },
@@ -884,6 +924,7 @@ const ROUTES = [
     if (countAdmins(allMembers) <= 1) throw new BadRequestError("至少需要保留一位後台用戶");
   }
   twsDelete(rmMember);
+  writeAuditLogEntry(rmTenantId, caller, "用戶管理", "移除成員", rmUid);
   var authDeleted = false;
   if (shouldDeleteAuth(rmUid)) {
     try { var orphanUser = twsFindRecordById("users", rmUid); twsDelete(orphanUser); authDeleted = true; }
@@ -904,6 +945,65 @@ const ROUTES = [
   pwUser.setPassword(newPassword);
   try { saveAuthRecord(pwUser); } catch (errPw) { throw new BadRequestError(mapSaveError(errPw, "重設密碼失敗")); }
   return e.json(200, { uid: pwUid });
+`,
+  },
+  {
+    path: '/tws/list-audit-logs',
+    body: `
+  var auditTenantId = String(data.tenantId || "").trim();
+  if (!auditTenantId) throw new BadRequestError("缺少 tenantId");
+  assertCanViewAuditLogs(caller, auditTenantId);
+  var auditPage = parseInt(data.page, 10) || 1;
+  if (auditPage < 1) auditPage = 1;
+  var auditPerPage = parseInt(data.perPage, 10) || 30;
+  if (auditPerPage !== 10 && auditPerPage !== 30 && auditPerPage !== 50 && auditPerPage !== 100) auditPerPage = 30;
+  var auditRows = queryRecords("audit_logs", "tenant_id = {:tid}", 2000, { tid: auditTenantId });
+  auditRows.sort(function(a, b) {
+    var ta = 0, tb = 0;
+    try { ta = Number(a.get("created_at")) || 0; } catch (eTa) {}
+    try { tb = Number(b.get("created_at")) || 0; } catch (eTb) {}
+    return tb - ta;
+  });
+  var auditTotal = auditRows.length;
+  var auditStart = (auditPage - 1) * auditPerPage;
+  var auditSlice = auditRows.slice(auditStart, auditStart + auditPerPage);
+  var auditItems = [];
+  for (var ali = 0; ali < auditSlice.length; ali += 1) {
+    var arow = auditSlice[ali];
+    var aCreated = null;
+    try { aCreated = arow.get("created_at"); } catch (eAc) { aCreated = null; }
+    auditItems.push({
+      id: recordStr(arow, "id"),
+      tenant_id: recordStr(arow, "tenant_id"),
+      user_id: recordStr(arow, "user_id"),
+      user_email: recordStr(arow, "user_email"),
+      page: recordStr(arow, "page"),
+      action: recordStr(arow, "action"),
+      detail: recordStr(arow, "detail"),
+      created_at: aCreated,
+    });
+  }
+  return e.json(200, {
+    tenantId: auditTenantId,
+    page: auditPage,
+    perPage: auditPerPage,
+    total: auditTotal,
+    items: auditItems,
+  });
+`,
+  },
+  {
+    path: '/tws/write-audit-log',
+    body: `
+  var wlTenantId = String(data.tenantId || "").trim();
+  if (!wlTenantId) throw new BadRequestError("缺少 tenantId");
+  assertTenantMember(caller, wlTenantId);
+  var wlPage = String(data.page || "").trim().slice(0, 80);
+  var wlAction = String(data.action || "").trim().slice(0, 120);
+  if (!wlPage || !wlAction) throw new BadRequestError("缺少 page 或 action");
+  var wlDetail = data.detail != null ? String(data.detail || "").trim().slice(0, 500) : "";
+  writeAuditLogEntry(wlTenantId, caller, wlPage, wlAction, wlDetail);
+  return e.json(200, { ok: true });
 `,
   },
 ];
@@ -930,7 +1030,7 @@ output += `var twsUserAuthMiddleware = (function() {
 `;
 
 output += `routerAdd("GET", "/tws/health", function(e) {
-  return e.json(200, { ok: true, service: "tws", version: 38, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
+  return e.json(200, { ok: true, service: "tws", version: 39, rbac: "tenant_members", pb_compat: true, debug: "/tws/debug-auth" });
 });
 
 routerAdd("GET", "/tws/debug-auth", function(e) {

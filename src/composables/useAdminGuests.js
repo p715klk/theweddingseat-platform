@@ -24,6 +24,7 @@ import {
   buildCSVImportPlan,
   buildCSVImportSuccessMessage,
 } from '@/lib/adminCsv';
+import { writeAuditLog } from '@/lib/auditLog';
 
 const DEFAULT_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
 
@@ -222,13 +223,32 @@ export function useAdminGuests() {
   }
 
   function emptyAllGuests() {
+    const removed = guests.value.length;
     guests.value = [];
     markDirty();
+    const tid = tenantId.value;
+    if (tid && removed > 0) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: '設定',
+        action: '清空賓客',
+        detail: `移除 ${removed} 位（待儲存）`,
+      });
+    }
   }
 
   function exportCSV() {
     if (!guests.value.length) return;
     downloadCsv(exportGuestsToCSV(guests.value));
+    const tid = tenantId.value;
+    if (tid) {
+      void writeAuditLog({
+        tenantId: tid,
+        page: '設定',
+        action: '匯出 CSV',
+        detail: `${guests.value.length} 位賓客`,
+      });
+    }
   }
 
   async function parseCSVFile(file) {
@@ -246,7 +266,11 @@ export function useAdminGuests() {
       guests.value = plan.resultGuests.map((g) => normalizeGuestForList(g));
       categories.value = mergeCategoriesFromGuests(categories.value, guests.value);
       markDirty();
-      await save({ toastMessage: buildCSVImportSuccessMessage(plan) });
+      await save({
+        toastMessage: buildCSVImportSuccessMessage(plan),
+        auditAction: '匯入 CSV',
+        auditDetail: `${plan.resultGuests.length} 位賓客`,
+      });
     } finally {
       csvImportInProgress = false;
     }
@@ -254,7 +278,11 @@ export function useAdminGuests() {
 
   async function save(options = {}) {
     if (!dirty.value) return;
-    const { toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。' } = options;
+    const {
+      toastMessage = '✨ 【後台數據同步成功】！已完美推送至畫布。',
+      auditAction = '儲存賓客',
+      auditDetail = '',
+    } = options;
     const tid = tenantId.value;
     if (!tid) throw new Error('專案未就緒');
 
@@ -280,6 +308,12 @@ export function useAdminGuests() {
 
       dirty.value = false;
       showToast(toastMessage, 2500);
+      void writeAuditLog({
+        tenantId: tid,
+        page: '賓客名單',
+        action: auditAction,
+        detail: auditDetail || `${guests.value.length} 位賓客`,
+      });
       startSync();
       try {
         await load(true);
