@@ -144,6 +144,7 @@
         :class="{ collapsed: !sidebarOpen, 'sidebar-no-transition': sidebarNoTransition }"
       >
         <div
+          id="sidebar-content"
           class="sidebar-content bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden w-[320px]"
           @dragover.prevent
           @drop="handleDropTrash($event)"

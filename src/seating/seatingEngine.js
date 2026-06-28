@@ -901,8 +901,16 @@ function notifySidebarChange(instant = false) {
 }
 
 function getSidebarRightEdge() {
-    if (!isSidebarOpen) return 0;
-    return getSidebarPanelWidth();
+    const content = document.querySelector('.sidebar-panel:not(.collapsed) .sidebar-content');
+    if (content) {
+        return content.getBoundingClientRect().right;
+    }
+    return 0;
+}
+
+function isGuestDragOverSidebarZone(clientX, clientY) {
+    if (clientX <= getSidebarDragOpenThreshold()) return true;
+    return isPointOverSidebarDropZone(clientX, clientY);
 }
 
 function openSidebar({ instant = false } = {}) {
@@ -924,10 +932,10 @@ function openSidebarIfDragEntersSidebar(clientX) {
     }
 }
 
-function closeSidebarIfDragLeavesSidebar(clientX, sidebarRight) {
-    if (!isSidebarOpen) return;
-    const edge = sidebarRight ?? getSidebarRightEdge();
-    if (clientX > edge - 8) {
+function closeSidebarIfDragLeavesSidebar(clientX) {
+    if (!isSidebarOpen || !isGuestDragging) return;
+    const edge = getSidebarRightEdge();
+    if (edge > 0 && clientX > edge - 8) {
         closeSidebar();
     }
 }
@@ -1888,6 +1896,14 @@ function isPointOverSidebarDropZone(clientX, clientY) {
 function resolvePointerDrop(clientX, clientY, data) {
     if (isPointOverSidebarDropZone(clientX, clientY)) {
         moveGuestToPool(data);
+        if (isMobileViewport()) openSidebar();
+        return;
+    }
+
+    if (isMobileViewport() && data?.fromTable && data.fromTable !== 'POOL'
+        && isGuestDragOverSidebarZone(clientX, clientY)) {
+        openSidebar();
+        moveGuestToPool(data);
         return;
     }
 
@@ -1915,9 +1931,11 @@ function finishGuestTouchDrag(dragging, dragData, ghost, clientX, clientY) {
     }
 }
 
-function handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev) {
+function handleGuestTouchMove(t, startX, startY, state, opts, ev) {
     openSidebarIfDragEntersSidebar(t.clientX);
-    if (sidebarRight != null) closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
+    if (opts.closeSidebarOnLeave) {
+        closeSidebarIfDragLeavesSidebar(t.clientX);
+    }
 
     const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
     if (!state.dragging && dist > GUEST_DRAG_THRESHOLD) {
@@ -1949,7 +1967,6 @@ function setupTouchDrag(el, getDragData, options) {
         const startX = e.touches[0].clientX;
         const startY = e.touches[0].clientY;
         const state = { dragging: false, ghost: null, dragData: null };
-        const sidebarRight = useDocListeners ? getSidebarRightEdge() : null;
 
         const findTouch = (list) => {
             for (let i = 0; i < list.length; i++) {
@@ -1962,7 +1979,7 @@ function setupTouchDrag(el, getDragData, options) {
             const onDocMove = (ev) => {
                 const t = findTouch(ev.touches);
                 if (!t) return;
-                handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev);
+                handleGuestTouchMove(t, startX, startY, state, opts, ev);
             };
             const onDocEnd = (ev) => {
                 const ended = findTouch(ev.changedTouches);
@@ -1980,7 +1997,7 @@ function setupTouchDrag(el, getDragData, options) {
 
         const onElMove = (ev) => {
             if (ev.touches.length !== 1) return;
-            handleGuestTouchMove(ev.touches[0], startX, startY, state, opts, null, ev);
+            handleGuestTouchMove(ev.touches[0], startX, startY, state, opts, ev);
         };
         const onElEnd = (ev) => {
             el.removeEventListener('touchmove', onElMove);
