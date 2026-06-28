@@ -109,9 +109,25 @@
           class="p-2 rounded-lg flex justify-between items-center gap-2 border border-red-100 bg-red-50"
           :class="{ 'opacity-50 line-through': row.arrived === '取消' }"
         >
-          <button type="button" class="flex-1 text-left" @click="openTable(row.tableNum)">
+          <button type="button" class="flex-1 text-left min-w-0" @click="openTable(row.tableNum)">
             <span class="font-bold text-gray-800">{{ row.guest.name }}</span>
-            <span class="block text-xs text-red-700 mt-1">第 {{ row.tableNum }} 桌 · {{ row.guest.side }}</span>
+            <div class="flex flex-wrap items-center gap-1 mt-1 text-xs">
+              <span class="text-red-700 font-medium shrink-0">第 {{ row.tableNum }} 桌</span>
+              <span class="text-red-700/60 shrink-0">·</span>
+              <span
+                class="px-1.5 py-0.5 rounded text-xs font-bold shrink-0"
+                :class="row.guest.side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'"
+              >
+                {{ row.guest.side }}
+              </span>
+              <span
+                v-for="tag in normalizeTags(row.guest.group)"
+                :key="tag"
+                class="px-1.5 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700 shrink-0"
+              >
+                {{ tag }}
+              </span>
+            </div>
           </button>
           <div class="flex gap-1">
             <button
