@@ -465,6 +465,27 @@ routerAdd("POST", "/tws/list-members", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -987,6 +1008,27 @@ routerAdd("POST", "/tws/list-all-members", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -1504,6 +1546,27 @@ routerAdd("POST", "/tws/create-user", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -2006,6 +2069,27 @@ routerAdd("POST", "/tws/check-member-email", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
@@ -2543,6 +2627,27 @@ routerAdd("POST", "/tws/create-tenant", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -2711,6 +2816,7 @@ routerAdd("POST", "/tws/create-tenant", function(e) {
   var slug = String(data.slug || "").trim().toLowerCase();
   if (!slug || slug.length < 2) throw new BadRequestError("Slug 格式無效");
   if (loadTenantByKey(slug)) throw new BadRequestError("Slug「" + slug + "」已被使用");
+  clearStaleTenantArtifacts(slug);
   var email = String(data.ownerEmail || "").trim().toLowerCase();
   var password = String(data.ownerPassword || "");
   var displayName = String(data.ownerDisplayName || "");
@@ -2772,16 +2878,26 @@ routerAdd("POST", "/tws/create-tenant", function(e) {
     dataRec.set("meta_label_columns", data.meta_label_columns || null);
     twsSave(dataRec);
     var membersCol = findCollection("tenant_members");
-    var memberRec = new Record(membersCol);
-    memberRec.set("created_at", now);
-    setMemberFields(memberRec, slug, tenantRec, ownerUid, "owner");
-    setMemberCreatedBy(memberRec, caller);
-    memberRec.set("display_name", displayName);
-    twsSave(memberRec);
+    var existingMember = getMemberRow(slug, ownerUid);
+    if (existingMember) {
+      setMemberFields(existingMember, slug, tenantRec, ownerUid, "owner");
+      if (displayName) existingMember.set("display_name", displayName);
+      twsSave(existingMember);
+    } else {
+      var memberRec = new Record(membersCol);
+      memberRec.set("created_at", now);
+      setMemberFields(memberRec, slug, tenantRec, ownerUid, "owner");
+      setMemberCreatedBy(memberRec, caller);
+      memberRec.set("display_name", displayName);
+      twsSave(memberRec);
+    }
   } catch (errCreate) {
     if (dataRec && dataRec.id) { try { twsDelete(dataRec); } catch (e1) {} }
     if (tenantRec && tenantRec.id) { try { twsDelete(tenantRec); } catch (e2) {} }
     var errMsg = errCreate && errCreate.message ? String(errCreate.message) : "建立 Project 失敗";
+    if (/UNIQUE constraint failed: tenant_members/i.test(errMsg)) {
+      errMsg = "此 Owner 已是該 Project 成員，或 slug 有殘留成員資料";
+    }
     throw new BadRequestError(errMsg);
   }
   return e.json(200, {
@@ -3108,6 +3224,27 @@ routerAdd("POST", "/tws/upsert-member", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
@@ -3623,6 +3760,27 @@ routerAdd("POST", "/tws/transfer-owner", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
@@ -4149,6 +4307,27 @@ routerAdd("POST", "/tws/swap-member-roles", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -4652,6 +4831,27 @@ routerAdd("POST", "/tws/update-member-profile", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -5143,6 +5343,27 @@ routerAdd("POST", "/tws/remove-member", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
@@ -5653,6 +5874,27 @@ routerAdd("POST", "/tws/set-password", function(e) {
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
   };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
+  };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
     if (!id) return [];
@@ -6141,6 +6383,27 @@ routerAdd("POST", "/tws/list-audit-logs", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();
@@ -6661,6 +6924,27 @@ routerAdd("POST", "/tws/write-audit-log", function(e) {
     if (rows.length) return rows[0];
     rows = queryRecords("tenants", "slug = {:k}", 1, { k: k });
     return rows.length ? rows[0] : null;
+  };
+  var isSlugReserved = function(key) {
+    var k = String(key || "").trim().toLowerCase();
+    if (!k) return false;
+    if (loadTenantByKey(k)) return true;
+    if (findByField("tenant_data", "tenant_id", k)) return true;
+    return queryRecords("tenant_members", "tenant_id = {:k}", 1, { k: k }).length > 0;
+  };
+  var clearStaleTenantArtifacts = function(slug) {
+    var k = String(slug || "").trim().toLowerCase();
+    if (!k || loadTenantByKey(k)) return;
+    try {
+      var staleMembers = queryRecords("tenant_members", "tenant_id = {:k}", 200, { k: k });
+      for (var si = 0; si < staleMembers.length; si++) {
+        try { twsDelete(staleMembers[si]); } catch (eSm) {}
+      }
+    } catch (eM) {}
+    try {
+      var staleData = findByField("tenant_data", "tenant_id", k);
+      if (staleData) twsDelete(staleData);
+    } catch (eD) {}
   };
   var listOwnedTenants = function(uid) {
     var id = String(uid || "").trim();

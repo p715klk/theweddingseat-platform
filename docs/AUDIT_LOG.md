@@ -47,13 +47,14 @@
 
 | 常數 | 顯示值 | 設定時機 |
 |------|--------|----------|
-| `AUDIT_PAGES.CHECKIN` | 點名 | `/p/{slug}` 點名頁 |
+| `AUDIT_PAGES.ACCOUNT` | 帳號 | 登入／登出（固定，唔跟路由） |
+| `AUDIT_PAGES.CHECKIN` | 點名 | `/p/{slug}` 點名頁（其他操作） |
 | `AUDIT_PAGES.GUESTLIST` | 賓客名單 | `/p/{slug}/admin` 後台 |
 | `AUDIT_PAGES.SEATING` | 排位 | `/p/{slug}/seating` 畫布 |
 | `AUDIT_PAGES.SETTINGS` | 設定 | 設定 dialog 內操作 |
 | `AUDIT_PAGES.USERS` | 用戶管理 | 成員管理相關 |
 
-各 View 載入時會呼叫 `setAuditPageContext({ tenantId, page })`，登入／登出記錄用同一個 page。
+各 View 載入時會呼叫 `setAuditPageContext({ tenantId, page })`，供**該頁操作**記錄用；登入／登出唔使用呢個 page。
 
 ---
 
@@ -63,12 +64,15 @@
 |------|----------|------|
 | 輸入帳密登入成功 | ✅ 登入 | `useAuth.login()` 成功後寫入 |
 | F5 / 重新開分頁 | ❌ | Session 自動還原，**唔**再寫登入 |
+| 轉頁（點名 → 後台 → 排位） | ❌ | 同一 browser session **只記一次**登入 |
 | 按登出 | ✅ 登出 | `useAuth.logout()` 前寫入 |
 | 被踢出（非成員、改密碼後登出、閒置登出等） | ✅ 登出 | 同樣經 `logout()` |
 
-設計目標：**一次手動登入配一次登出**，避免 F5 產生重複登入 record。
+登入／登出嘅 **`page` 固定為「帳號」**，唔會因為當時喺邊個路由而顯示「賓客名單」「排位」等（轉頁唔代表重新登入）。
 
-> Super Admin 喺 `/super` 登入若無 project context，唔會寫 project 級別嘅登入 record。
+同一 **tenant + user** 用 `sessionStorage` 標記：已記過登入就唔再寫，登出時清除標記。設計目標：**一次手動登入配一次登出**。
+
+> Super Admin 喺 `/super` 登入若 project context 未就緒，可能唔會寫 project 級別嘅登入 record。
 
 ---
 
@@ -155,11 +159,11 @@
 
 ---
 
-### 登入／登出（`page` = 目前所在頁）
+### 登入／登出（`page = 帳號`）
 
 | 操作 | 觸發 |
 |------|------|
-| 登入 | 提交帳密成功 |
+| 登入 | 提交帳密成功（同一 session 只記一次） |
 | 登出 | 登出按鈕、被踢出、改密碼後登出、閒置登出等 |
 
 程式位置：`src/composables/useAuth.js`、`src/lib/auditLog.js`

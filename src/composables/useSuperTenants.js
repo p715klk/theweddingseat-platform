@@ -343,6 +343,29 @@ function buildCreateTenantApiPayload({
   };
 }
 
+async function clearStaleTenantArtifacts(tenantId) {
+  const tid = String(tenantId || '').trim();
+  if (!tid || (await findTenantByIdOrSlug(tid))) return;
+
+  const pb = getPocketBase();
+  const { pbFilterString } = await import('@/lib/pb/filter');
+  const filter = `tenant_id = ${pbFilterString(tid)}`;
+  try {
+    const members = await pb.collection('tenant_members').getFullList({ filter });
+    await Promise.all(members.map((m) => pb.collection('tenant_members').delete(m.id)));
+  } catch {
+    /* best-effort */
+  }
+  try {
+    const dataRows = await pb.collection('tenant_data').getList(1, 1, { filter });
+    if (dataRows.items?.[0]) {
+      await pb.collection('tenant_data').delete(dataRows.items[0].id);
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 async function createTenantViaClient({
   normalized,
   tenantId,
@@ -366,6 +389,7 @@ async function createTenantViaClient({
     if (!resolvedOwnerUid) throw new Error('建立帳號失敗（缺少 uid）');
 
     const pb = getPocketBase();
+    await clearStaleTenantArtifacts(tenantId);
     const tenantFields = metaToRecordFields(
       { ...meta, owner_uid: resolvedOwnerUid },
       normalized,

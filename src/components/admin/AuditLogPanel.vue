@@ -2,7 +2,7 @@
   <div class="audit-panel">
     <div class="audit-toolbar">
       <p class="audit-hint">
-        記錄後台重要操作，僅 Owner 與 Super Admin 可查看。
+        記錄後台重要操作，僅 Owner 可查看。
       </p>
       <div class="audit-controls">
         <label class="per-page-label" for="audit-per-page">每頁</label>

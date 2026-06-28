@@ -43,13 +43,14 @@ async function login(email, password) {
   authError.value = null;
   const pb = getPocketBase();
   await pb.collection('users').authWithPassword(email.trim(), password);
-  logLogin();
+  logLogin(pb.authStore.record?.id);
 }
 
 async function logout() {
   if (!isPocketBaseConfigured()) return;
   authError.value = null;
-  logLogout();
+  const uid = getPocketBase().authStore.record?.id;
+  logLogout(uid);
   getPocketBase().authStore.clear();
 }
 

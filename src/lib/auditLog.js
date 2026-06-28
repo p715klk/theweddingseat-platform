@@ -4,6 +4,7 @@ export const AUDIT_PAGE_SIZE_OPTIONS = [10, 30, 50, 100];
 
 /** 常用頁面名稱（操作記錄 tab 顯示） */
 export const AUDIT_PAGES = {
+  ACCOUNT: '帳號',
   CHECKIN: '點名',
   GUESTLIST: '賓客名單',
   SEATING: '排位',
@@ -12,6 +13,12 @@ export const AUDIT_PAGES = {
 };
 
 let auditContext = { tenantId: '', page: '' };
+
+const SESSION_FLAG_PREFIX = 'tws_audit_session:';
+
+function sessionFlagKey(tenantId, uid) {
+  return `${SESSION_FLAG_PREFIX}${tenantId}:${uid}`;
+}
 
 export function setAuditPageContext({ tenantId, page }) {
   auditContext = {
@@ -24,18 +31,29 @@ export function getAuditPageContext() {
   return { ...auditContext };
 }
 
-/** 真正提交帳密登入成功時記錄（F5 / session 還原唔會觸發） */
-export function logLogin() {
-  const { tenantId, page } = auditContext;
-  if (!tenantId || !page) return;
-  void writeAuditLog({ tenantId, page, action: '登入' });
+/**
+ * 真正提交帳密登入成功時記錄。
+ * 同一 tenant + 同一 user 喺同一 browser session 只記一次（F5、轉頁唔會重複）。
+ */
+export function logLogin(uid) {
+  const tid = auditContext.tenantId;
+  const id = String(uid || '').trim();
+  if (!tid || !id) return;
+  const key = sessionFlagKey(tid, id);
+  if (sessionStorage.getItem(key) === '1') return;
+  sessionStorage.setItem(key, '1');
+  void writeAuditLog({ tenantId: tid, page: AUDIT_PAGES.ACCOUNT, action: '登入' });
 }
 
-/** 登出前記錄（用 setAuditPageContext 設定嘅 tenant / page） */
-export function logLogout() {
-  const { tenantId, page } = auditContext;
-  if (!tenantId || !page) return;
-  void writeAuditLog({ tenantId, page, action: '登出' });
+/** 登出前記錄；只有曾記過登入先寫登出 */
+export function logLogout(uid) {
+  const tid = auditContext.tenantId;
+  const id = String(uid || '').trim();
+  if (!tid || !id) return;
+  const key = sessionFlagKey(tid, id);
+  if (sessionStorage.getItem(key) !== '1') return;
+  sessionStorage.removeItem(key);
+  void writeAuditLog({ tenantId: tid, page: AUDIT_PAGES.ACCOUNT, action: '登出' });
 }
 
 export function formatAuditTime(ts) {
