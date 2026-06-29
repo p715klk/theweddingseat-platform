@@ -1,17 +1,25 @@
 <template>
-  <form class="login-card" @submit.prevent="submit">
-    <h2>登入</h2>
-    <p class="hint">{{ hint }}</p>
+  <form class="login-card" :class="themeClass" @submit.prevent="submit">
+    <h2>{{ title }}</h2>
+    <p v-if="hint" class="hint">{{ hint }}</p>
     <p v-if="postLogoutNotice" class="notice">{{ postLogoutNotice }}</p>
     <label>Email</label>
-    <input v-model="email" type="email" required autocomplete="username" />
+    <input
+      v-model="email"
+      type="email"
+      required
+      autocomplete="username"
+      v-bind="loginEmailInputAttrs"
+      v-on="emailInputHandlers"
+    />
     <label>密碼</label>
     <input
       v-model="password"
       type="password"
       required
       autocomplete="current-password"
-      v-on="passwordInputHandlers"
+      v-bind="loginPasswordInputAttrs"
+      v-on="passwordFieldHandlers"
     />
     <p v-if="showCapsLockHint" class="caps-lock-hint">Caps Lock 已開啟</p>
     <p v-if="configError" class="error">{{ configError }}</p>
@@ -26,19 +34,36 @@ import { useAuth } from '@/composables/useAuth';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { mapPocketBaseLoginError } from '@/lib/pocketbaseErrors';
 import { consumePostLogoutNotice } from '@/lib/logoutNotices';
+import {
+  createLoginInputHandlers,
+  loginEmailInputAttrs,
+  loginPasswordInputAttrs,
+  mergeInputHandlers,
+  stripCjkFromLogin,
+} from '@/lib/loginInputGuard';
 
 const emit = defineEmits(['success']);
-defineProps({
-  hint: {
+
+const props = defineProps({
+  title: { type: String, default: '登入' },
+  hint: { type: String, default: '' },
+  /** tenant = 紅色（點名／後台）；super = 藍色（平台 Super Admin） */
+  theme: {
     type: String,
-    default: '請使用 Owner 為此宴會專案建立的帳號登入。',
+    default: 'tenant',
+    validator: (v) => ['tenant', 'super'].includes(v),
   },
 });
+
+const themeClass = computed(() => (props.theme === 'super' ? 'login-card--super' : 'login-card--tenant'));
+
 const { login, authError } = useAuth();
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
 const email = ref('');
 const password = ref('');
+const emailInputHandlers = createLoginInputHandlers(email);
+const passwordFieldHandlers = mergeInputHandlers(createLoginInputHandlers(password), passwordInputHandlers);
 const error = ref('');
 const loading = ref(false);
 const postLogoutNotice = ref(consumePostLogoutNotice());
@@ -50,7 +75,7 @@ async function submit() {
   if (configError.value) return;
   loading.value = true;
   try {
-    await login(email.value, password.value);
+    await login(stripCjkFromLogin(email.value), stripCjkFromLogin(password.value));
     emit('success');
   } catch (e) {
     error.value = mapPocketBaseLoginError(e);
@@ -73,8 +98,14 @@ async function submit() {
 .login-card h2 {
   font-size: 1.125rem;
   font-weight: 800;
-  color: #b91c1c;
   margin: 0 0 0.25rem;
+}
+.login-card--tenant h2 {
+  color: #b91c1c;
+}
+.login-card--super h2 {
+  color: #1e3a8a;
+  font-weight: 700;
 }
 .hint {
   font-size: 0.75rem;
@@ -119,13 +150,19 @@ input {
 }
 button {
   width: 100%;
-  background: #dc2626;
   color: #fff;
   border: none;
   border-radius: 0.5rem;
   padding: 0.5rem;
   font-weight: 800;
   cursor: pointer;
+}
+.login-card--tenant button {
+  background: #dc2626;
+}
+.login-card--super button {
+  background: #1d4ed8;
+  font-weight: 700;
 }
 button:disabled {
   opacity: 0.7;

@@ -18,7 +18,12 @@
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center p-4"
     >
       <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
-      <AdminLoginForm v-else @success="onLoggedIn" />
+      <LoginForm
+        v-else
+        title="後台登入"
+        hint="請使用管理員帳號登入"
+        @success="onLoggedIn"
+      />
     </div>
     <div
       v-else-if="!tenantAccessReady"
@@ -51,7 +56,7 @@ import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
 import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 import TenantErrorView from '@/views/TenantErrorView.vue';
-import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
+import LoginForm from '@/components/auth/LoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import SeatingCanvasApp from '@/components/seating/SeatingCanvasApp.vue';
 import AppFooter from '@/components/AppFooter.vue';

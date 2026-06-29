@@ -14,7 +14,7 @@
     >
       <div class="flex-1 flex items-center justify-center p-4">
       <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
-      <FrontendLoginForm v-else @success="onLoggedIn" />
+      <LoginForm v-else @success="onLoggedIn" />
       </div>
       <AppFooter />
     </div>
@@ -31,43 +31,43 @@
       <span v-if="isPlatformAdmin">（平台預覽模式，你仍可睇到頁面）</span>
     </div>
     <header
-      class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center gap-2"
+      class="text-white px-3 py-3 shadow-md sticky top-0 z-50 flex items-stretch gap-2"
       :style="{ backgroundColor: themeColor }"
     >
-      <div class="flex-1 flex justify-start items-center gap-2 min-w-0">
+      <div class="flex shrink-0 items-start pt-0.5">
         <button
           v-if="user"
           type="button"
-          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          class="bg-white/15 hover:bg-white/25 text-white px-2 py-1 rounded-lg text-[11px] sm:text-xs font-bold border border-white/30 transition whitespace-nowrap leading-tight"
           @click="handleLogout"
         >
           登出
         </button>
       </div>
-      <div class="text-center flex-shrink-0 min-w-0 max-w-[46%]">
-        <h1 class="text-xl font-bold tracking-wider truncate">{{ coupleNames || '載入中...' }}</h1>
-        <p class="text-xs opacity-90 mt-1 truncate">{{ venueLabel || '載入中...' }}</p>
+      <div class="flex-1 min-w-0 flex flex-col items-center justify-center text-center px-1">
+        <h1 class="text-lg sm:text-xl font-bold tracking-wide leading-tight">{{ coupleNames || '載入中...' }}</h1>
+        <p class="text-[11px] sm:text-xs opacity-90 mt-0.5 leading-snug">{{ venueLabel || '載入中...' }}</p>
       </div>
-      <div class="flex-1 flex justify-end items-center gap-2 min-w-0">
-        <button
-          v-if="user"
-          type="button"
-          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
-          @click="settingsDialogOpen = true"
-        >
-          ⚙ 設定
-        </button>
+      <div class="flex shrink-0 flex-col items-end justify-center gap-1">
         <router-link
           v-if="canAccessAdmin"
           :to="adminRoute"
-          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          class="bg-white/15 hover:bg-white/25 text-white px-2 py-1 rounded-lg text-[11px] sm:text-xs font-bold border border-white/30 transition whitespace-nowrap leading-tight"
         >
           📋 後台管理
         </router-link>
         <button
+          v-if="user"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2 py-1 rounded-lg text-[11px] sm:text-xs font-bold border border-white/30 transition whitespace-nowrap leading-tight"
+          @click="settingsDialogOpen = true"
+        >
+          ⚙ 設定
+        </button>
+        <button
           v-if="!user && authReady"
           type="button"
-          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          class="bg-white/15 hover:bg-white/25 text-white px-2 py-1 rounded-lg text-[11px] sm:text-xs font-bold border border-white/30 transition whitespace-nowrap leading-tight"
           @click="showLoginModal = true"
         >
           登入
@@ -405,7 +405,7 @@
       class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
       @click.self="showLoginModal = false"
     >
-      <FrontendLoginForm
+      <LoginForm
         :key="loginFormKey"
         hint="登入後可使用點名、現場加座等功能（須為本專案成員）。"
         @success="onLoginSuccess"
@@ -424,7 +424,7 @@ import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
-import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
+import LoginForm from '@/components/auth/LoginForm.vue';
 import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
 import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
 import AppFooter from '@/components/AppFooter.vue';

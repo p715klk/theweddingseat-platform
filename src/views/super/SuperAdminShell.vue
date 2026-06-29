@@ -6,7 +6,12 @@
 
     <div v-else-if="!user" class="super-center">
       <p v-if="idleLogoutNotice" class="idle-notice">{{ idleLogoutNotice }}</p>
-      <SuperAdminLoginForm @success="onLoggedIn" />
+      <LoginForm
+        title="平台 Super Admin"
+        hint="僅限 platform admin 帳號"
+        theme="super"
+        @success="onLoggedIn"
+      />
     </div>
 
     <div v-else-if="!isPlatformAdmin" class="super-center denied">
@@ -58,7 +63,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import SuperAdminLoginForm from '@/components/auth/SuperAdminLoginForm.vue';
+import LoginForm from '@/components/auth/LoginForm.vue';
 import AppFooter from '@/components/AppFooter.vue';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
