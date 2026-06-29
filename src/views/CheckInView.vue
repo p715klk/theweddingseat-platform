@@ -31,15 +31,24 @@
       <span v-if="isPlatformAdmin">（平台預覽模式，你仍可睇到頁面）</span>
     </div>
     <header
-      class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center gap-3"
+      class="text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center gap-2"
       :style="{ backgroundColor: themeColor }"
     >
-      <div class="flex-1" />
-      <div class="text-center flex-shrink-0">
-        <h1 class="text-xl font-bold tracking-wider">{{ coupleNames || '載入中...' }}</h1>
-        <p class="text-xs opacity-90 mt-1">{{ venueLabel || '載入中...' }}</p>
+      <div class="flex-1 flex justify-start items-center gap-2 min-w-0">
+        <button
+          v-if="user"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          @click="handleLogout"
+        >
+          登出
+        </button>
       </div>
-      <div class="flex-1 flex justify-end items-center gap-2">
+      <div class="text-center flex-shrink-0 min-w-0 max-w-[46%]">
+        <h1 class="text-xl font-bold tracking-wider truncate">{{ coupleNames || '載入中...' }}</h1>
+        <p class="text-xs opacity-90 mt-1 truncate">{{ venueLabel || '載入中...' }}</p>
+      </div>
+      <div class="flex-1 flex justify-end items-center gap-2 min-w-0">
         <button
           v-if="user"
           type="button"
@@ -62,14 +71,6 @@
           @click="showLoginModal = true"
         >
           登入
-        </button>
-        <button
-          v-else-if="user"
-          type="button"
-          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
-          @click="handleLogout"
-        >
-          登出
         </button>
       </div>
     </header>
