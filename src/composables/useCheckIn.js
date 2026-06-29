@@ -2,12 +2,13 @@ import { ref } from 'vue';
 import { useTenant } from '@/composables/useTenant';
 import { getMaxSeatsForTable, serializeGroupForFirebase } from '@/lib/adminGuestModel';
 import {
-  getTenantDataBundle,
   setGuestStatusField,
   addWeddingGuestAtTable,
+  getTenantTableSettings,
   subscribeTenantData,
-  subscribeTenantDataByTenantId,
 } from '@/lib/pb/tenantData';
+import { database } from '@/lib/pocketbaseRtdb';
+import { onTableSettingsChange } from '@/lib/tableSettingsSync';
 import {
   buildCheckInFloorPlan,
   parseArrivedStatus,
@@ -17,6 +18,7 @@ import {
   FLOOR_CANVAS_SCALE,
   FLOOR_TABLE_PX,
 } from '@/lib/guestUtils';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
 
 export const TABLE_RING_BASE =
   'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
@@ -30,25 +32,40 @@ export function useCheckIn() {
   const searchKeyword = ref('');
   const unsubscribers = [];
   let tableSettingsCache = {};
-  let dataRecordId = '';
+  let lastTableSettingsJson = '';
+  let tableSettingsPullTimer = null;
 
-  function applyDataBundle(bundle) {
-    weddingGuests.value = bundle.wedding_guests || {};
-    guestStatus.value = bundle.guest_status || {};
-    tableSettingsCache = bundle.table_settings || {};
-    refreshFloorLayout();
-  }
-
+  /** 同 legacy index_script — 只用 table_settings x/y，唔用 floor_layout（避免落後覆蓋） */
   function refreshFloorLayout() {
     floorLayout.value = buildCheckInFloorPlan(weddingGuests.value, tableSettingsCache);
   }
 
-  async function refreshFromServer() {
+  function applyTableSettings(next) {
+    const normalized = next || {};
+    const json = JSON.stringify(normalized);
+    if (json === lastTableSettingsJson) return;
+    lastTableSettingsJson = json;
+    tableSettingsCache = normalized;
+    refreshFloorLayout();
+  }
+
+  function scheduleTableSettingsPull() {
+    clearTimeout(tableSettingsPullTimer);
+    tableSettingsPullTimer = setTimeout(() => {
+      tableSettingsPullTimer = null;
+      void pullTableSettings();
+    }, 80);
+  }
+
+  async function pullTableSettings() {
     const tid = tenantId.value;
     if (!tid) return;
-    const bundle = await getTenantDataBundle(tid);
-    applyDataBundle(bundle);
-    if (bundle.recordId) dataRecordId = bundle.recordId;
+    try {
+      const settings = await getTenantTableSettings(tid);
+      applyTableSettings(settings);
+    } catch (e) {
+      console.error('CheckIn 枱位同步失敗:', e);
+    }
   }
 
   function patchGuestStatusField(statusKey, field, value) {
@@ -83,25 +100,38 @@ export function useCheckIn() {
     const tid = tenantId.value;
     if (!tid) return;
 
-    const recordId = dataRecordId || tenantDataRecordId.value;
+    const bindPath = (subPath, handler) => {
+      const dbRef = database.ref(`tenants/${tid}/${subPath}`);
+      dbRef.on('value', handler);
+      unsubscribers.push(() => dbRef.off('value', handler));
+    };
+
+    bindPath('wedding_guests', (snap) => {
+      weddingGuests.value = snap.val() || {};
+      refreshFloorLayout();
+    });
+    bindPath('guest_status', (snap) => {
+      guestStatus.value = snap.val() || {};
+    });
+    bindPath('table_settings', (snap) => {
+      applyTableSettings(snap.val());
+    });
+
+    const recordId = tenantDataRecordId.value;
     if (recordId) {
-      const unsub = subscribeTenantData(recordId, () => {
-        refreshFromServer().catch((e) => console.error('CheckIn 即時同步失敗:', e));
-      });
+      const unsub = subscribeTenantData(recordId, scheduleTableSettingsPull, tid);
       unsubscribers.push(unsub);
-      refreshFromServer().catch((e) => console.error('CheckIn 載入失敗:', e));
-      return;
     }
 
-    subscribeTenantDataByTenantId(tid, (bundle) => {
-      applyDataBundle(bundle);
-      if (bundle.recordId) dataRecordId = bundle.recordId;
-    }).then((unsub) => unsubscribers.push(unsub));
+    unsubscribers.push(onTableSettingsChange(tid, scheduleTableSettingsPull));
   }
 
   function stopSync() {
     unsubscribers.forEach((off) => off());
     unsubscribers.length = 0;
+    clearTimeout(tableSettingsPullTimer);
+    tableSettingsPullTimer = null;
+    lastTableSettingsJson = '';
   }
 
   function tablePercent(tableNum) {
@@ -144,6 +174,12 @@ export function useCheckIn() {
     patchGuestStatusField(statusKey, 'arrived', next);
     try {
       await setGuestStatusField(tid, statusKey, 'arrived', next);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '更新簽到狀態',
+        detail: `${name}（${table}桌）${current || '未到'} → ${next}`,
+      });
     } catch (e) {
       patchGuestStatusField(statusKey, 'arrived', prev);
       console.error('簽到狀態更新失敗:', e);
@@ -160,6 +196,12 @@ export function useCheckIn() {
     patchGuestStatusField(statusKey, 'gift', next);
     try {
       await setGuestStatusField(tid, statusKey, 'gift', next);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '更新人情狀態',
+        detail: `${name}（${table}桌）${current || '未交'} → ${next}`,
+      });
     } catch (e) {
       patchGuestStatusField(statusKey, 'gift', prev);
       console.error('人情狀態更新失敗:', e);
@@ -238,6 +280,12 @@ export function useCheckIn() {
     patchWeddingGuestAtTable(tableNum, guest);
     try {
       await addWeddingGuestAtTable(tid, tableNum, guest);
+      void writeAuditLog({
+        tenantId: tid,
+        page: AUDIT_PAGES.CHECKIN,
+        action: '現場加座',
+        detail: `${trimmed}（${table}桌，${guest.side}，${guest.group}）`,
+      });
     } catch (e) {
       revertWeddingGuestsForTable(tableNum, prevList);
       throw e;

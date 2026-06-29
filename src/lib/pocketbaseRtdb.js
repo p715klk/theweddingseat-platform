@@ -13,6 +13,12 @@ import {
   cleanupOrphanedAuthUsers,
   getUserProfilesByIds,
 } from '@/lib/tenantUserLifecycle';
+import { broadcastTableSettingsChange } from '@/lib/tableSettingsSync';
+import {
+  buildDefaultTableSettings,
+  buildFloorPlanFromTableSettings,
+  buildDefaultStarterGuestsPayload,
+} from '@/lib/guestUtils';
 
 const TENANT_DATA_KEYS = new Set([
   'wedding_guests',
@@ -55,13 +61,15 @@ function isDuplicateRecordError(err) {
 }
 
 function defaultTenantDataPayload(tenantId) {
+  const tableSettings = buildDefaultTableSettings();
+  const starters = buildDefaultStarterGuestsPayload();
   return {
     tenant_id: tenantId,
-    wedding_guests: {},
-    unassigned_guests: [],
-    guest_status: {},
-    table_settings: {},
-    floor_layout: {},
+    wedding_guests: starters.wedding_guests,
+    unassigned_guests: starters.unassigned_guests,
+    guest_status: starters.guest_status,
+    table_settings: tableSettings,
+    floor_layout: buildFloorPlanFromTableSettings(tableSettings),
     meta_label_columns: DEFAULT_LABEL_COLUMNS,
   };
 }
@@ -310,6 +318,20 @@ async function findTenantDataRecord(tenantId) {
   const record = list.items[0];
   if (record) tenantDataIdCache.set(key, record.id);
   return record || null;
+}
+
+/** 合併同一 tick 內對同一 tenant 嘅重複讀取（例如 slug 頁同時訂閱多個 path） */
+const tenantDataReadInflight = new Map();
+
+function findTenantDataRecordCoalesced(tenantId) {
+  const key = String(tenantId || '').trim();
+  if (!key) return Promise.resolve(null);
+  if (tenantDataReadInflight.has(key)) return tenantDataReadInflight.get(key);
+  const work = findTenantDataRecord(key).finally(() => {
+    tenantDataReadInflight.delete(key);
+  });
+  tenantDataReadInflight.set(key, work);
+  return work;
 }
 
 async function resolveOwnerUid(tenantId, tenantRecord) {
@@ -565,7 +587,7 @@ async function readPath(path) {
     }
 
     if (TENANT_DATA_KEYS.has(parts[2])) {
-      const dataRec = await findTenantDataRecord(tenantId);
+      const dataRec = await findTenantDataRecordCoalesced(tenantId);
       const root = dataRec?.[parts[2]];
       if (parts.length === 3) {
         return root ?? (parts[2] === 'unassigned_guests' ? [] : parts[2] === 'meta_label_columns' ? DEFAULT_LABEL_COLUMNS : {});
@@ -724,6 +746,10 @@ async function writePath(path, value) {
       }
 
       await pb.collection('tenant_data').update(dataRec.id, { [key]: nextValue });
+      if (key === 'table_settings') {
+        broadcastTableSettingsChange(tenantId);
+        notifyPath(`tenants/${tenantId}/table_settings`, nextValue);
+      }
       return;
     }
   }
@@ -736,19 +762,15 @@ function ensureTenantSubscription(tenantId) {
   const unsubs = [];
 
   const refreshData = async () => {
-    const paths = [
-      `tenants/${tenantId}/wedding_guests`,
-      `tenants/${tenantId}/unassigned_guests`,
-      `tenants/${tenantId}/guest_status`,
-      `tenants/${tenantId}/table_settings`,
-      `tenants/${tenantId}/floor_layout`,
-      `tenants/${tenantId}/meta_label_columns`,
-    ];
-    await Promise.all(
-      paths.map(async (p) => {
-        notifyPath(p, await readPath(p));
-      }),
-    );
+    const dataRec = await findTenantDataRecord(tenantId);
+    if (!dataRec) return;
+    const base = `tenants/${tenantId}`;
+    notifyPath(`${base}/wedding_guests`, dataRec.wedding_guests ?? {});
+    notifyPath(`${base}/unassigned_guests`, dataRec.unassigned_guests ?? []);
+    notifyPath(`${base}/guest_status`, dataRec.guest_status ?? {});
+    notifyPath(`${base}/table_settings`, dataRec.table_settings ?? {});
+    notifyPath(`${base}/floor_layout`, dataRec.floor_layout ?? {});
+    notifyPath(`${base}/meta_label_columns`, dataRec.meta_label_columns ?? DEFAULT_LABEL_COLUMNS);
   };
 
   const refreshMeta = async () => {
@@ -763,15 +785,20 @@ function ensureTenantSubscription(tenantId) {
   findTenantByIdOrSlug(tenantId).then((tenant) => {
     if (!tenant) return;
 
-    pb.collection('tenants').subscribe(tenant.id, () => {
-      refreshMeta();
-    }).then((fn) => unsubs.push(fn)).catch(() => {});
+    pb.collection('tenants').subscribe('*', (e) => {
+      if (e.record?.id === tenant.id) refreshMeta();
+    }).then((fn) => unsubs.push(fn)).catch((err) => {
+      console.warn('tenants realtime subscribe 失敗:', tenantId, err);
+    });
 
     findTenantDataRecord(tenantId).then((dataRec) => {
       if (!dataRec) return;
-      pb.collection('tenant_data').subscribe(dataRec.id, () => {
-        refreshData();
-      }).then((fn) => unsubs.push(fn)).catch(() => {});
+      // 單筆 subscribe(recordId) 用 viewRule（null = 只限 superuser）；改用 * + filter
+      pb.collection('tenant_data').subscribe('*', (e) => {
+        if (e.record?.tenant_id === tenantId) refreshData();
+      }).then((fn) => unsubs.push(fn)).catch((err) => {
+        console.warn('tenant_data realtime subscribe 失敗:', tenantId, err);
+      });
     });
 
     pb.collection('tenant_members').subscribe('*', (e) => {

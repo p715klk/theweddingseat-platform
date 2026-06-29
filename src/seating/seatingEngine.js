@@ -1,7 +1,18 @@
 import { createCompatTenantRef } from './compatTenantRef.js';
 import { tenantDataDbRef } from '@/lib/pb/dataRef';
 import { saveGuestSeatingState, updateTenantData } from '@/lib/pb/tenantData';
-import { serializeGroupForFirebase } from '@/lib/adminGuestModel';
+import { mergeCategoriesFromGuests, serializeGroupForFirebase } from '@/lib/adminGuestModel';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
+
+function logSeatingAudit(action, detail = '') {
+    if (!activeTenantId) return;
+    void writeAuditLog({
+        tenantId: activeTenantId,
+        page: AUDIT_PAGES.SEATING,
+        action,
+        detail,
+    });
+}
 
 let tenantRefFn = null;
 let activeTenantId = '';
@@ -22,6 +33,7 @@ let uiHooks = {
     onGuestModalChange: null,
     onCategoryPoolChange: null,
     onTableSettingsModalChange: null,
+    onNewTableModalChange: null,
     onGlobalStatsChange: null,
     onPrintPreviewChange: null,
     onCanvasTransformChange: null,
@@ -112,9 +124,9 @@ function persistTableSettings() {
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
-let categoriesByColumn = {
-    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
-};
+const DEFAULT_TAG_CATEGORIES = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
+let savedCategoryPool = [...DEFAULT_TAG_CATEGORIES];
+let categoriesByColumn = { [PRIMARY_TAG_KEY]: [...DEFAULT_TAG_CATEGORIES] };
 let legacyLabelKeys = null;
 
 function normalizeGuestTags(val) {
@@ -139,19 +151,31 @@ function getPrimaryGroup(guest) {
     return tags[0] || '未分類';
 }
 
+function refreshCategoryPool() {
+    const guests = collectAllGuestsInSeating();
+    const merged = mergeCategoriesFromGuests(savedCategoryPool, guests);
+    categoriesByColumn = { [PRIMARY_TAG_KEY]: merged };
+    notifyCategoryPoolChange();
+}
+
 function applyMetaLabelColumns(meta) {
-    if (meta && meta.keys && meta.names) {
-        const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
-        meta.keys.forEach(k => {
-            (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
+    if (meta?.categories?.group) {
+        savedCategoryPool = [...meta.categories.group];
+        legacyLabelKeys = meta.keys?.length > 1 ? meta.keys : null;
+    } else if (meta?.keys && meta?.names) {
+        const pool = [];
+        meta.keys.forEach((k) => {
+            (meta.categories?.[k] || []).forEach((c) => {
+                if (!pool.includes(c)) pool.push(c);
+            });
         });
-        categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+        if (pool.length) savedCategoryPool = pool;
         legacyLabelKeys = meta.keys.length > 1 ? meta.keys : null;
-    } else if (meta && meta.categories) {
-        categoriesByColumn = meta.categories;
+    } else if (meta?.categories) {
+        savedCategoryPool = [...(meta.categories[PRIMARY_TAG_KEY] || DEFAULT_TAG_CATEGORIES)];
         legacyLabelKeys = null;
     }
-    notifyCategoryPoolChange();
+    refreshCategoryPool();
 }
 
 function notifyCategoryPoolChange() {
@@ -202,7 +226,7 @@ function persistMetaLabelColumns() {
     const labelColumns = {
         keys: [PRIMARY_TAG_KEY],
         names: ['標籤 (可多選)'],
-        categories: categoriesByColumn,
+        categories: { [PRIMARY_TAG_KEY]: savedCategoryPool },
     };
     cachedMetaLabelColumns = labelColumns;
     if (!activeTenantId) return Promise.reject(new Error('專案未就緒'));
@@ -888,8 +912,16 @@ function notifySidebarChange(instant = false) {
 }
 
 function getSidebarRightEdge() {
-    if (!isSidebarOpen) return 0;
-    return getSidebarPanelWidth();
+    const content = document.querySelector('.sidebar-panel:not(.collapsed) .sidebar-content');
+    if (content) {
+        return content.getBoundingClientRect().right;
+    }
+    return 0;
+}
+
+function isGuestDragOverSidebarZone(clientX, clientY) {
+    if (clientX <= getSidebarDragOpenThreshold()) return true;
+    return isPointOverSidebarDropZone(clientX, clientY);
 }
 
 function openSidebar({ instant = false } = {}) {
@@ -911,10 +943,10 @@ function openSidebarIfDragEntersSidebar(clientX) {
     }
 }
 
-function closeSidebarIfDragLeavesSidebar(clientX, sidebarRight) {
-    if (!isSidebarOpen) return;
-    const edge = sidebarRight ?? getSidebarRightEdge();
-    if (clientX > edge - 8) {
+function closeSidebarIfDragLeavesSidebar(clientX) {
+    if (!isSidebarOpen || !isGuestDragging) return;
+    const edge = getSidebarRightEdge();
+    if (edge > 0 && clientX > edge - 8) {
         closeSidebar();
     }
 }
@@ -1811,6 +1843,10 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         ]
         : null;
 
+    const guestName = movingGuestObj?.name || '（未知）';
+    const fromLabel = fromTable === 'POOL' ? '待派池' : `${fromTable}桌`;
+    logSeatingAudit('移動賓客', `${guestName}：${fromLabel} → ${toTableNum}桌 座位${targetSortNum}`);
+
     commitGuestStateChange(Array.from(affected), { poolChanged, poolSides });
 }
 
@@ -1853,6 +1889,8 @@ function moveGuestToPool(data) {
         unassignedPool.push(movingGuestObj);
     }
 
+    logSeatingAudit('移回待派池', `${movingGuestObj.name}（${fromTable}桌）`);
+
     commitGuestStateChange([String(fromTable)], {
         poolChanged: true,
         poolSides: [getGuestSideLabel(movingGuestObj)]
@@ -1874,6 +1912,14 @@ function isPointOverSidebarDropZone(clientX, clientY) {
 
 function resolvePointerDrop(clientX, clientY, data) {
     if (isPointOverSidebarDropZone(clientX, clientY)) {
+        moveGuestToPool(data);
+        if (isMobileViewport()) openSidebar();
+        return;
+    }
+
+    if (isMobileViewport() && data?.fromTable && data.fromTable !== 'POOL'
+        && isGuestDragOverSidebarZone(clientX, clientY)) {
+        openSidebar();
         moveGuestToPool(data);
         return;
     }
@@ -1902,9 +1948,11 @@ function finishGuestTouchDrag(dragging, dragData, ghost, clientX, clientY) {
     }
 }
 
-function handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev) {
+function handleGuestTouchMove(t, startX, startY, state, opts, ev) {
     openSidebarIfDragEntersSidebar(t.clientX);
-    if (sidebarRight != null) closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
+    if (opts.closeSidebarOnLeave) {
+        closeSidebarIfDragLeavesSidebar(t.clientX);
+    }
 
     const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
     if (!state.dragging && dist > GUEST_DRAG_THRESHOLD) {
@@ -1936,7 +1984,6 @@ function setupTouchDrag(el, getDragData, options) {
         const startX = e.touches[0].clientX;
         const startY = e.touches[0].clientY;
         const state = { dragging: false, ghost: null, dragData: null };
-        const sidebarRight = useDocListeners ? getSidebarRightEdge() : null;
 
         const findTouch = (list) => {
             for (let i = 0; i < list.length; i++) {
@@ -1949,7 +1996,7 @@ function setupTouchDrag(el, getDragData, options) {
             const onDocMove = (ev) => {
                 const t = findTouch(ev.touches);
                 if (!t) return;
-                handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev);
+                handleGuestTouchMove(t, startX, startY, state, opts, ev);
             };
             const onDocEnd = (ev) => {
                 const ended = findTouch(ev.changedTouches);
@@ -1967,7 +2014,7 @@ function setupTouchDrag(el, getDragData, options) {
 
         const onElMove = (ev) => {
             if (ev.touches.length !== 1) return;
-            handleGuestTouchMove(ev.touches[0], startX, startY, state, opts, null, ev);
+            handleGuestTouchMove(ev.touches[0], startX, startY, state, opts, ev);
         };
         const onElEnd = (ev) => {
             el.removeEventListener('touchmove', onElMove);
@@ -2136,6 +2183,7 @@ function startSeatingRealtimeSync() {
             return;
         }
         if (!shouldApplyRemoteGuestState()) return;
+        refreshCategoryPool();
         runRender();
     }, err => {
         console.error('wedding_guests 讀取失敗:', err);
@@ -2160,6 +2208,7 @@ function startSeatingRealtimeSync() {
             return;
         }
         if (!shouldApplyRemoteGuestState()) return;
+        refreshCategoryPool();
         runRender();
     }, err => console.error('unassigned_guests 讀取失敗:', err)));
 
@@ -2347,7 +2396,10 @@ function finishTableDrag() {
         if (moved) {
             suppressTableSettingsRemoteRenderCount = 2;
             tenantRef(`table_settings/${tableNum}`).update({ x: bx, y: by })
-                .then(() => syncFloorLayoutBestEffort())
+                .then(() => {
+                    logSeatingAudit('移動枱位置', `${tableNum}桌 → (${Math.round(bx)}, ${Math.round(by)})`);
+                    return syncFloorLayoutBestEffort();
+                })
                 .catch(err => {
                     suppressTableSettingsRemoteRenderCount = 0;
                     console.error('枱位同步失敗:', err);
@@ -2466,6 +2518,7 @@ function saveGuestChangesAction(payload) {
         return persistMetaLabelColumns()
             .then(() => persistGuestState(getTableSettingKeys(), true))
             .then(() => {
+                logSeatingAudit('編輯賓客（待派池）', newName);
                 applyGuestMoveUI([], { poolChanged: true, poolSides: [newSide] });
                 closeGuestModal();
             })
@@ -2494,6 +2547,7 @@ function saveGuestChangesAction(payload) {
     return persistMetaLabelColumns()
         .then(() => persistGuestState([String(tableIdx)], false))
         .then(() => {
+            logSeatingAudit('編輯賓客', `${newName}（${tableIdx}桌）`);
             applyGuestMoveUI([String(tableIdx)], { poolChanged: false });
             closeGuestModal();
         })
@@ -2520,6 +2574,8 @@ function removeGuestFromSeatAction() {
         if (guestId && !unassignedPool.some(g => g?.id && String(g.id) === guestId)) {
             unassignedPool.push(guestObj);
         }
+
+        logSeatingAudit('移除座位賓客', `${guestObj?.name || '（未知）'}（${tableNum}桌）→ 待派池`);
 
         commitGuestStateChange([String(tableNum)], {
             poolChanged: true,
@@ -2571,14 +2627,46 @@ function handleDropTrash(e) {
     } catch (err) { console.error(err); }
 }
 
-function createNewTableAction() {
-    const newNum = prompt("請輸入全新圓枱桌號:");
-    if (!newNum || newNum.trim() === "") return;
-    const cleanNum = newNum.trim();
+function getNextSuggestedTableNum() {
+    const nums = getTableSettingKeys()
+        .map((n) => parseInt(n, 10))
+        .filter((n) => !Number.isNaN(n) && n >= 1);
+    if (!nums.length) return 1;
+    return Math.max(...nums) + 1;
+}
 
-    if (tableSettings[cleanNum]) { alert("❌ 此桌號已存在！"); return; }
-    const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
-    const cleanMax = parseInt(maxSeats) || 12;
+function createNewTableAction() {
+    uiHooks.onNewTableModalChange?.({
+        open: true,
+        tableNum: getNextSuggestedTableNum(),
+        maxSeats: 12,
+    });
+}
+
+function closeNewTableModal() {
+    uiHooks.onNewTableModalChange?.({ open: false });
+}
+
+function confirmCreateNewTableAction(payload) {
+    const newNumRaw = digitsOnly(String(payload?.tableNum ?? ''));
+    if (!newNumRaw) {
+        alert('❌ 請輸入桌號！');
+        return Promise.reject(new Error('empty table num'));
+    }
+    const tableNum = parseInt(newNumRaw, 10);
+    if (Number.isNaN(tableNum) || tableNum < 1 || tableNum > 99) {
+        alert('❌ 請輸入有效桌號（1–99 數字）！');
+        return Promise.reject(new Error('invalid table num'));
+    }
+    const cleanNum = String(tableNum);
+
+    if (tableSettings[cleanNum]) {
+        alert('❌ 此桌號已存在！');
+        return Promise.reject(new Error('duplicate table num'));
+    }
+
+    const maxRaw = digitsOnly(String(payload?.maxSeats ?? ''));
+    const cleanMax = Math.min(99, Math.max(1, parseInt(maxRaw, 10) || 12));
 
     const center = screenToCanvas(
         viewport.getBoundingClientRect().left + viewport.getBoundingClientRect().width / 2,
@@ -2593,8 +2681,12 @@ function createNewTableAction() {
     runRender();
     refreshFindTableMenu();
     suppressTableSettingsRemoteRenderCount = 1;
-    tenantRef(`table_settings/${cleanNum}`).set(newSettings)
+    return tenantRef(`table_settings/${cleanNum}`).set(newSettings)
         .then(() => syncFloorLayoutBestEffort())
+        .then(() => {
+            logSeatingAudit('新增枱', `${cleanNum}桌（${cleanMax} 位）`);
+            closeNewTableModal();
+        })
         .catch((err) => {
             suppressTableSettingsRemoteRenderCount = 0;
             delete tableSettings[cleanNum];
@@ -2602,7 +2694,12 @@ function createNewTableAction() {
             refreshFindTableMenu();
             console.error('新增圓枱失敗:', err);
             alert('❌ 新增圓枱失敗，請確認已登入並有寫入權限。');
+            throw err;
         });
+}
+
+function digitsOnly(value) {
+    return String(value ?? '').replace(/\D/g, '');
 }
 
 function getMinAllowedMaxSeats(tableNum) {
@@ -2677,6 +2774,7 @@ function saveTableSettingsAction(payload) {
             max_seats: newMax,
             label: newLabel,
         }).then(() => {
+            logSeatingAudit('更改枱設定', `${oldNum}桌：上限 ${newMax}，標籤「${newLabel || '—'}」`);
             notifyCanvasTablesChange([oldNum]);
             refreshFindTableMenu();
             scheduleFloorLayoutSync();
@@ -2707,6 +2805,7 @@ function saveTableSettingsAction(payload) {
     return tenantRef().update(updates).then(() => persistTableSettings())
         .then(() => forceFloorLayoutSync())
         .then(() => {
+            logSeatingAudit('更改枱號', `${oldNum}桌 → ${newNum}桌`);
             notifyCanvasTablesChange();
             refreshFindTableMenu();
             runRender();
@@ -2746,6 +2845,7 @@ function deleteTableAction() {
         .then(() => persistGuestState([tableNum], true))
         .then(() => forceFloorLayoutSync())
         .then(() => {
+            logSeatingAudit('刪除枱', `${tableNum}桌（${guestsInTable.filter(g => g?.name).length} 位移入待派池）`);
             runRender();
             closeSettingsModal();
         })
@@ -2762,12 +2862,12 @@ function getSeatingGuestsUsingTag(tag) {
 function addSeatingCategory(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed) return Promise.resolve(false);
-    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
-    if (pool.includes(trimmed)) return Promise.resolve(false);
-    pool.push(trimmed);
-    categoriesByColumn[PRIMARY_TAG_KEY] = pool;
+    if (savedCategoryPool.includes(trimmed)) return Promise.resolve(false);
+    savedCategoryPool.push(trimmed);
+    categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
+            logSeatingAudit('新增標籤', trimmed);
             notifyCategoryPoolChange();
             return true;
         });
@@ -2778,12 +2878,13 @@ function removeSeatingCategory(tag) {
     if (!trimmed || getGuestsUsingTagInSeating(trimmed).length > 0) {
         return Promise.resolve(false);
     }
-    const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
-    const idx = pool.indexOf(trimmed);
+    const idx = savedCategoryPool.indexOf(trimmed);
     if (idx === -1) return Promise.resolve(false);
-    pool.splice(idx, 1);
+    savedCategoryPool.splice(idx, 1);
+    categoriesByColumn[PRIMARY_TAG_KEY] = mergeCategoriesFromGuests(savedCategoryPool, collectAllGuestsInSeating());
     return persistMetaLabelColumns()
         .then(() => {
+            logSeatingAudit('刪除標籤', trimmed);
             notifyCategoryPoolChange();
             return true;
         });
@@ -2794,6 +2895,8 @@ function resetEngineState() {
     seatingDataReady = { guests: false, pool: false, tables: false, meta: false };
     tableSettingsMigrated = false;
     cachedMetaLabelColumns = null;
+    savedCategoryPool = [...DEFAULT_TAG_CATEGORIES];
+    categoriesByColumn = { [PRIMARY_TAG_KEY]: [...DEFAULT_TAG_CATEGORIES] };
     allGuests = {};
     unassignedPool = [];
     tableSettings = {};
@@ -2806,6 +2909,7 @@ function resetEngineState() {
         onGuestModalChange: null,
         onCategoryPoolChange: null,
         onTableSettingsModalChange: null,
+    onNewTableModalChange: null,
         onGlobalStatsChange: null,
         onPrintPreviewChange: null,
         onCanvasTransformChange: null,
@@ -2841,6 +2945,7 @@ export function initSeatingEngine({ tenantId, tenantRef: tenantRefProp, slug, ho
         onGuestModalChange: hooks.onGuestModalChange || null,
         onCategoryPoolChange: hooks.onCategoryPoolChange || null,
         onTableSettingsModalChange: hooks.onTableSettingsModalChange || null,
+        onNewTableModalChange: hooks.onNewTableModalChange || null,
         onGlobalStatsChange: hooks.onGlobalStatsChange || null,
         onPrintPreviewChange: hooks.onPrintPreviewChange || null,
         onCanvasTransformChange: hooks.onCanvasTransformChange || null,
@@ -2892,6 +2997,8 @@ export {
     refreshFindTableMenu,
     flyToTable,
     createNewTableAction,
+    closeNewTableModal,
+    confirmCreateNewTableAction,
     toggleTablePositionLock,
     printCanvasView,
     printGuestListView,

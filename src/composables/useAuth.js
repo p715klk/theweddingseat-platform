@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import getPocketBase, { isPocketBaseConfigured } from '@/lib/pocketbaseClient';
+import { logLogin, logLogout } from '@/lib/auditLog';
 
 const user = ref(null);
 const authReady = ref(false);
@@ -42,11 +43,14 @@ async function login(email, password) {
   authError.value = null;
   const pb = getPocketBase();
   await pb.collection('users').authWithPassword(email.trim(), password);
+  logLogin(pb.authStore.record?.id);
 }
 
 async function logout() {
   if (!isPocketBaseConfigured()) return;
   authError.value = null;
+  const uid = getPocketBase().authStore.record?.id;
+  logLogout(uid);
   getPocketBase().authStore.clear();
 }
 

@@ -8,10 +8,11 @@
     </div>
     <TenantErrorView v-if="error" :message="error" />
     <div
-      v-else-if="requireLogin && authReady && !user"
+      v-else-if="requireLogin && authReady && (!user || !loginGuardReady)"
       class="min-h-screen flex items-center justify-center bg-gray-100 p-4"
     >
-      <FrontendLoginForm @success="onLoggedIn" />
+      <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
+      <FrontendLoginForm v-else @success="onLoggedIn" />
     </div>
     <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
       ⏳ 載入中...
@@ -34,6 +35,14 @@
         <p class="text-xs opacity-90 mt-1">{{ venueLabel || '載入中...' }}</p>
       </div>
       <div class="flex-1 flex justify-end items-center gap-2">
+        <button
+          v-if="user"
+          type="button"
+          class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold border border-white/30 transition whitespace-nowrap"
+          @click="settingsDialogOpen = true"
+        >
+          ⚙ 設定
+        </button>
         <router-link
           v-if="canAccessAdmin"
           :to="adminRoute"
@@ -59,6 +68,18 @@
         </button>
       </div>
     </header>
+
+    <div
+      class="relative"
+      :class="{ 'pointer-events-none opacity-95': interactionLocked }"
+      :aria-hidden="interactionLocked ? 'true' : undefined"
+    >
+    <p
+      v-if="interactionLocked"
+      class="mx-4 mt-2 text-center text-xs font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg py-2 px-3"
+    >
+      請先按右上角「登入」以操作點名
+    </p>
 
     <div class="max-w-xl mx-auto mt-2 px-4">
       <div class="relative">
@@ -88,9 +109,25 @@
           class="p-2 rounded-lg flex justify-between items-center gap-2 border border-red-100 bg-red-50"
           :class="{ 'opacity-50 line-through': row.arrived === '取消' }"
         >
-          <button type="button" class="flex-1 text-left" @click="openTable(row.tableNum)">
+          <button type="button" class="flex-1 text-left min-w-0" @click="openTable(row.tableNum)">
             <span class="font-bold text-gray-800">{{ row.guest.name }}</span>
-            <span class="block text-xs text-red-700 mt-1">第 {{ row.tableNum }} 桌 · {{ row.guest.side }}</span>
+            <div class="flex flex-wrap items-center gap-1 mt-1 text-xs">
+              <span class="text-red-700 font-medium shrink-0">第 {{ row.tableNum }} 桌</span>
+              <span class="text-red-700/60 shrink-0">·</span>
+              <span
+                class="px-1.5 py-0.5 rounded text-xs font-bold shrink-0"
+                :class="row.guest.side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'"
+              >
+                {{ row.guest.side }}
+              </span>
+              <span
+                v-for="tag in normalizeTags(row.guest.group)"
+                :key="tag"
+                class="px-1.5 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700 shrink-0"
+              >
+                {{ tag }}
+              </span>
+            </div>
           </button>
           <div class="flex gap-1">
             <button
@@ -157,9 +194,10 @@
         ↔↕ 枱位較多，可左右／上下滑動查看
       </p>
     </div>
+    </div>
 
     <div
-      v-if="selectedTable"
+      v-if="selectedTable && !interactionLocked"
       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
       @click.self="closeTableModal"
     >
@@ -301,13 +339,68 @@
     </div>
     </div>
 
+    <input
+      ref="csvInputRef"
+      type="file"
+      accept=".csv"
+      class="hidden"
+      @change="onCsvSelected"
+    />
+
+    <AdminSettingsDialog
+      :open="settingsDialogOpen"
+      :profile-only="settingsProfileOnly"
+      @close="settingsDialogOpen = false"
+      @password-changed="onPasswordChanged"
+      @import-csv="openCsvPicker"
+      @export-csv="onExportCsv"
+      @empty-guests="confirmEmpty"
+    />
+
+    <AdminCsvImportDialog
+      v-if="canAccessAdmin"
+      :open="csvDialogOpen"
+      :file-name="csvFileName"
+      :imported-guests="csvImportedGuests"
+      :preview-fn="previewCSVImport"
+      :applying="adminSaving"
+      @cancel="csvDialogOpen = false"
+      @confirm="onCsvConfirm"
+    />
+
+    <div
+      v-if="adminToast"
+      class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10001] bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-lg max-w-[90vw] text-center"
+      role="status"
+      aria-live="polite"
+    >
+      {{ adminToast }}
+    </div>
+
+    <div
+      v-if="passwordChangedNotice"
+      class="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4"
+    >
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100 text-center">
+        <p class="text-sm font-bold text-green-700 leading-relaxed mb-4">{{ passwordChangedNotice }}</p>
+        <button
+          type="button"
+          class="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold"
+          @click="passwordChangedNotice = ''"
+        >
+          確定
+        </button>
+      </div>
+    </div>
+
     <div
       v-if="showLoginModal"
       class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
       @click.self="showLoginModal = false"
     >
       <FrontendLoginForm
-        hint="登入後可使用點名、現場加座等功能（視乎帳號角色）。"
+        :key="loginFormKey"
+        hint="登入後可使用點名、現場加座等功能（須為本專案成員）。"
         @success="onLoginSuccess"
       />
     </div>
@@ -321,9 +414,14 @@ import { useTenant } from '@/composables/useTenant';
 import { useCheckIn } from '@/composables/useCheckIn';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
+import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
 import { useAuth } from '@/composables/useAuth';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
+import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
+import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
+import { useAdminGuests } from '@/composables/useAdminGuests';
+import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 
 const route = useRoute();
 const loading = ref(true);
@@ -332,7 +430,8 @@ const requireLogin = String(import.meta.env.VITE_FRONTEND_REQUIRE_LOGIN || '').t
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, canAddWalkInGuest } = useTenantAccess();
-const { error, features, themeColor, coupleNames, venueLabel, initTenant } = useTenant();
+const { loginGuardReady } = useTenantLoginGuard('checkin');
+const { error, features, themeColor, coupleNames, venueLabel, initTenant, tenantId } = useTenant();
 const {
   floorLayout,
   selectedTable,
@@ -357,15 +456,36 @@ const {
   guestMatchesKeyword,
 } = useCheckIn();
 
+const {
+  guests: adminGuests,
+  saving: adminSaving,
+  toast: adminToast,
+  load: loadAdminGuests,
+  save: saveAdminGuests,
+  emptyAllGuests,
+  exportCSV,
+  parseCSVFile,
+  previewCSVImport,
+  applyCSVImport,
+} = useAdminGuests();
+
 const showAddGuestForm = ref(false);
 const showLoginModal = ref(false);
+const settingsDialogOpen = ref(false);
+const passwordChangedNotice = ref('');
+const csvInputRef = ref(null);
+const csvDialogOpen = ref(false);
+const csvFileName = ref('');
+const csvImportedGuests = ref([]);
 const walkInName = ref('');
 const walkInSide = ref('男方');
 const walkInGroup = ref('現場加座');
 const walkInError = ref('');
 const addingGuest = ref(false);
+const loginFormKey = ref(0);
 
 const adminRoute = computed(() => `/p/${route.params.slug}/admin`);
+const settingsProfileOnly = computed(() => !canAccessAdmin.value);
 
 const tableOccupancy = computed(() => {
   if (!selectedTable.value) return { occupied: 0, max: 12, remaining: 0 };
@@ -373,6 +493,23 @@ const tableOccupancy = computed(() => {
 });
 
 const showFloorScrollHint = ref(false);
+
+watch(settingsDialogOpen, async (open) => {
+  if (!open || !canAccessAdmin.value) return;
+  try {
+    await loadAdminGuests(true);
+  } catch {
+    /* errors surfaced when using data actions */
+  }
+});
+
+watch(
+  tenantId,
+  (tid) => {
+    if (tid) setAuditPageContext({ tenantId: tid, page: AUDIT_PAGES.CHECKIN });
+  },
+  { immediate: true },
+);
 
 watch(
   () => floorLayout.value.items.length,
@@ -390,7 +527,13 @@ watch(
   { immediate: true },
 );
 
-const checkInLocked = computed(() => !features.value.checkin);
+const checkInLocked = computed(
+  () => !features.value.checkin || !authReady.value || !user.value || !loginGuardReady.value,
+);
+
+const interactionLocked = computed(
+  () => !authReady.value || !user.value || !loginGuardReady.value,
+);
 
 function onCycleArrived(table, name, current) {
   if (checkInLocked.value) return;
@@ -437,7 +580,11 @@ watch(
 
 watch(
   user,
-  (u) => {
+  (u, prevU) => {
+    if (u) passwordChangedNotice.value = '';
+    if (prevU && !u && showLoginModal.value) {
+      loginFormKey.value += 1;
+    }
     if (!requireLogin) return;
     if (!u) {
       authGatePassed = false;
@@ -446,6 +593,12 @@ watch(
   },
 );
 
+watch([user, loginGuardReady], ([u, ready]) => {
+  if (showLoginModal.value && u && ready) {
+    showLoginModal.value = false;
+  }
+});
+
 onUnmounted(stopSync);
 
 function onLoggedIn() {
@@ -453,7 +606,82 @@ function onLoggedIn() {
 }
 
 function onLoginSuccess() {
-  showLoginModal.value = false;
+  /* 等 useTenantLoginGuard 通過後先關 modal */
+}
+
+function onPasswordChanged() {
+  settingsDialogOpen.value = false;
+  passwordChangedNotice.value = '密碼已更新，請重新登入';
+}
+
+function openCsvPicker() {
+  settingsDialogOpen.value = false;
+  if (csvInputRef.value) {
+    csvInputRef.value.value = '';
+    csvInputRef.value.click();
+  }
+}
+
+function onExportCsv() {
+  settingsDialogOpen.value = false;
+  void (async () => {
+    try {
+      await loadAdminGuests(true);
+      if (!adminGuests.value.length) {
+        window.alert('目前沒有賓客可匯出');
+        return;
+      }
+      exportCSV();
+    } catch (e) {
+      window.alert(`❌ 匯出失敗: ${e.message}`);
+    }
+  })();
+}
+
+async function confirmEmpty() {
+  settingsDialogOpen.value = false;
+  try {
+    await loadAdminGuests(true);
+    if (!adminGuests.value.length) {
+      window.alert('目前沒有賓客可清空');
+      return;
+    }
+    const ok = window.confirm(
+      `確定要清空所有賓客嗎？\n\n將移除 ${adminGuests.value.length} 位賓客並立即同步到伺服器。`,
+    );
+    if (!ok) return;
+    emptyAllGuests();
+    await saveAdminGuests();
+  } catch (e) {
+    window.alert(`❌ 清空失敗: ${e.message}`);
+  }
+}
+
+async function onCsvSelected(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    await loadAdminGuests(true);
+    const parsed = await parseCSVFile(file);
+    if (parsed.error) {
+      window.alert(parsed.error);
+      return;
+    }
+    csvFileName.value = file.name;
+    csvImportedGuests.value = parsed.importedGuests;
+    csvDialogOpen.value = true;
+  } catch {
+    window.alert('❌ 讀取 CSV 檔案失敗，請重試。');
+  }
+}
+
+async function onCsvConfirm(plan) {
+  try {
+    await applyCSVImport(plan);
+    csvDialogOpen.value = false;
+  } catch (e) {
+    window.alert(`❌ 匯入失敗: ${e.message}`);
+  }
 }
 
 async function handleLogout() {
@@ -466,6 +694,7 @@ async function handleLogout() {
 }
 
 function openTable(num) {
+  if (interactionLocked.value) return;
   selectedTable.value = String(num);
   searchKeyword.value = '';
   resetWalkInForm();

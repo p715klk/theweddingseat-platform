@@ -152,7 +152,7 @@ const tableReady = computed(() => !props.loading && !props.loadError);
 const dragLockTitle = computed(() => {
   if (props.loading || !props.guests.length) return '載入名單後可切換拖動鎖定';
   if (props.dragLocked) {
-    return '拖動已鎖定，按一下解鎖（未滿桌拖動可能令空位前移）';
+    return '拖動已鎖定，按一下解鎖（未滿桌拖動會令空位前移）';
   }
   return '拖動已解鎖，按一下鎖定';
 });

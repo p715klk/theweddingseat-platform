@@ -1,5 +1,10 @@
 import getPocketBase from '@/lib/pocketbaseClient';
 import { pbFilterString } from '@/lib/pb/filter';
+import {
+  buildDefaultTableSettings,
+  buildFloorPlanFromTableSettings,
+  buildDefaultStarterGuestsPayload,
+} from '@/lib/guestUtils';
 
 const DEFAULT_LABEL_COLUMNS = {
   keys: ['group'],
@@ -56,13 +61,15 @@ function isDuplicateRecordError(err) {
 }
 
 function defaultTenantDataPayload(tenantId) {
+  const tableSettings = buildDefaultTableSettings();
+  const starters = buildDefaultStarterGuestsPayload();
   return {
     tenant_id: tenantId,
-    wedding_guests: {},
-    unassigned_guests: [],
-    guest_status: {},
-    table_settings: {},
-    floor_layout: {},
+    wedding_guests: starters.wedding_guests,
+    unassigned_guests: starters.unassigned_guests,
+    guest_status: starters.guest_status,
+    table_settings: tableSettings,
+    floor_layout: buildFloorPlanFromTableSettings(tableSettings),
     meta_label_columns: DEFAULT_LABEL_COLUMNS,
   };
 }
@@ -159,6 +166,18 @@ export function recordToDataBundle(record) {
 export async function getTenantDataBundle(tenantId) {
   const record = await findTenantDataRecord(tenantId);
   return recordToDataBundle(record);
+}
+
+/** 只拉 table_settings（比成條 tenant_data 細好多） */
+export async function getTenantTableSettings(tenantId) {
+  const key = String(tenantId || '').trim();
+  if (!key) return {};
+  const pb = getPocketBase();
+  const list = await pb.collection('tenant_data').getList(1, 1, {
+    filter: `tenant_id = ${pbFilterString(key)}`,
+    fields: 'table_settings',
+  });
+  return list.items[0]?.table_settings ?? {};
 }
 
 export async function updateTenantData(tenantId, patch) {
@@ -273,16 +292,32 @@ export async function patchTenantDataField(tenantId, field, mutator) {
   return next;
 }
 
-export function subscribeTenantData(recordId, callback) {
-  if (!recordId) return () => {};
+/**
+ * PocketBase 單筆 subscribe(recordId) 用 viewRule；tenant_data viewRule 為空時只有 superuser 收得到事件。
+ * 改用 collection 級 subscribe('*')（走 listRule）再 filter，跨裝置 realtime 先會生效。
+ */
+export function subscribeTenantData(recordId, callback, tenantId = '') {
+  if (!recordId && !tenantId) return () => {};
   const pb = getPocketBase();
+  const rid = String(recordId || '').trim();
+  const tid = String(tenantId || '').trim();
   let unsub = () => {};
   pb.collection('tenant_data')
-    .subscribe(recordId, () => callback())
+    .subscribe('*', (e) => {
+      const rec = e?.record;
+      if (!rec) return;
+      if (rid && rec.id === rid) {
+        callback(e);
+        return;
+      }
+      if (tid && rec.tenant_id === tid) callback(e);
+    })
     .then((fn) => {
       unsub = fn;
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn('tenant_data realtime subscribe 失敗:', err);
+    });
   return () => {
     try {
       unsub();
@@ -299,5 +334,5 @@ export async function subscribeTenantDataByTenantId(tenantId, callback) {
     callback(recordToDataBundle(latest));
   };
   await refresh();
-  return subscribeTenantData(record.id, refresh);
+  return subscribeTenantData(record.id, refresh, tenantId);
 }

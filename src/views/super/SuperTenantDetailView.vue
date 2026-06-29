@@ -18,19 +18,15 @@
       <section class="section">
         <h3>連結（URL Slug）</h3>
         <p class="hint-block">
-          改 slug 會改晒點名／後台網址。舊 link 會失效；資料仍保留喺 <code>tenants/{{ tenant.tenantId }}</code>。
+          Slug 建立後<strong>不可更改</strong>（避免舊連結失效同內部 ID 衝突）。如需新網址請建立新 Project。
         </p>
-        <form class="slug-form" @submit.prevent="saveSlug">
-          <div class="slug-row">
-            <span class="slug-prefix">{{ appUrl('p/') }}</span>
-            <input v-model="editForm.slug" type="text" required placeholder="chen-wong-20260915" />
-          </div>
-          <p class="field-hint">預覽：<code>{{ slugPreview || '…' }}</code></p>
-          <p v-if="slugMsg" :class="slugMsgOk ? 'ok' : 'error'">{{ slugMsg }}</p>
-          <button type="submit" class="btn-save" :disabled="savingSlug || slugPreview === slug">
-            {{ savingSlug ? '更新中…' : '🔗 更新連結' }}
-          </button>
-        </form>
+        <p class="slug-readonly">
+          <code>{{ slug }}</code>
+          <span v-if="tenant.tenantId !== slug" class="tenant-id-note">
+            · 內部 ID：<code>{{ tenant.tenantId }}</code>
+            <span class="warn">（與 slug 不一致，請執行 <code>node scripts/sync-tenant-id-to-slug.mjs</code> 修復）</span>
+          </span>
+        </p>
         <ul class="links">
           <li>
             點名頁：
@@ -171,9 +167,7 @@ import {
   getTenantBySlug,
   setTenantFeatures,
   updateTenantMeta,
-  renameTenantSlug,
   transferTenantOwner,
-  normalizeSlug,
   formatAuditTime,
 } from '@/composables/useSuperTenants';
 import { appUrl } from '@/lib/appBase';
@@ -196,9 +190,6 @@ const memberMsgOk = ref(false);
 const savingMeta = ref(false);
 const saveMetaMsg = ref('');
 const saveMetaOk = ref(false);
-const savingSlug = ref(false);
-const slugMsg = ref('');
-const slugMsgOk = ref(false);
 const panelMembers = ref([]);
 const membersPanelRef = ref(null);
 const transferringOwner = ref(false);
@@ -229,7 +220,6 @@ const featureBadgeClass = computed(() => {
 });
 
 const editForm = reactive({
-  slug: '',
   coupleNames: '',
   venueName: '',
   venueHall: '',
@@ -240,8 +230,6 @@ const editForm = reactive({
 
 const tenantOwnerUid = computed(() => tenant.value?.meta?.owner_uid || '');
 
-const slugPreview = computed(() => normalizeSlug(editForm.slug));
-
 function editorInfo() {
   if (!user.value) return null;
   return { uid: user.value.uid, email: user.value.email || '' };
@@ -249,7 +237,6 @@ function editorInfo() {
 
 function syncEditForm() {
   const m = tenant.value?.meta || {};
-  editForm.slug = tenant.value?.slug || m.slug || '';
   editForm.coupleNames = m.couple_names || '';
   editForm.venueName = m.venue_name || '';
   editForm.venueHall = m.venue_hall || '';
@@ -415,31 +402,6 @@ async function saveMeta() {
     saveMetaOk.value = false;
   } finally {
     savingMeta.value = false;
-  }
-}
-
-async function saveSlug() {
-  slugMsg.value = '';
-  savingSlug.value = true;
-  try {
-    const newSlug = await renameTenantSlug(
-      tenant.value.tenantId,
-      slug.value,
-      editForm.slug,
-      editorInfo(),
-    );
-    slugMsg.value = '連結已更新';
-    slugMsgOk.value = true;
-    if (newSlug !== slug.value) {
-      await router.replace(`/super/tenants/${newSlug}`);
-    } else {
-      await load();
-    }
-  } catch (e) {
-    slugMsg.value = e?.message || '更新失敗';
-    slugMsgOk.value = false;
-  } finally {
-    savingSlug.value = false;
   }
 }
 
@@ -673,6 +635,18 @@ async function saveSlug() {
 .owner-uid {
   margin-left: 0.35rem;
   color: #94a3b8;
+  font-size: 0.75rem;
+}
+.slug-readonly {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+.slug-readonly code {
+  font-weight: 700;
+  color: #0f172a;
+}
+.tenant-id-note .warn {
+  color: #b45309;
   font-size: 0.75rem;
 }
 .slug-form {

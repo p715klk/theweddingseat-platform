@@ -19,7 +19,7 @@
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
       <div class="flex items-center gap-3">
         <h1 class="text-base font-black tracking-wider text-slate-900 flex items-center gap-1.5">
-          <span class="text-xl">🦢</span> 可視化圓枱排位畫布
+          可視化圓枱排位畫布
         </h1>
         <div class="global-stats text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold">{{ globalStatsText }}</div>
       </div>
@@ -144,6 +144,7 @@
         :class="{ collapsed: !sidebarOpen, 'sidebar-no-transition': sidebarNoTransition }"
       >
         <div
+          id="sidebar-content"
           class="sidebar-content bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden w-[320px]"
           @dragover.prevent
           @drop="handleDropTrash($event)"
@@ -194,6 +195,15 @@
       @remove-category="onGuestRemoveCategory"
     />
 
+    <SeatingNewTableModal
+      :open="newTableModal.open"
+      :table-num="newTableModal.tableNum"
+      :max-seats="newTableModal.maxSeats"
+      :creating="newTableCreating"
+      @close="closeNewTableModal()"
+      @create="onNewTableCreate"
+    />
+
     <SeatingTableSettingsModal
       :open="tableSettingsModal.open"
       :original-table-num="tableSettingsModal.originalTableNum"
@@ -231,6 +241,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTenant } from '@/composables/useTenant';
 import { useSeatingViewportGestures } from '@/composables/useSeatingViewportGestures';
 import SeatingGuestEditModal from '@/components/seating/SeatingGuestEditModal.vue';
+import SeatingNewTableModal from '@/components/seating/SeatingNewTableModal.vue';
 import SeatingTableSettingsModal from '@/components/seating/SeatingTableSettingsModal.vue';
 import SeatingPrintPreview from '@/components/seating/SeatingPrintPreview.vue';
 import SeatingPoolSide from '@/components/seating/SeatingPoolSide.vue';
@@ -243,6 +254,8 @@ import {
   refreshFindTableMenu,
   flyToTable,
   createNewTableAction,
+  closeNewTableModal,
+  confirmCreateNewTableAction,
   toggleTablePositionLock,
   printCanvasView,
   printGuestListView,
@@ -297,6 +310,7 @@ const seatingCategories = ref([]);
 const guestModalSaving = ref(false);
 const tableSettingsSaving = ref(false);
 const tableSettingsDeleting = ref(false);
+const newTableCreating = ref(false);
 const guestModal = ref({
   open: false,
   name: '',
@@ -312,6 +326,11 @@ const tableSettingsModal = ref({
   label: '',
   maxSeats: 12,
   minMaxSeats: 1,
+});
+const newTableModal = ref({
+  open: false,
+  tableNum: '',
+  maxSeats: 12,
 });
 const printPreview = ref({
   open: false,
@@ -489,6 +508,17 @@ async function onGuestRemoveCategory(tag) {
   }
 }
 
+async function onNewTableCreate(payload) {
+  newTableCreating.value = true;
+  try {
+    await confirmCreateNewTableAction(payload);
+  } catch {
+    /* alert shown in engine */
+  } finally {
+    newTableCreating.value = false;
+  }
+}
+
 async function onTableSettingsSave(payload) {
   tableSettingsSaving.value = true;
   try {
@@ -558,6 +588,17 @@ function mountEngine() {
             label: state.label || '',
             maxSeats: state.maxSeats || 12,
             minMaxSeats: state.minMaxSeats || 1,
+          };
+        },
+        onNewTableModalChange(state) {
+          if (!state?.open) {
+            newTableModal.value = { ...newTableModal.value, open: false };
+            return;
+          }
+          newTableModal.value = {
+            open: true,
+            tableNum: String(state.tableNum ?? ''),
+            maxSeats: state.maxSeats || 12,
           };
         },
         onGlobalStatsChange(text) {

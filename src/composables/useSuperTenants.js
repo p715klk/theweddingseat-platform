@@ -1,4 +1,4 @@
-import { buildDefaultTableSettings, buildFloorPlanFromTableSettings } from '@/lib/guestUtils';
+import { buildDefaultTableSettings, buildFloorPlanFromTableSettings, buildDefaultStarterGuestsPayload } from '@/lib/guestUtils';
 import getPocketBase from '@/lib/pocketbaseClient';
 import {
   assertPlatformAdmin,
@@ -14,9 +14,9 @@ import {
   listAllTenants,
   getTenantBySlug as pbGetTenantBySlug,
   updateTenantMeta as pbUpdateTenantMeta,
-  renameTenantSlug as pbRenameTenantSlug,
   deleteTenantRecord,
   findTenantBySlug,
+  findTenantByIdOrSlug,
   metaToRecordFields,
 } from '@/lib/pb/tenant';
 import { getMemberProfile, getMembersMap } from '@/lib/pb/members';
@@ -204,19 +204,8 @@ export async function transferTenantOwner(tenantId, newOwnerUid, editor = null) 
   };
 }
 
-export async function renameTenantSlug(tenantId, oldSlug, newSlugInput, editor = null) {
-  const newSlug = normalizeSlug(newSlugInput);
-  if (!isValidSlug(newSlug)) {
-    throw new Error('Slug 格式無效（用小寫英文、數字、連字號）');
-  }
-  if (newSlug === oldSlug) return newSlug;
-  if (await isSlugTaken(newSlug)) {
-    throw new Error(`Slug「${newSlug}」已被使用`);
-  }
-
-  await pbRenameTenantSlug(tenantId, oldSlug, newSlug);
-  await pbUpdateTenantMeta(tenantId, { slug: newSlug, ...auditFields(editor) });
-  return newSlug;
+export async function renameTenantSlug() {
+  throw new Error('Slug 建立後不可更改；請建立新 Project 如需新網址。');
 }
 
 export async function addTenantMember(tenantId, uid, editor = null) {
@@ -299,7 +288,7 @@ export async function removeTenantMember(tenantId, uid) {
 }
 
 export async function isSlugTaken(slug) {
-  const hit = await findTenantBySlug(slug);
+  const hit = await findTenantByIdOrSlug(slug);
   return !!hit;
 }
 
@@ -331,6 +320,7 @@ function buildCreateTenantApiPayload({
 }) {
   const defaultTableSettings = buildDefaultTableSettings();
   const defaultFloorLayout = buildFloorPlanFromTableSettings(defaultTableSettings);
+  const defaultGuests = buildDefaultStarterGuestsPayload();
   return {
     slug: normalized,
     coupleNames: coupleNames.trim(),
@@ -344,13 +334,36 @@ function buildCreateTenantApiPayload({
     ownerDisplayName: String(ownerDisplayName || '').trim(),
     initial_password: ownerPassword,
     features: { ...DEFAULT_TENANT_FEATURES },
-    wedding_guests: tenantData.wedding_guests ?? {},
-    unassigned_guests: tenantData.unassigned_guests ?? [],
-    guest_status: tenantData.guest_status ?? {},
+    wedding_guests: tenantData.wedding_guests ?? defaultGuests.wedding_guests,
+    unassigned_guests: tenantData.unassigned_guests ?? defaultGuests.unassigned_guests,
+    guest_status: tenantData.guest_status ?? defaultGuests.guest_status,
     table_settings: tenantData.table_settings ?? defaultTableSettings,
     floor_layout: tenantData.floor_layout ?? defaultFloorLayout,
     meta_label_columns: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
   };
+}
+
+async function clearStaleTenantArtifacts(tenantId) {
+  const tid = String(tenantId || '').trim();
+  if (!tid || (await findTenantByIdOrSlug(tid))) return;
+
+  const pb = getPocketBase();
+  const { pbFilterString } = await import('@/lib/pb/filter');
+  const filter = `tenant_id = ${pbFilterString(tid)}`;
+  try {
+    const members = await pb.collection('tenant_members').getFullList({ filter });
+    await Promise.all(members.map((m) => pb.collection('tenant_members').delete(m.id)));
+  } catch {
+    /* best-effort */
+  }
+  try {
+    const dataRows = await pb.collection('tenant_data').getList(1, 1, { filter });
+    if (dataRows.items?.[0]) {
+      await pb.collection('tenant_data').delete(dataRows.items[0].id);
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function createTenantViaClient({
@@ -376,6 +389,7 @@ async function createTenantViaClient({
     if (!resolvedOwnerUid) throw new Error('建立帳號失敗（缺少 uid）');
 
     const pb = getPocketBase();
+    await clearStaleTenantArtifacts(tenantId);
     const tenantFields = metaToRecordFields(
       { ...meta, owner_uid: resolvedOwnerUid },
       normalized,
@@ -385,10 +399,11 @@ async function createTenantViaClient({
     tenantWritten = true;
 
     const { updateTenantData } = await import('@/lib/pb/tenantData');
+    const defaultGuests = buildDefaultStarterGuestsPayload();
     await updateTenantData(tenantId, {
-      wedding_guests: tenantData.wedding_guests ?? {},
-      unassigned_guests: tenantData.unassigned_guests ?? [],
-      guest_status: tenantData.guest_status ?? {},
+      wedding_guests: tenantData.wedding_guests ?? defaultGuests.wedding_guests,
+      unassigned_guests: tenantData.unassigned_guests ?? defaultGuests.unassigned_guests,
+      guest_status: tenantData.guest_status ?? defaultGuests.guest_status,
       table_settings: tenantData.table_settings ?? buildDefaultTableSettings(),
       floor_layout: tenantData.floor_layout ?? buildFloorPlanFromTableSettings(buildDefaultTableSettings()),
       meta_label_columns: tenantData.meta_label_columns ?? DEFAULT_LABEL_COLUMNS,
@@ -505,9 +520,9 @@ export async function createTenant({
     meta,
     ownerReuseExisting,
     tenantData: {
-      wedding_guests: {},
-      unassigned_guests: [],
-      guest_status: {},
+      wedding_guests: apiPayload.wedding_guests,
+      unassigned_guests: apiPayload.unassigned_guests,
+      guest_status: apiPayload.guest_status,
       table_settings: apiPayload.table_settings,
       floor_layout: apiPayload.floor_layout,
       meta_label_columns: apiPayload.meta_label_columns,

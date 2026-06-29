@@ -11,6 +11,7 @@ const SuperTenantDetailView = () => import('@/views/super/SuperTenantDetailView.
 const SuperSettingsView = () => import('@/views/super/SuperSettingsView.vue');
 const SuperMembersView = () => import('@/views/super/SuperMembersView.vue');
 const SuperPlatformAdminsView = () => import('@/views/super/SuperPlatformAdminsView.vue');
+const NotFoundView = () => import('@/views/NotFoundView.vue');
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -74,6 +75,15 @@ const router = createRouter({
       path: '/error',
       name: 'error',
       component: TenantErrorView,
+    },
+    {
+      path: '/404notfound',
+      name: 'not-found',
+      component: NotFoundView,
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/404notfound',
     },
   ],
 });

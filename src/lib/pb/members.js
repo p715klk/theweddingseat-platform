@@ -86,8 +86,8 @@ export async function getProfilesMap(tenantId) {
       email: u.email || '',
       display_name: m.display_name || u.display_name || '',
       created_at: m.created_at ?? u.created_at ?? null,
-      created_by_uid: u.created_by_uid || '',
-      created_by_email: u.created_by_email || '',
+      created_by_uid: m.created_by_uid || u.created_by_uid || '',
+      created_by_email: m.created_by_email || u.created_by_email || '',
     };
   });
   return map;

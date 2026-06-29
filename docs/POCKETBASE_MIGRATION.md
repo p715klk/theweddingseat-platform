@@ -67,9 +67,45 @@ npm run setup:pocketbase
 
 | `tenant_members` | Super Admin、本人、該 project Owner | **全部 Super Admin only**（Owner 經 `upsert-member` / `remove-member` hook） |
 
-| `tenant_data` | Super Admin、該 project 成員（`&&` 失敗時 fallback 為任何登入者） | create/delete：Super Admin；update：Super Admin 或成員 |
+| `tenant_data` | Super Admin、該 project 成員、持 slug 連結者（`&&` 失敗時 fallback 為任何登入者） | create/delete：Super Admin；update：Super Admin 或成員 |
 
+### 即時同步（Realtime / `/p/{slug}` 點名）
 
+PocketBase realtime 規則：
+
+| 訂閱方式 | 檢查嘅 rule |
+|----------|-------------|
+| `subscribe('*')` | **listRule** |
+| `subscribe('RECORD_ID')` | **viewRule** |
+
+舊版 `setup:pocketbase` 將 `tenants` / `tenant_data` 嘅 **viewRule 留空**（等同只限 superuser 讀單筆）。  
+前端若用 `subscribe(recordId)`，一般成員同點名頁 **收唔到** 簽到／派枱更新，要手動 refresh。
+
+**已修正（前端 + setup 腳本）：**
+
+1. 前端改用 `subscribe('*')` 再按 `tenant_id` filter（見 `src/lib/pb/tenantData.js`、`src/lib/pocketbaseRtdb.js`）
+2. 新版 `setup:pocketbase` 將 `tenants.viewRule`、`tenant_data.viewRule` 設成同 listRule 一樣
+
+**若 NAS 上仍無即時更新**，請重新跑一次：
+
+```bash
+npm run setup:pocketbase
+```
+
+或喺 PocketBase Admin → Collections → `tenant_data` → **View rule** 填同 **List rule** 一樣嘅 expression。
+
+**驗證：** 開兩部機 `/p/{slug}`，一部簽到 → 另一部應幾秒內更新（SSE `/api/realtime`）。F12 → Network 應見到長連線 `realtime`；若完全冇，檢查 NAS 反向代理有冇擋 SSE。
+
+### 登入限制（專案成員）
+
+`/p/{slug}`、`/admin`、`/seating` 登入後會驗證 `tenant_members`（Super Admin 除外）：
+
+| 頁面 | 允許角色 |
+|------|----------|
+| 點名 `/p/{slug}` | owner、admin、reception |
+| 後台／畫布 | owner、admin（reception 登入後見「返回點名頁」提示，唔會被登出） |
+
+非本 project 成員登入後會**自動登出**並提示。reception 誤入後台／畫布時保留登入，顯示 `TenantAccessDenied` 及返回點名按鈕。實作：`src/composables/useTenantLoginGuard.js`。
 
 **建帳號：** `createAuthUserViaRest` → `POST /tws/create-user`（見 `src/lib/twsApi.js`）。  
 
@@ -221,7 +257,7 @@ tenant_members        → 邊個 user 屬於邊個 project、role（owner / admi
 
 GitHub Pages 係 **HTTPS**，瀏覽器會 **封鎖** 對 `http://...` API 嘅請求（mixed content）。  
 
-本機 `http://localhost` 可以連 HTTP NAS，但 **p715klk.github.io 唔得**。
+本機 `http://localhost` 可以連 HTTP NAS，但 **welcome.theweddingseat.com（GitHub Pages HTTPS）唔得**。
 
 
 
@@ -229,19 +265,24 @@ GitHub Pages 係 **HTTPS**，瀏覽器會 **封鎖** 對 `http://...` API 嘅請
 
 
 
-1. **俾 PocketBase 一個 HTTPS 網址**（揀其一）：
+1. **俾 PocketBase 一個 HTTPS 網址，且憑證必須受瀏覽器信任**（揀其一）：
 
-   - QNAP 反向代理 + Let's Encrypt 憑證
+   - QNAP 反向代理 + **受信任**憑證（Let's Encrypt / myQNAPcloud；**QNAP 自簽 cert 唔得**）
 
-   - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（免費，適合家用 NAS）
+   - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（**推薦**：免費、邊界用 Cloudflare 受信任 cert，NAS 可保持自簽／HTTP 8090）
 
-2. **PocketBase Admin → Settings → Application → Allowed origins** 加入：
+   > **自簽 cert 問題：** 你自己開 Admin 可以按「繼續」，但 `welcome.theweddingseat.com` 用 JavaScript `fetch` 連 API 時，瀏覽器會直接 `ERR_CERT_AUTHORITY_INVALID`，無法 bypass。
 
+2. **CORS（通常唔使改）**
+
+   PocketBase **預設允許所有 origin**（`*`），Admin UI **冇**「Allowed origins」欄位。  
+   只有啟動時加咗 `--origins=...` 先需要限制；若要允許 GitHub Pages 自訂域名，重啟時加：
+
+   ```bash
+   ./pocketbase serve --http=127.0.0.1:8090 --origins="https://welcome.theweddingseat.com"
    ```
 
-   https://p715klk.github.io
-
-   ```
+   （QNAP 反向代理 `8091 → 8090` 時，PocketBase 仍只需聽 localhost:8090。）
 
 3. **GitHub repo → Settings → Secrets → Actions** 設：
 
@@ -274,6 +315,19 @@ https://kin9310.myqnapcloud.com:443/pb  →  http://127.0.0.1:8090
 
 
 然後 `VITE_POCKETBASE_URL=https://kin9310.myqnapcloud.com/pb`（實際 path 視你 NAS 設定）。
+
+
+
+### Cloudflare Tunnel（QNAP 自簽 cert 時推薦）
+
+NAS 維持 `http://127.0.0.1:8090`，唔使改 QNAP 憑證；對外經 Tunnel 提供 **受信任 HTTPS**：
+
+1. 喺 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 開 Tunnel（或用 `cloudflared` CLI）
+2. Public hostname 指去 `http://localhost:8090`（例如 `pb.yourdomain.com`）
+3. GitHub Secret：`VITE_POCKETBASE_URL=https://pb.yourdomain.com`
+4. 重新 deploy GitHub Pages
+
+（亦可用 QNAP Container Station 跑 `cloudflare/cloudflared` image，長期開機。）
 
 
 

@@ -245,13 +245,19 @@ export async function deleteTenantRecord(tenantId) {
 
 export function subscribeTenantRecord(recordId, callback) {
   const pb = getPocketBase();
+  const rid = String(recordId || '').trim();
+  if (!rid) return () => {};
   let unsub = () => {};
   pb.collection('tenants')
-    .subscribe(recordId, () => callback())
+    .subscribe('*', (e) => {
+      if (e.record?.id === rid) callback();
+    })
     .then((fn) => {
       unsub = fn;
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn('tenants realtime subscribe 失敗:', err);
+    });
   return () => {
     try {
       unsub();

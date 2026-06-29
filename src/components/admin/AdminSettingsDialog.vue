@@ -17,7 +17,7 @@
             ×
           </button>
         </div>
-        <div class="flex gap-1 border-b border-gray-200 -mb-px">
+        <div v-if="!profileOnly" class="flex gap-1 border-b border-gray-200 -mb-px">
           <button
             v-for="tab in tabs"
             :key="tab.id"
@@ -33,7 +33,7 @@
 
       <div class="p-4 overflow-y-auto flex-1 min-h-0">
         <!-- 資料管理 -->
-        <div v-if="activeTab === 'data'" class="space-y-3">
+        <div v-if="!profileOnly && activeTab === 'data'" class="space-y-3">
           <p class="text-xs text-gray-500 leading-relaxed">
             匯入／匯出賓客名單，或清空所有賓客。修改後需按「儲存變更」才會同步。
           </p>
@@ -49,7 +49,7 @@
         </div>
 
         <!-- 我的帳號 -->
-        <div v-else-if="activeTab === 'profile'" class="space-y-4">
+        <div v-else-if="profileOnly || activeTab === 'profile'" class="space-y-4">
           <dl class="profile-info">
             <div class="profile-row">
               <dt>Email</dt>
@@ -96,7 +96,6 @@
 
           <div>
             <h4 class="section-title">更改密碼</h4>
-            <p class="hint">更改前需輸入目前密碼以確認身份。</p>
             <form class="pw-form" @submit.prevent="submitPassword">
               <div class="field">
                 <label for="admin-current-pw">目前密碼</label>
@@ -105,6 +104,7 @@
                   v-model="currentPassword"
                   type="password"
                   required
+                  placeholder="更改前需輸入目前密碼以確認身份"
                   autocomplete="current-password"
                   v-on="passwordInputHandlers"
                 />
@@ -143,14 +143,20 @@
         </div>
 
         <!-- 用戶管理 -->
-        <div v-else-if="activeTab === 'users'" class="space-y-4">
+        <div v-else-if="!profileOnly && activeTab === 'users'" class="space-y-4">
           <TenantMembersPanel
             v-if="tenantId"
             :tenant-id="tenantId"
             :owner-uid="ownerUid"
-            hint="管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。"
+            :hint="tenantMembersHint"
             id-prefix="admin-settings-members"
+            @updated="onMembersUpdated"
           />
+        </div>
+
+        <!-- 操作記錄 -->
+        <div v-else-if="!profileOnly && activeTab === 'audit'" class="space-y-4">
+          <AuditLogPanel v-if="tenantId" :tenant-id="tenantId" />
         </div>
       </div>
     </div>
@@ -165,19 +171,32 @@ import { useTenantAccess } from '@/composables/useTenantAccess';
 import { useTenantUsers } from '@/composables/useTenantUsers';
 import { useCapsLockHint } from '@/composables/useCapsLockHint';
 import { setPostLogoutNotice } from '@/lib/logoutNotices';
+import { AUDIT_PAGES, writeAuditLog } from '@/lib/auditLog';
 import TenantMembersPanel from '@/components/admin/TenantMembersPanel.vue';
+import AuditLogPanel from '@/components/admin/AuditLogPanel.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  profileOnly: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'import-csv', 'export-csv', 'empty-guests']);
+const emit = defineEmits(['close', 'import-csv', 'export-csv', 'empty-guests', 'password-changed']);
 
-const tabs = [
-  { id: 'data', label: '資料管理' },
-  { id: 'profile', label: '我的帳號' },
-  { id: 'users', label: '用戶管理' },
-];
+const tabs = computed(() => {
+  const base = [
+    { id: 'data', label: '資料管理' },
+    { id: 'profile', label: '我的帳號' },
+    { id: 'users', label: '用戶管理' },
+  ];
+  if (canViewAuditLog.value) {
+    base.push({ id: 'audit', label: '操作記錄' });
+  }
+  return base;
+});
+
+const tenantMembersHint =
+  '管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。\n'
+  + '如需重設用戶密碼請WhatsApp聯絡系統管理員。';
 
 const activeTab = ref('data');
 
@@ -185,6 +204,9 @@ const { user, changePassword, logout } = useAuth();
 const { memberRole } = useTenantAccess();
 const { meta, tenantId } = useTenant();
 const ownerUid = computed(() => meta.value?.owner_uid || '');
+const canViewAuditLog = computed(
+  () => memberRole.value === 'platform_admin' || memberRole.value === 'owner',
+);
 const {
   members,
   loadMembers,
@@ -193,8 +215,10 @@ const {
 } = useTenantUsers();
 const roleLabel = computed(() => {
   if (memberRole.value === 'platform_admin') return 'Super Admin';
+  if (memberRole.value === 'owner') return 'Owner';
+  if (memberRole.value === 'admin') return '後台管理員';
   if (memberRole.value === 'reception') return '現場接待';
-  return '後台管理員';
+  return '未授權（非本專案成員）';
 });
 const { showCapsLockHint, passwordInputHandlers } = useCapsLockHint();
 
@@ -216,21 +240,46 @@ watch(
   () => props.open,
   async (isOpen) => {
     if (!isOpen) return;
-    activeTab.value = 'data';
+    activeTab.value = props.profileOnly ? 'profile' : 'data';
     pwMsg.value = '';
     nameMsg.value = '';
     editingName.value = false;
     try {
       await ensureSelfProfile();
-      await loadMembers();
-      const self = members.value.find((m) => m.isSelf);
-      displayName.value = self?.displayName || '';
-      originalDisplayName.value = displayName.value;
+      await syncProfileDisplayName();
     } catch {
       /* errors shown in UI */
     }
   },
 );
+
+watch(activeTab, async (tab) => {
+  if (tab === 'audit' && !canViewAuditLog.value) {
+    activeTab.value = 'data';
+    return;
+  }
+  if (tab !== 'profile' || !props.open) return;
+  try {
+    await syncProfileDisplayName();
+  } catch {
+    /* errors shown in UI */
+  }
+});
+
+async function syncProfileDisplayName(sourceMembers) {
+  if (!sourceMembers) {
+    await loadMembers();
+  }
+  const list = sourceMembers || members.value;
+  const self = list.find((m) => m.isSelf);
+  if (!self || editingName.value) return;
+  displayName.value = self.displayName || '';
+  originalDisplayName.value = displayName.value;
+}
+
+function onMembersUpdated(updatedMembers) {
+  syncProfileDisplayName(updatedMembers);
+}
 
 function passwordErrorMessage(e) {
   const code = e?.code || '';
@@ -276,12 +325,24 @@ async function submitPassword() {
   changingPw.value = true;
   try {
     await changePassword(currentPassword.value, newPassword.value);
+    if (tenantId.value) {
+      void writeAuditLog({
+        tenantId: tenantId.value,
+        page: AUDIT_PAGES.SETTINGS,
+        action: '更改密碼',
+      });
+    }
     currentPassword.value = '';
     newPassword.value = '';
     confirmPassword.value = '';
-    pwMsgOk.value = true;
-    pwMsg.value = '密碼已更新，請重新登入';
     setPostLogoutNotice('密碼已更新，請重新登入');
+    if (props.profileOnly) {
+      emit('close');
+      emit('password-changed');
+    } else {
+      pwMsgOk.value = true;
+      pwMsg.value = '密碼已更新，請重新登入';
+    }
     await logout();
   } catch (e) {
     pwMsgOk.value = false;

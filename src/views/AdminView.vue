@@ -14,10 +14,11 @@
       ⏳ 驗證登入狀態...
     </div>
     <div
-      v-else-if="!user"
+      v-else-if="!user || !loginGuardReady"
       class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center p-4"
     >
-      <AdminLoginForm @success="onLoggedIn" />
+      <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
+      <AdminLoginForm v-else @success="onLoggedIn" />
     </div>
     <div
       v-else-if="!tenantAccessReady"
@@ -45,16 +46,19 @@ import { useTenant } from '@/composables/useTenant';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useTenantAccess } from '@/composables/useTenantAccess';
+import { useTenantLoginGuard } from '@/composables/useTenantLoginGuard';
+import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import AdminPanel from '@/components/admin/AdminPanel.vue';
 
 const route = useRoute();
-const { slug, ready, error, coupleNames, initTenant } = useTenant();
+const { slug, ready, error, coupleNames, initTenant, tenantId } = useTenant();
 const { user, authReady, logout } = useAuth();
 const { isPlatformAdmin, platformAdminReady } = usePlatformAdmin();
 const { canAccessAdmin, tenantAccessReady } = useTenantAccess();
+const { loginGuardReady } = useTenantLoginGuard('admin');
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);
@@ -68,6 +72,14 @@ async function bootAdmin() {
 }
 
 watch([platformAdminReady, () => route.params.slug], bootAdmin, { immediate: true });
+
+watch(
+  tenantId,
+  (tid) => {
+    if (tid) setAuditPageContext({ tenantId: tid, page: AUDIT_PAGES.GUESTLIST });
+  },
+  { immediate: true },
+);
 
 function onLoggedIn() {
   /* auth state updates automatically */

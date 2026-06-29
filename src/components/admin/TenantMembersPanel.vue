@@ -209,7 +209,7 @@
             {{ addUserEmailChecking ? '檢查 Email…' : addUserEmailHint }}
           </p>
           <div v-if="!addUserEmailReuse" class="field">
-            <label :for="pwInputId">初始密碼</label>
+            <label :for="pwInputId">密碼</label>
             <input
               :id="pwInputId"
               v-model="newUserPassword"
@@ -370,7 +370,7 @@ const addUserBlockReason = computed(() => {
   if (addUserEmailBlocking.value) return addUserEmailHint.value || '此 Email 無法使用';
   if (!addUserEmailCanProceed.value) return '請輸入有效 Email 並等待檢查完成';
   if (!addUserEmailReuse.value && newUserPassword.value.trim().length < 6) {
-    return '請輸入至少 6 字元的初始密碼';
+    return '請輸入至少 6 字元的密碼';
   }
   return '';
 });
@@ -640,6 +640,7 @@ defineExpose({ members, loadMembers });
   color: #64748b;
   margin: 0;
   line-height: 1.5;
+  white-space: pre-line;
 }
 .viewer-hint {
   color: #1d4ed8;

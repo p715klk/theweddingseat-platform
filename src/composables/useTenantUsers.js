@@ -6,6 +6,7 @@ import { getMembersMap, getProfilesMap, getMemberProfile } from '@/lib/pb/member
 import { createAuthUserViaRest, callUpdateMemberProfile, callUpsertTenantMember, callSwapTenantMemberRoles } from '@/lib/twsApi';
 import { callRemoveTenantMember } from '@/lib/removeTenantMemberCallable';
 import { assertCanAddMember, assertCanChangeMemberRole, getMemberQuota } from '@/lib/tenantMemberLimits';
+import { writeAuditLog, AUDIT_PAGES } from '@/lib/auditLog';
 
 const ROLE_SORT_ORDER = { owner: 0, admin: 1, reception: 2 };
 
@@ -127,6 +128,13 @@ export function useTenantUsers(options = {}) {
       display_name: displayName.trim(),
     });
 
+    void writeAuditLog({
+      tenantId: tid,
+      page: AUDIT_PAGES.USERS,
+      action: reused ? '加入現有帳號' : '建立新帳號',
+      detail: `${trimmedEmail}（${role}）`,
+    });
+
     await loadMembers();
     return { uid, email: trimmedEmail, reused };
   }
@@ -166,6 +174,12 @@ export function useTenantUsers(options = {}) {
     });
 
     await callUpsertTenantMember({ tenantId: tid, uid, role });
+    void writeAuditLog({
+      tenantId: tid,
+      page: AUDIT_PAGES.USERS,
+      action: '變更角色',
+      detail: `${target.email || uid} → ${role}`,
+    });
     await loadMembers();
   }
 
@@ -178,6 +192,14 @@ export function useTenantUsers(options = {}) {
       throw new Error('只有 owner 可以變更角色');
     }
     await callSwapTenantMemberRoles({ tenantId: tid, uidA, uidB });
+    const memberA = members.value.find((m) => m.uid === uidA);
+    const memberB = members.value.find((m) => m.uid === uidB);
+    void writeAuditLog({
+      tenantId: tid,
+      page: AUDIT_PAGES.USERS,
+      action: '交換角色',
+      detail: `${memberA?.email || uidA} ↔ ${memberB?.email || uidB}`,
+    });
     await loadMembers();
   }
 
@@ -224,6 +246,12 @@ export function useTenantUsers(options = {}) {
     };
 
     await callUpdateMemberProfile({ tenantId: tid, uid, profile: next });
+    void writeAuditLog({
+      tenantId: tid,
+      page: AUDIT_PAGES.USERS,
+      action: uid === user.value?.uid ? '更新顯示名稱' : '更新成員顯示名稱',
+      detail: name,
+    });
     await loadMembers();
   }
 

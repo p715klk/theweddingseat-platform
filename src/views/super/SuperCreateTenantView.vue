@@ -97,7 +97,7 @@
             </span>
           </p>
           <div v-if="!ownerEmailReuse" class="field field-span-2">
-            <label>初始密碼 <span class="req">*</span></label>
+            <label>密碼 <span class="req">*</span></label>
             <div class="pw-row">
               <input
                 v-model="form.ownerPassword"
@@ -128,12 +128,12 @@
           <li>Owner Email：<code>{{ createdInfo.ownerEmail }}</code></li>
           <li v-if="createdInfo.ownerUid" class="muted-uid">（技術用）UID：<code>{{ createdInfo.ownerUid }}</code></li>
           <li v-if="createdInfo.ownerTempPassword">
-            臨時密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
+            密碼：<code>{{ createdInfo.ownerTempPassword }}</code>
             <button type="button" class="btn-copy" @click="copy(createdInfo.ownerTempPassword)">複製</button>
           </li>
           <li v-if="createdInfo.reusedNote">{{ createdInfo.reusedNote }}</li>
         </ul>
-        <p class="field-hint">建議客戶首次登入後即刻喺「設定 → 我的帳號」更改密碼。</p>
+        <p class="field-hint">建議客戶首次登入後即刻係「設定 → 我的帳號」更改密碼。</p>
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
@@ -225,7 +225,7 @@ const submitBlockReason = computed(() => {
   if (ownerEmailBlocking.value) return ownerEmailHint.value || '此 Email 無法使用';
   if (!ownerEmailCanProceed.value) return '請輸入有效 Email 並等待檢查完成';
   if (!ownerEmailReuse.value && form.ownerPassword.trim().length < 6) {
-    return '請輸入至少 6 字元的初始密碼';
+    return '請輸入至少 6 字元的密碼';
   }
   return '';
 });
