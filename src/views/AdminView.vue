@@ -1,6 +1,6 @@
 <template>
   <div class="admin-host">
-    <TenantErrorView v-if="tenantError" :message="tenantError" />
+    <TenantErrorView v-if="tenantError" embedded :message="tenantError" />
     <div
       v-else-if="!tenantReady"
       class="fixed inset-0 bg-gray-100 z-[10000] flex items-center justify-center text-gray-400 font-bold"
@@ -36,6 +36,7 @@
       :couple-names="coupleNames"
       @logout="handleLogout"
     />
+    <AppFooter />
   </div>
 </template>
 
@@ -52,6 +53,7 @@ import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import AdminPanel from '@/components/admin/AdminPanel.vue';
+import AppFooter from '@/components/AppFooter.vue';
 
 const route = useRoute();
 const { slug, ready, error, coupleNames, initTenant, tenantId } = useTenant();

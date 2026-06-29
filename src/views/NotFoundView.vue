@@ -1,19 +1,23 @@
 <template>
   <div class="not-found-page">
-    <div class="card">
-      <p class="icon">🔍</p>
-      <h1>找不到此頁面</h1>
-      <p class="hint">你輸入嘅網址不存在，或連結可能已失效。</p>
-      <div class="actions">
-        <router-link to="/p/demo" class="btn-primary">前往 demo 點名頁</router-link>
-        <button type="button" class="btn-secondary" @click="goBack">返回上一頁</button>
+    <div class="not-found-body">
+      <div class="card">
+        <p class="icon">🔍</p>
+        <h1>找不到此頁面</h1>
+        <p class="hint">你輸入嘅網址不存在，或連結可能已失效。</p>
+        <div class="actions">
+          <router-link to="/p/demo" class="btn-primary">前往 demo 點名頁</router-link>
+          <button type="button" class="btn-secondary" @click="goBack">返回上一頁</button>
+        </div>
       </div>
     </div>
+    <AppFooter />
   </div>
 </template>
 
 <script setup>
 import { useRouter } from 'vue-router';
+import AppFooter from '@/components/AppFooter.vue';
 
 const router = useRouter();
 
@@ -30,10 +34,15 @@ function goBack() {
 .not-found-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  background: #f3f4f6;
+}
+.not-found-body {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: #f3f4f6;
 }
 .card {
   background: #fff;

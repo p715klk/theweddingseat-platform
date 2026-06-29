@@ -31,7 +31,7 @@ const emit = defineEmits(['success']);
 defineProps({
   hint: {
     type: String,
-    default: '請使用 Owner 為此婚宴專案建立的帳號登入。',
+    default: '請使用 Owner 為此宴會專案建立的帳號登入。',
   },
 });
 const { login, authError } = useAuth();

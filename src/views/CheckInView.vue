@@ -6,16 +6,21 @@
     >
       requireLogin={{ requireLogin }} · authReady={{ authReady }} · user={{ user ? 'yes' : 'no' }}
     </div>
-    <TenantErrorView v-if="error" :message="error" />
+    <TenantErrorView v-if="error" embedded :message="error" />
+    <AppFooter v-if="error" />
     <div
       v-else-if="requireLogin && authReady && (!user || !loginGuardReady)"
-      class="min-h-screen flex items-center justify-center bg-gray-100 p-4"
+      class="min-h-screen flex flex-col bg-gray-100"
     >
+      <div class="flex-1 flex items-center justify-center p-4">
       <div v-if="user && !loginGuardReady" class="text-gray-500 font-bold">⏳ 驗證專案權限...</div>
       <FrontendLoginForm v-else @success="onLoggedIn" />
+      </div>
+      <AppFooter />
     </div>
-    <div v-else-if="loading" class="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500 font-bold">
-      ⏳ 載入中...
+    <div v-else-if="loading" class="min-h-screen flex flex-col bg-gray-100 text-gray-500 font-bold">
+      <div class="flex-1 flex items-center justify-center">⏳ 載入中...</div>
+      <AppFooter />
     </div>
     <div v-else class="bg-gray-100 text-gray-800 font-sans pb-12 select-none min-h-screen">
     <div
@@ -169,7 +174,7 @@
       <div v-else class="floor-plan-wrap">
         <main
           id="floor-plan"
-          aria-label="婚宴枱位平面圖"
+          aria-label="宴會枱位平面圖"
           :style="floorStyle(floorLayout.bounds)"
         >
           <div
@@ -195,6 +200,7 @@
       </p>
     </div>
     </div>
+    <AppFooter />
 
     <div
       v-if="selectedTable && !interactionLocked"
@@ -420,6 +426,7 @@ import TenantErrorView from '@/views/TenantErrorView.vue';
 import FrontendLoginForm from '@/components/auth/FrontendLoginForm.vue';
 import AdminSettingsDialog from '@/components/admin/AdminSettingsDialog.vue';
 import AdminCsvImportDialog from '@/components/admin/AdminCsvImportDialog.vue';
+import AppFooter from '@/components/AppFooter.vue';
 import { useAdminGuests } from '@/composables/useAdminGuests';
 import { AUDIT_PAGES, setAuditPageContext } from '@/lib/auditLog';
 

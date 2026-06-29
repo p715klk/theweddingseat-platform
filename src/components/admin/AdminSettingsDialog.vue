@@ -195,7 +195,7 @@ const tabs = computed(() => {
 });
 
 const tenantMembersHint =
-  '管理可登入此婚宴專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。\n'
+  '管理可登入此宴會專案的帳號。Owner 可點「編輯」修改顯示名稱、角色或移除用戶。\n'
   + '如需重設用戶密碼請WhatsApp聯絡系統管理員。';
 
 const activeTab = ref('data');

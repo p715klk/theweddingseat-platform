@@ -1,6 +1,5 @@
 html, body.seating-touch {
     height: 100%;
-    overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
     touch-action: none;

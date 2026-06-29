@@ -1,16 +1,22 @@
 <template>
-  <div class="error-page">
-    <div class="card">
-      <p class="icon">⚠️</p>
-      <h1>無法載入婚宴專案</h1>
-      <p>{{ message }}</p>
+  <div class="error-page" :class="{ 'error-page--embedded': embedded }">
+    <div class="error-body">
+      <div class="card">
+        <p class="icon">⚠️</p>
+        <h1>無法載入宴會專案</h1>
+        <p>{{ message }}</p>
+      </div>
     </div>
+    <AppFooter v-if="!embedded" />
   </div>
 </template>
 
 <script setup>
+import AppFooter from '@/components/AppFooter.vue';
+
 defineProps({
   message: { type: String, default: '發生錯誤' },
+  embedded: { type: Boolean, default: false },
 });
 </script>
 
@@ -18,10 +24,19 @@ defineProps({
 .error-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  background: #f3f4f6;
+}
+.error-page--embedded {
+  min-height: auto;
+  background: transparent;
+}
+.error-body {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: #f3f4f6;
 }
 .card {
   background: #fff;

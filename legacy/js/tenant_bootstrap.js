@@ -28,7 +28,7 @@ function showTenantError(message) {
         <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:sans-serif;background:#f3f4f6;">
             <div style="max-width:28rem;text-align:center;background:#fff;border-radius:0.75rem;padding:2rem;box-shadow:0 4px 6px rgba(0,0,0,.1);">
                 <p style="font-size:2rem;margin:0 0 1rem;">⚠️</p>
-                <h1 style="font-size:1.25rem;font-weight:700;color:#b91c1c;margin:0 0 0.5rem;">無法載入婚宴專案</h1>
+                <h1 style="font-size:1.25rem;font-weight:700;color:#b91c1c;margin:0 0 0.5rem;">無法載入宴會專案</h1>
                 <p style="color:#4b5563;margin:0;">${message}</p>
             </div>
         </div>`;
@@ -54,7 +54,7 @@ function applyTenantBranding() {
     if (couple) {
         document.title = couple + (document.title.includes('管理') || document.title.includes('畫布')
             ? ' — ' + document.title.split('—').pop().trim()
-            : ' — 婚宴帶位');
+            : ' — 宴會帶位');
     }
 
     const headerTitle = document.querySelector('header h1');
@@ -126,7 +126,7 @@ function initTenant() {
                 throw new Error(`Tenant not found: ${tenantSlug}`);
             }
             if (isCheckinDisabled(tenantMeta) && !isAdminContext()) {
-                showTenantError('此婚宴專案點名功能已停用，如有疑問請聯絡婚禮統籌。');
+                showTenantError('此宴會點名功能已停用，如有疑問請聯絡管理員。');
                 throw new Error(`Tenant checkin disabled: ${tenantSlug}`);
             }
             applyTenantBranding();

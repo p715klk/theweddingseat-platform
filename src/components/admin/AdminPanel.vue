@@ -1,5 +1,6 @@
 <template>
-  <div class="admin-page bg-gray-100 text-gray-800 font-sans h-screen flex flex-col p-4 overflow-hidden">
+  <div class="admin-panel-root">
+    <div class="admin-page bg-gray-100 text-gray-800 font-sans h-screen flex flex-col p-4 overflow-hidden">
     <div class="w-full max-w-[98%] mx-auto flex flex-col h-full space-y-3">
       <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-300 pb-3 flex-shrink-0 gap-3">
         <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0 flex-1 lg:flex-initial">
@@ -90,10 +91,7 @@
           @retry="load(true)"
         />
       </div>
-
-      <div class="text-right text-[10px] text-gray-400 font-mono flex-shrink-0 px-1">
-        Wedding Manager Panel v5.0 (多選標籤)
-      </div>
+    </div>
     </div>
 
     <div

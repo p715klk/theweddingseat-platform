@@ -50,6 +50,8 @@
         <RouterView />
       </main>
     </template>
+
+    <AppFooter />
   </div>
 </template>
 
@@ -57,6 +59,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import SuperAdminLoginForm from '@/components/auth/SuperAdminLoginForm.vue';
+import AppFooter from '@/components/AppFooter.vue';
 import { useAuth } from '@/composables/useAuth';
 import { usePlatformAdmin } from '@/composables/usePlatformAdmin';
 import { useIdleLogout, consumeLogoutReason } from '@/composables/useIdleLogout';

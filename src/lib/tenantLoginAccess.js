@@ -31,7 +31,7 @@ export async function validateTenantMemberLogin(
 export function tenantLoginRejectionMessage(code) {
   switch (code) {
     case 'not_member':
-      return '此帳號未獲授權登入此婚宴專案，請聯絡 Owner。';
+      return '此帳號未獲授權登入此宴會專案，請聯絡 Owner。';
     case 'reception_only':
       return '現場接待帳號只可登入點名頁，請使用「前往點名首頁」。';
     default:

@@ -1,6 +1,6 @@
 <template>
   <div class="seating-host">
-    <TenantErrorView v-if="tenantError" :message="tenantError" />
+    <TenantErrorView v-if="tenantError" embedded :message="tenantError" />
     <div
       v-else-if="!tenantReady"
       class="fixed inset-0 bg-slate-100 z-[10000] flex items-center justify-center text-gray-500 font-bold"
@@ -30,12 +30,14 @@
       v-else-if="!canAccessAdmin"
       @logout="handleLogout"
     />
-    <SeatingCanvasApp
-      v-else
-      :key="slug"
-      :slug="slug"
-      @logout="handleLogout"
-    />
+    <div v-else class="seating-canvas-shell">
+      <SeatingCanvasApp
+        :key="slug"
+        :slug="slug"
+        @logout="handleLogout"
+      />
+    </div>
+    <AppFooter v-if="showSeatingFooter" />
   </div>
 </template>
 
@@ -52,6 +54,7 @@ import TenantErrorView from '@/views/TenantErrorView.vue';
 import AdminLoginForm from '@/components/auth/AdminLoginForm.vue';
 import TenantAccessDenied from '@/components/auth/TenantAccessDenied.vue';
 import SeatingCanvasApp from '@/components/seating/SeatingCanvasApp.vue';
+import AppFooter from '@/components/AppFooter.vue';
 
 const route = useRoute();
 const { slug, ready, error, initTenant, tenantId } = useTenant();
@@ -62,6 +65,9 @@ const { loginGuardReady } = useTenantLoginGuard('admin');
 
 const tenantReady = computed(() => ready.value);
 const tenantError = computed(() => error.value);
+const showSeatingFooter = computed(
+  () => tenantReady.value && authReady.value && !!user.value && loginGuardReady.value && tenantAccessReady.value && canAccessAdmin.value,
+);
 
 async function bootSeating() {
   if (!platformAdminReady.value) return;
@@ -92,9 +98,11 @@ async function handleLogout() {
 
 <style scoped>
 .seating-host {
+  background: #f1f5f9;
+}
+.seating-canvas-shell {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-  background: #f1f5f9;
 }
 </style>

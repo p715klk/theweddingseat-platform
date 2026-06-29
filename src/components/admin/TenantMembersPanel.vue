@@ -540,7 +540,7 @@ function removeFromMenu(member) {
 async function confirmRemove(member) {
   const label = member.email || member.uid;
   const ok = window.confirm(
-    `確定要移除「${label}」嗎？\n\n對方將無法再登入此婚宴後台。若該帳號沒有加入其他專案，登入帳號亦會一併刪除。`,
+    `確定要移除「${label}」嗎？\n\n對方將無法再登入此宴會後台。若該帳號沒有加入其他專案，登入帳號亦會一併刪除。`,
   );
   if (!ok) return;
   removingUid.value = member.uid;
